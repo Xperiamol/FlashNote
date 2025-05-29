@@ -1,0 +1,86 @@
+[
+  {
+    "id": "1748509559729",
+    "text": "12122",
+    "color": "#f6ffed",
+    "alwaysOnTop": true
+  },
+  {
+    "id": "1748509918909",
+    "text": "121212122",
+    "color": "",
+    "alwaysOnTop": true
+  },
+  {
+    "id": "1748509946188",
+    "text": "11212121这种12这种",
+    "color": "",
+    "alwaysOnTop": true
+  },
+  {
+    "id": "1748510102599",
+    "text": "12121212",
+    "color": "",
+    "alwaysOnTop": true
+  },
+  {
+    "id": "1748510675674",
+    "text": "1212122112122222222",
+    "color": "",
+    "alwaysOnTop": true
+  },
+  {
+    "id": "1748511346519",
+    "text": "121212",
+    "color": "",
+    "alwaysOnTop": true
+  },
+  {
+    "id": "1748511392338",
+    "text": "1212122",
+    "color": "",
+    "alwaysOnTop": true
+  },
+  {
+    "id": "1748511869123",
+    "text": "122121",
+    "color": "",
+    "alwaysOnTop": true
+  },
+  {
+    "id": "1748511954945",
+    "text": "1212121",
+    "color": "",
+    "alwaysOnTop": true
+  },
+  {
+    "id": "1748512278027",
+    "text": "1212122",
+    "color": "",
+    "alwaysOnTop": true
+  },
+  {
+    "id": "1748512294549",
+    "text": "122121111111111Compiled with problems:\n×\nERROR in ./src/App.css (./node_modules/css-loader/dist/cjs.js??ruleSet[1].rules[1].oneOf[5].use[1]!./node_modules/postcss-loader/dist/cjs.js??ruleSet[1].rules[1].oneOf[5].use[2]!./node_modules/source-map-loader/dist/cjs.js!./src/App.css)\nModule build failed (from ./node_modules/postcss-loader/dist/cjs.js):\nSyntaxError\n\n(1065:1) C:\\Users\\KevinYe\\Desktop\\code\\note\\renderer\\src\\App.css Unclosed block\n\n  1063 | body.dark-mode .todo-quadrant-label-4 { color: #52c41a !important; }\n  1064 | body.dark-mode .todo-quadrant-label-4 { color: #52c41a !important; }\n> 1065 | body.dark-mode .todo-quadrant-label-4 { color: #52c41a !important\n       | ^",
+    "color": "",
+    "alwaysOnTop": true
+  },
+  {
+    "id": "1748512287566",
+    "text": "1212121收拾收拾呜呜呜呜呜呜呜呜呜呜呜呜呜呜呜呜呜呜呜呜呜呜",
+    "color": "",
+    "alwaysOnTop": true
+  },
+  {
+    "id": "1748512929217",
+    "text": "12122121",
+    "color": "",
+    "alwaysOnTop": true
+  },
+  {
+    "id": "1748517114193",
+    "text": "12122",
+    "color": "",
+    "alwaysOnTop": true
+  }
+]

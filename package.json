@@ -1,0 +1,51 @@
+{
+  "name": "floating-note-app",
+  "version": "1.0.0",
+  "main": "main.js",
+  "description": "A floating note app with Flash Note and Todo modules.",
+  "scripts": {
+    "start": "concurrently \"npm:react-start\" \"npm:electron-start\"",
+    "react-start": "cd renderer && npm start",
+    "electron-start": "wait-on tcp:3000 && electron .",
+    "build": "cd renderer && npm run build",
+    "pack": "electron-builder --dir",
+    "dist": "npm run build && electron-builder"
+  },
+  "dependencies": {
+    "concurrently": "^8.2.2",
+    "moment": "^2.30.1",
+    "wait-on": "^7.0.1"
+  },
+  "build": {
+    "productName": "闪念速记",
+    "appId": "com.kevinye.flashnote",
+    "copyright": "Copyright © 2024",
+    "directories": {
+      "output": "dist"
+    },
+    "asar": true,
+    "files": [
+      "main.js",
+      "notes.json",
+      "renderer/build/**/*"
+    ],
+    "win": {
+      "icon": "renderer/public/favicon.ico",
+      "target": [
+        "nsis"
+      ]
+    },
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true,
+      "shortcutName": "闪念速记"
+    }
+  },
+  "devDependencies": {
+    "electron-builder": "^26.0.12",
+    "electron": "^28.2.3"
+  },
+  "author": "Kevin Ye"
+}

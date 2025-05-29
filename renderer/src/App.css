@@ -1,0 +1,623 @@
+html, body, #root {
+  height: 100vh;
+  margin: 0;
+  background: #f5f5f5;
+}
+.ant-layout {
+  box-shadow: 0 4px 24px rgba(0,0,0,0.12);
+  height: 100vh;
+  display: flex;
+  flex-direction: column;
+}
+.ant-layout-header {
+  background: #fff;
+  padding: 0;
+}
+.ant-tabs-nav {
+  margin-bottom: 0;
+  margin-top: 0;
+}
+.custom-title-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  height: 36px;
+  background: #f5f5f5;
+  padding: 0 12px;
+  -webkit-app-region: drag;
+}
+.custom-title-bar .title {
+  font-size: 16px;
+  color: #333;
+  font-weight: bold;
+  user-select: none;
+}
+.close-btn {
+  -webkit-app-region: no-drag;
+  color: #888;
+  font-size: 18px;
+}
+.close-btn:hover {
+  color: #f5222d;
+  background: #eee;
+}
+.content-scroll-area {
+  flex: 1 1 auto;
+  min-height: 0;
+  /* max-height: 420px;  // 可选 */
+  overflow-y: auto;
+  padding-right: 4px;
+}
+
+/* 美化滚动条 */
+.content-scroll-area::-webkit-scrollbar {
+  width: 6px;
+  background: #f5f5f5;
+}
+.content-scroll-area::-webkit-scrollbar-thumb {
+  background: #d9d9d9;
+  border-radius: 3px;
+}
+
+.main-content {
+  flex: 1 1 auto;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  padding: 0px 13px;
+  background: rgba(255, 255, 255, 0.25);
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
+  overflow: hidden;
+}
+
+.note-content-anim {
+  width: 100%;
+  box-sizing: border-box;
+  overflow: hidden;
+  transition: max-height 0.3s cubic-bezier(0.4,0,0.2,1);
+  display: -webkit-box;
+  -webkit-line-clamp: 1;
+  -webkit-box-orient: vertical;
+  white-space: normal;
+  text-overflow: ellipsis;
+  word-break: break-all;
+  line-height: 32px;
+  position: relative;
+  padding: 2px 12px 40px 12px;
+  margin-right: 48px;
+  background: rgba(255, 255, 255, 0.35);
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+  border-radius: var(--block-radius, 6px);
+  box-shadow: 0 1px 4px #eee;
+  margin: 8px 0;
+  transform: translateY(0px);
+}
+.note-content-anim.expanded {
+  -webkit-line-clamp: unset;
+  display: block;
+}
+.note-actions {
+  position: absolute;
+  right: 8px;
+  bottom: 8px;
+  display: flex;
+  gap: 4px;
+  z-index: 1;
+}
+.note-actions-bg {
+  position: absolute;
+  right: 0;
+  bottom: 0;
+  width: 64px;
+  height: 36px;
+  border-radius: 12px;
+  background: rgba(255,255,255,0.7);
+  backdrop-filter: blur(8px);
+  z-index: 0;
+}
+
+.note-single-line {
+  width: 100%;
+  box-sizing: border-box;
+  display: flex;
+  align-items: center;
+  background: #fff;
+  border-radius: 6px;
+  box-shadow: 0 1px 4px #eee;
+  margin: 8px 0;
+  padding: 2px 12px;
+  min-height: 32px;
+}
+
+/* 让 Tabs 内容区也能撑满剩余空间 */
+.ant-tabs-content-holder,
+.ant-tabs-content {
+  flex: 1 1 auto;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+body.dark-mode .custom-title-bar {
+  background: #232323;
+  color: #eee;
+}
+body.dark-mode .custom-title-bar .title {
+  color: #eee;
+}
+
+body.dark-mode .main-content {
+  background: rgba(30, 30, 30, 0.65);
+  backdrop-filter: blur(18px);
+  -webkit-backdrop-filter: blur(18px);
+}
+
+body.dark-mode .note-content-anim {
+  background: rgba(40, 40, 40, 0.75);
+  backdrop-filter: blur(10px);
+  -webkit-backdrop-filter: blur(10px);
+  box-shadow: 0 1px 8px #111a;
+  color: #eee;
+}
+
+body.dark-mode .note-single-line {
+  background: rgba(40, 40, 40, 0.85);
+  box-shadow: 0 1px 8px #111a;
+  color: #eee;
+}
+
+/* 操作按钮统一风格 */
+.note-actions-bg {
+  position: absolute;
+  top: 0; left: 0; right: 0; bottom: 0;
+  background: rgba(255,255,255,0.85);
+  border-radius: 16px;
+  box-shadow: 0 2px 8px rgba(0,0,0,0.06);
+  z-index: 0;
+}
+
+.note-actions {
+  position: relative;
+}
+
+.note-action-btn {
+  background: transparent !important;
+  z-index: 1;
+  border-radius: 6px !important;
+  transition: background 0.2s;
+}
+
+.note-action-btn:hover, .note-action-btn:focus {
+  background: rgba(0,0,0,0.04) !important;
+}
+
+.add-button {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px !important;
+  height: 32px !important;
+  padding: 0 !important;
+  border-radius: 50% !important;
+  min-width: 32px !important;
+  margin-left: 8px !important;
+}
+
+.add-button:hover {
+  transform: rotate(90deg) !important;
+}
+
+.add-button .anticon {
+  font-size: 16px;
+  margin: 0 !important;
+}
+
+/* For Todo input */
+.ant-space-compact {
+  display: flex !important;
+  align-items: center !important;
+}
+
+.ant-space-compact .ant-input {
+  border-radius: 25px !important;
+  padding-left: 16px !important;
+  padding-right: 16px !important;
+}
+
+/* For FlashNote input (and potentially other basic inputs) */
+.ant-input {
+  border-radius: var(--input-radius, 25px) !important;
+  padding: 8px 16px !important;
+}
+
+.ant-input-textarea textarea {
+  border-radius: var(--input-radius, 25px) !important;
+}
+
+.note-color-dot {
+  position: absolute;
+  top: 8px;
+  right: 12px;
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  box-shadow: 0 1px 4px #0002;
+  border: 2px solid #fff3;
+  z-index: 10;
+  pointer-events: none;
+}
+
+/* Dark mode styles */
+body.dark-mode {
+  background: #b14545 !important;
+  color: #eee !important;
+}
+
+body.dark-mode,
+body.dark-mode * {
+  color: #d8d8d8 !important;
+}
+
+body.dark-mode .ant-layout,
+body.dark-mode .ant-layout-content,
+body.dark-mode .ant-tabs,
+body.dark-mode .ant-list,
+body.dark-mode .ant-input,
+body.dark-mode .ant-input-textarea,
+body.dark-mode .ant-btn,
+body.dark-mode .ant-dropdown-menu {
+  background: #2e2d2d !important;
+  color: #eee !important;
+  border-color: #333 !important;
+}
+
+body.dark-mode .ant-input,
+body.dark-mode .ant-input-textarea textarea {
+  color: #eee !important;
+  background: #5e5d5d !important;
+  border-color: #444 !important;
+}
+
+body.dark-mode .ant-input::placeholder,
+body.dark-mode .ant-input-textarea textarea::placeholder {
+  color: #bbb !important;
+  opacity: 1;
+}
+
+body.dark-mode .note-action-btn {
+  color: #444 !important;
+  background: transparent !important;
+  border: none !important;
+  transition: background 0.2s, color 0.2s;
+}
+
+body.dark-mode .note-action-btn:hover, 
+body.dark-mode .note-action-btn:focus {
+  color: #fff !important;
+  background: #666 !important;
+  border: none !important;
+}
+
+body.dark-mode .note-content-anim {
+  background: #232323 !important;
+  color: #444 !important;
+}
+
+body.dark-mode .todo-quadrant-label-1 { color: #f5222d !important; }
+body.dark-mode .todo-quadrant-label-2 { color: #faad14 !important; }
+body.dark-mode .todo-quadrant-label-3 { color: #1890ff !important; }
+body.dark-mode .todo-quadrant-label-4 { color: #52c41a !important; }
+/* 确保Tab内容区域高度一致，防止切换时抖动 */
+.ant-tabs-tabpane {
+  min-height: 300px; /* 可根据实际需要调整 */
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+}
+
+/* 确保标题栏固定高度 */
+.custom-title-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  height: 36px;
+  background: #f5f5f5;
+  padding: 0 12px;
+  -webkit-app-region: drag;
+  flex-shrink: 0; /* 防止压缩 */
+}
+
+/* 确保Tab栏固定高度 */
+.ant-tabs-nav {
+  margin-bottom: 0;
+  margin-top: 0;
+  height: 46px; /* 根据实际Tab高度调整 */
+  flex-shrink: 0; /* 防止压缩 */
+}
+.custom-title-bar .title {
+  font-size: 16px;
+  color: #333;
+  font-weight: bold;
+  user-select: none;
+}
+.close-btn {
+  -webkit-app-region: no-drag;
+  color: #888;
+  font-size: 18px;
+}
+.close-btn:hover {
+  color: #f5222d;
+  background: #eee;
+}
+.content-scroll-area {
+  flex: 1 1 auto;
+  min-height: 0;
+  /* max-height: 420px;  // 可选 */
+  overflow-y: auto;
+  padding-right: 4px;
+}
+
+/* 美化滚动条 */
+.content-scroll-area::-webkit-scrollbar {
+  width: 6px;
+  background: #f5f5f5;
+}
+.content-scroll-area::-webkit-scrollbar-thumb {
+  background: #d9d9d9;
+  border-radius: 3px;
+}
+
+.main-content {
+  flex: 1 1 auto;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  padding: 0px 13px;
+  background: rgba(255, 255, 255, 0.25);
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
+  overflow: hidden;
+}
+
+.note-content-anim {
+  width: 100%;
+  box-sizing: border-box;
+  overflow: hidden;
+  transition: max-height 0.3s cubic-bezier(0.4,0,0.2,1);
+  display: -webkit-box;
+  -webkit-line-clamp: 1;
+  -webkit-box-orient: vertical;
+  white-space: normal;
+  text-overflow: ellipsis;
+  word-break: break-all;
+  line-height: 32px;
+  position: relative;
+  padding: 2px 12px 40px 12px;
+  margin-right: 48px;
+  background: rgba(255, 255, 255, 0.35);
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+  border-radius: var(--block-radius, 6px);
+  box-shadow: 0 1px 4px #eee;
+  margin: 8px 0;
+  transform: translateY(0px);
+}
+.note-content-anim.expanded {
+  -webkit-line-clamp: unset;
+  display: block;
+}
+.note-actions {
+  position: absolute;
+  right: 8px;
+  bottom: 8px;
+  display: flex;
+  gap: 4px;
+  z-index: 1;
+}
+.note-actions-bg {
+  position: absolute;
+  right: 0;
+  bottom: 0;
+  width: 64px;
+  height: 36px;
+  border-radius: 12px;
+  background: rgba(255,255,255,0.7);
+  backdrop-filter: blur(8px);
+  z-index: 0;
+}
+
+.note-single-line {
+  width: 100%;
+  box-sizing: border-box;
+  display: flex;
+  align-items: center;
+  background: #fff;
+  border-radius: 6px;
+  box-shadow: 0 1px 4px #eee;
+  margin: 8px 0;
+  padding: 2px 12px;
+  min-height: 32px;
+}
+
+/* 让 Tabs 内容区也能撑满剩余空间 */
+.ant-tabs-content-holder,
+.ant-tabs-content {
+  flex: 1 1 auto;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+body.dark-mode .custom-title-bar {
+  background: #232323;
+  color: #eee;
+}
+body.dark-mode .custom-title-bar .title {
+  color: #eee;
+}
+
+body.dark-mode .main-content {
+  background: rgba(30, 30, 30, 0.65);
+  backdrop-filter: blur(18px);
+  -webkit-backdrop-filter: blur(18px);
+}
+
+body.dark-mode .note-content-anim {
+  background: rgba(40, 40, 40, 0.75);
+  backdrop-filter: blur(10px);
+  -webkit-backdrop-filter: blur(10px);
+  box-shadow: 0 1px 8px #111a;
+  color: #eee;
+}
+
+body.dark-mode .note-single-line {
+  background: rgba(40, 40, 40, 0.85);
+  box-shadow: 0 1px 8px #111a;
+  color: #eee;
+}
+
+/* 操作按钮统一风格 */
+.note-actions-bg {
+  position: absolute;
+  top: 0; left: 0; right: 0; bottom: 0;
+  background: rgba(255,255,255,0.85);
+  border-radius: 16px;
+  box-shadow: 0 2px 8px rgba(0,0,0,0.06);
+  z-index: 0;
+}
+
+.note-actions {
+  position: relative;
+}
+
+.note-action-btn {
+  background: transparent !important;
+  z-index: 1;
+  border-radius: 6px !important;
+  transition: background 0.2s;
+}
+
+.note-action-btn:hover, .note-action-btn:focus {
+  background: rgba(0,0,0,0.04) !important;
+}
+
+.add-button {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px !important;
+  height: 32px !important;
+  padding: 0 !important;
+  border-radius: 50% !important;
+  min-width: 32px !important;
+  margin-left: 8px !important;
+}
+
+.add-button:hover {
+  transform: rotate(90deg) !important;
+}
+
+.add-button .anticon {
+  font-size: 16px;
+  margin: 0 !important;
+}
+
+/* For Todo input */
+.ant-space-compact {
+  display: flex !important;
+  align-items: center !important;
+}
+
+.ant-space-compact .ant-input {
+  border-radius: 25px !important;
+  padding-left: 16px !important;
+  padding-right: 16px !important;
+}
+
+/* For FlashNote input (and potentially other basic inputs) */
+.ant-input {
+  border-radius: var(--input-radius, 25px) !important;
+  padding: 8px 16px !important;
+}
+
+.ant-input-textarea textarea {
+  border-radius: var(--input-radius, 25px) !important;
+}
+
+.note-color-dot {
+  position: absolute;
+  top: 8px;
+  right: 12px;
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  box-shadow: 0 1px 4px #0002;
+  border: 2px solid #fff3;
+  z-index: 10;
+  pointer-events: none;
+}
+
+/* Dark mode styles */
+body.dark-mode {
+  background: #b14545 !important;
+  color: #eee !important;
+}
+
+body.dark-mode,
+body.dark-mode * {
+  color: #d8d8d8 !important;
+}
+
+body.dark-mode .ant-layout,
+body.dark-mode .ant-layout-content,
+body.dark-mode .ant-tabs,
+body.dark-mode .ant-list,
+body.dark-mode .ant-input,
+body.dark-mode .ant-input-textarea,
+body.dark-mode .ant-btn,
+body.dark-mode .ant-dropdown-menu {
+  background: #2e2d2d !important;
+  color: #eee !important;
+  border-color: #333 !important;
+}
+
+body.dark-mode .ant-input,
+body.dark-mode .ant-input-textarea textarea {
+  color: #eee !important;
+  background: #5e5d5d !important;
+  border-color: #444 !important;
+}
+
+body.dark-mode .ant-input::placeholder,
+body.dark-mode .ant-input-textarea textarea::placeholder {
+  color: #bbb !important;
+  opacity: 1;
+}
+
+body.dark-mode .note-action-btn {
+  color: #444 !important;
+  background: transparent !important;
+  border: none !important;
+  transition: background 0.2s, color 0.2s;
+}
+
+body.dark-mode .note-action-btn:hover, 
+body.dark-mode .note-action-btn:focus {
+  color: #fff !important;
+  background: #666 !important;
+  border: none !important;
+}
+
+body.dark-mode .note-content-anim {
+  background: #232323 !important;
+  color: #444 !important;
+}
+
+body.dark-mode .todo-quadrant-label-1 { color: #f5222d !important; }
+body.dark-mode .todo-quadrant-label-2 { color: #faad14 !important; }
+body.dark-mode .todo-quadrant-label-3 { color: #1890ff !important; }
+body.dark-mode .todo-quadrant-label-4 { color: #52c41a !important;}
