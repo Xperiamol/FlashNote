@@ -13,10 +13,7 @@ function NoteWindow() {
   useEffect(() => {
     // 从URL hash中获取笔记ID
     const noteId = window.location.hash.replace('#note/', '');
-    
-    // 检查是否在Electron环境中
-    const ipcRenderer = window.require ? window.require('electron').ipcRenderer : null;
-    
+
     // 从localStorage或文件中加载笔记数据
     const loadNote = () => {
       try {
@@ -26,25 +23,29 @@ function NoteWindow() {
         if (foundNote) {
           setNote(foundNote);
           setEditValue(foundNote.text || '');
+          // 初始化时设置一次置顶
+          const ipcRenderer = window.require ? window.require('electron').ipcRenderer : null;
+          if (ipcRenderer) {
+            ipcRenderer.send('set-always-on-top', { id: noteId, value: foundNote.alwaysOnTop !== false });
+            setAlwaysOnTop(foundNote.alwaysOnTop !== false);
+          }
           return;
         }
       } catch (e) {
         console.error('Error loading note:', e);
       }
     };
-    
+
     loadNote();
-    
+
     // 检测暗色模式
     setIsDark(document.body.classList.contains('dark-mode'));
-    
-    // 设置窗口置顶状态
-    if (ipcRenderer) {
-      ipcRenderer.send('set-always-on-top', { id: noteId, value: alwaysOnTop });
-    }
-  }, [alwaysOnTop]);
+  }, []);
   
   const handleClose = () => {
+    if (isEditing) {
+      saveEdit();
+    }
     if (window && window.close) {
       window.close();
     }
@@ -103,18 +104,10 @@ function NoteWindow() {
   
   return (
     <div 
-      className="note-window"
-      style={{
-        background: isDark ? '#232323' : (note.color || '#fff'),
-        padding: '8px',
-        height: '100vh',
-        display: 'flex',
-        flexDirection: 'column',
-        borderRadius: '8px',
-        overflow: 'hidden'
-      }}
+      className={`note-window ${isDark ? 'dark-mode' : ''}`}
+      style={{ background: !isDark ? (note.color || '#fff') : undefined }}
     >
-      <div className="custom-title-bar" style={{ padding: '4px 8px', display: 'flex', justifyContent: 'space-between' }}>
+      <div className="note-window-title-bar">
         <div>
           <Button
             type={isEditing ? 'primary' : 'text'}
@@ -122,15 +115,15 @@ function NoteWindow() {
             onClick={handleEditClick}
             size="small"
             title={isEditing ? "保存" : "编辑"}
-            style={{ marginRight: '4px', WebkitAppRegion: 'no-drag' }}
+            className="edit-button"
           />
           <Button
             type="text"
-            icon={<PushpinOutlined style={{ color: alwaysOnTop ? '#1890ff' : undefined }} />}
+            icon={<PushpinOutlined className={alwaysOnTop ? 'pinned' : ''} />}
             onClick={toggleAlwaysOnTop}
             size="small"
             title={alwaysOnTop ? "取消置顶" : "窗口置顶"}
-            style={{ WebkitAppRegion: 'no-drag' }}
+            className="pin-button"
           />
         </div>
         <Button
@@ -141,23 +134,14 @@ function NoteWindow() {
           size="small"
         />
       </div>
-      <div 
-        className="note-content"
-        style={{
-          flex: 1,
-          overflow: 'auto',
-          padding: '8px',
-          whiteSpace: 'pre-wrap',
-          wordBreak: 'break-word'
-        }}
-      >
+      <div className="note-content-window">
         {isEditing ? (
           <Input.TextArea
             autoSize={{ minRows: 4 }}
             value={editValue}
             onChange={e => setEditValue(e.target.value)}
             onPressEnter={e => { if (!e.shiftKey) { e.preventDefault(); saveEdit(); } }}
-            style={{ background: 'inherit', border: '1px solid #eee', borderRadius: 4 }}
+            className="edit-textarea"
           />
         ) : (
           note.text

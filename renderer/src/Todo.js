@@ -77,29 +77,25 @@ function Todo() {
 
   return (
     <div>
-      <Space.Compact style={{ width: '100%', display: 'flex', alignItems: 'center' }}>
+      <Space.Compact className="add-todo-form">
         <Input
           placeholder="添加任务..."
           value={input}
           onChange={e => setInput(e.target.value)}
           onPressEnter={addTodo}
-          style={{ flex: 1 }}
+          className="todo-input"
         />
         <Button 
           type="primary" 
           icon={<PlusOutlined />} 
           onClick={addTodo}
-          style={{ 
-            transition: 'all 0.3s',
-            transform: 'rotate(0deg)',
-            height: '32px'
-          }}
+
           className="add-button"
         />
       </Space.Compact>
       <div className="content-scroll-area">
         <List
-          style={{ marginTop: 16 }}
+          className="todo-list"
           bordered
           dataSource={
             [...todos].sort((a, b) => {
@@ -131,14 +127,14 @@ function Todo() {
                   placement="left"
                   trigger="click"
                   content={
-                    <div style={{ minWidth: 180 }}>
-                      <div style={{ marginBottom: 8 }}>
+                    <div className="todo-popover-content">
+                      <div className="todo-popover-item">
                         <span>截止日期：</span>
                         <DatePicker
                           value={item.ddl ? window.moment?.(item.ddl) : null}
                           onChange={date => handleDdlChange(item.id, date)}
                           allowClear
-                          style={{ width: '100%' }}
+                          className="todo-datepicker"
                         />
                       </div>
                       <div>
@@ -148,7 +144,7 @@ function Todo() {
                           onChange={value => handleQuadrantChange(item.id, value)}
                           options={QUADRANTS}
                           allowClear
-                          style={{ width: '100%' }}
+                          className="todo-quadrant-select"
                           placeholder="选择分类"
                         />
                       </div>
@@ -161,9 +157,9 @@ function Todo() {
               ]}
             >
               <Checkbox checked={item.done} onChange={() => toggleDone(item.id)}>
-                <span style={{ textDecoration: item.done ? 'line-through' : 'none' }}>{item.text}</span>
+                <span className={item.done ? 'todo-text-done' : ''}>{item.text}</span>
                 {item.ddl && (
-                  <span style={{ color: '#888', marginLeft: 8, fontSize: 12 }}>
+                  <span className="todo-ddl">
                     [DDL: {item.ddl}
                     {(() => {
                       const now = moment().startOf('day');
@@ -177,13 +173,8 @@ function Todo() {
                 )}
                 {item.quadrant && (
                   <span
-                    className={`todo-quadrant-label-${item.quadrant}`}
-                    style={{
-                      color: QUADRANTS.find(q => q.value === item.quadrant)?.color,
-                      marginLeft: 8,
-                      fontSize: 12,
-                      fontWeight: 500
-                    }}
+
+                    className={`todo-quadrant-label todo-quadrant-label-${item.quadrant}`}
                   >
                     [{QUADRANTS.find(q => q.value === item.quadrant)?.label}]
                   </span>
@@ -197,4 +188,4 @@ function Todo() {
   );
 }
 
-export default Todo; 
+export default Todo;

@@ -2,6 +2,30 @@ const { app, BrowserWindow, ipcMain } = require('electron');
 const path = require('path');
 const fs = require('fs');
 const notesFile = path.join(__dirname, 'notes.json');
+const settingsFile = path.join(__dirname, 'settings.json');
+
+// 读取设置
+function readSettings() {
+  try {
+    if (fs.existsSync(settingsFile)) {
+      const data = fs.readFileSync(settingsFile, 'utf-8');
+      return JSON.parse(data);
+    }
+  } catch (error) {
+    console.error('Failed to read settings file:', error);
+  }
+  // 默认设置
+  return { alwaysOnTop: true };
+}
+
+// 写入设置
+function writeSettings(settings) {
+  try {
+    fs.writeFileSync(settingsFile, JSON.stringify(settings, null, 2), 'utf-8');
+  } catch (error) {
+    console.error('Failed to write settings file:', error);
+  }
+}
 
 let mainWin = null;
 
@@ -11,6 +35,15 @@ function registerIpcHandlers() {
   ipcMain.on('set-always-on-top', (event, { id, value }) => {
     if (id === 'main' && mainWin) {
       mainWin.setAlwaysOnTop(!!value);
+      const settings = readSettings();
+      settings.alwaysOnTop = !!value;
+      writeSettings(settings);
+    } else {
+      // 处理来自小窗口的置顶请求
+      const win = BrowserWindow.fromWebContents(event.sender);
+      if (win) {
+        win.setAlwaysOnTop(!!value);
+      }
     }
   });
 
@@ -81,11 +114,13 @@ function registerIpcHandlers() {
 }
 
 function createWindow() {
+  const settings = readSettings();
+
   mainWin = new BrowserWindow({
     width: 400,
     height: 600,
     frame: false,
-    alwaysOnTop: true,
+    alwaysOnTop: settings.alwaysOnTop,
     transparent: true,
     backgroundColor: '#00000000',
     webPreferences: {

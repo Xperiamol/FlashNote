@@ -127,14 +127,15 @@ function NoteItem({ item, expanded, onToggleExpand, onDelete, onEdit, editingId,
   const colorBtn = expanded && (
     <Popover
       content={
-        <div style={{ display: 'flex', gap: 6 }}>
+        <div className="color-palette-container">
           {COLOR_PALETTE.map(color => (
             <div
               key={color}
               onClick={() => { onChangeColor(item.id, color); setColorPopoverOpen(false); }}
+              className="color-palette-item"
               style={{
-                width: 24, height: 24, borderRadius: '50%', background: color,
-                border: color === item.color ? '2px solid #1890ff' : '1px solid #eee', cursor: 'pointer'
+                background: color,
+                border: color === item.color ? '2px solid #1890ff' : '1px solid #eee'
               }}
             />
           ))}
@@ -150,19 +151,13 @@ function NoteItem({ item, expanded, onToggleExpand, onDelete, onEdit, editingId,
 
   // 单行和多行内容统一布局，按钮始终右下角
   return (
-    <List.Item style={{ padding: 0, border: 'none', background: 'transparent' }}>
+    <List.Item className="flash-note-item">
       <div
         className={`note-content-anim${expanded ? ' expanded' : ''}`}
         ref={contentRef}
         style={{
           maxHeight,
           background: isDark ? '#232323' : (item.color || '#fff'),
-          position: 'relative',
-          minHeight: 32,
-          overflow: 'hidden',
-          padding: expanded ? '2px 12px 40px 12px' : '2px 12px 40px 12px',
-          boxSizing: 'border-box',
-          paddingRight: 20,
         }}
       >
         {/* 彩色小圆球，仅暗色模式且有自定义色时显示 */}
@@ -174,24 +169,8 @@ function NoteItem({ item, expanded, onToggleExpand, onDelete, onEdit, editingId,
           />
         )}
         <div
-          className="note-text"
-          style={expanded ? { minWidth: 0, flex: 1, minHeight: 32, paddingRight: 8, wordWrap: 'break-word' } : {
-            display: '-webkit-box',
-            WebkitLineClamp: 2,
-            WebkitBoxOrient: 'vertical',
-            overflow: 'hidden',
-            whiteSpace: 'normal',
-            textOverflow: 'ellipsis',
-            wordBreak: 'break-all',
-            minWidth: 0,
-            flex: 1,
-            lineHeight: '32px',
-            maxWidth: '100%',
-            minHeight: 32,
-            paddingRight: 60,
-            wordWrap: 'break-word'
-          }}
-        >
+
+          className={`note-text ${expanded ? 'note-text-expanded' : 'note-text-collapsed'}`}>
           {isEditing ? (
             <Input.TextArea
               autoSize
@@ -199,7 +178,6 @@ function NoteItem({ item, expanded, onToggleExpand, onDelete, onEdit, editingId,
               onChange={e => setEditValue(e.target.value)}
               onPressEnter={e => { e.preventDefault(); handleEditClick(); }}
               onBlur={handleEditClick}
-              style={{ background: 'inherit', border: '1px solid #eee', borderRadius: 4 }}
             />
           ) : item.text}
         </div>
@@ -218,7 +196,7 @@ function NoteItem({ item, expanded, onToggleExpand, onDelete, onEdit, editingId,
           }}
         >
           <Button
-            className="note-action-btn"
+            className="note-action-btn edit-button"
             type={isEditing ? 'primary' : 'text'}
             icon={<EditOutlined />}
             onClick={handleEditClick}
@@ -234,6 +212,7 @@ function NoteItem({ item, expanded, onToggleExpand, onDelete, onEdit, editingId,
             onClick={handleOpenWindow}
             key="window"
             size="small"
+            color="#1890ff"
             title="独立窗口"
           />
           <Button
@@ -387,9 +366,9 @@ function FlashNote() {
           />
         </Col>
       </Row>
-      <div className="content-scroll-area" style={{ height: 'calc(100vh - 100px)', overflow: 'auto', paddingBottom: 5 }}>
+      <div className="content-scroll-area">
         <List
-          style={{ marginTop: 16 }}
+          className="add-note-form"
           bordered={false}
           dataSource={notes}
           renderItem={item => (

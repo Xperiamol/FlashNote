@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { Tabs, Layout, Button, Menu, Dropdown, message, Modal, Slider } from 'antd';
-import { CloseOutlined, SettingOutlined } from '@ant-design/icons';
+import { CloseOutlined, SettingOutlined, GithubOutlined } from '@ant-design/icons';
 import FlashNote from './FlashNote';
 import Todo from './Todo';
 import './App.css';
@@ -67,7 +67,7 @@ function App() {
   );
 
   return (
-    <Layout style={{ height: '100vh', background: 'inherit', borderRadius: 0, overflow: 'hidden' }}>
+    <Layout className="app-layout">
       <div className="custom-title-bar">
         <span className="title">闪念速记</span>
         <Button
@@ -98,7 +98,7 @@ function App() {
         onCancel={() => setRadiusModalOpen(false)}
         footer={null}
       >
-        <div style={{ marginBottom: 24 }}>
+        <div className="radius-slider-container">
           <div>输入框圆角：{inputRadius}px</div>
           <Slider min={0} max={40} value={inputRadius} onChange={setInputRadius} />
         </div>
@@ -119,7 +119,7 @@ function App() {
           </Button>
         ]}
       >
-        <div style={{ padding: '10px 0' }}>
+        <div className="about-content">
           <h3>闪念速记 v1.0.0</h3>
           <p>一个简单而实用的桌面笔记应用，帮助您随时记录想法和管理待办事项。</p>
           <p>技术栈：Electron+React+Ant Design</p>
@@ -131,6 +131,15 @@ function App() {
             <li>亮暗主题：根据喜好切换显示模式</li>
           </ul>
           <p>© 2025 Xperia</p>
+          <Button 
+            type="link" 
+            href="https://github.com/Xperiamol/FlashNote" 
+            target="_blank"
+            icon={<GithubOutlined />}
+            className="github-link"
+          >
+            GitHub
+          </Button>
         </div>
       </Modal>
     </Layout>

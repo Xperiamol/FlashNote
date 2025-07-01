@@ -82,5 +82,101 @@
     "text": "12122",
     "color": "",
     "alwaysOnTop": true
+  },
+  {
+    "id": "1748518201118",
+    "text": "121212121212",
+    "color": "",
+    "alwaysOnTop": true
+  },
+  {
+    "id": "1751360215454",
+    "text": "121212",
+    "color": "",
+    "alwaysOnTop": true
+  },
+  {
+    "id": "1751360513343",
+    "text": "闪记 Todo Ind",
+    "color": "",
+    "alwaysOnTop": true
+  },
+  {
+    "id": "1751360657949",
+    "text": "取消置顶按钮无效",
+    "color": "",
+    "alwaysOnTop": true
+  },
+  {
+    "id": "1751373397996",
+    "text": "\n/* 确保Tab栏固定高度 */\n.ant-tabs-nav {\n  margin-bottom: 0;\n  margin-top: 0;\n  height: 46px; /* 根据实际Tab高度调整 */\n  flex-shrink: 0; /* 防止压缩 */\n}\n/* 确保Tab栏固定高度 */\n.ant-tabs-nav {\n  margin-bottom: 0;\n  margin-top: 0;\n  height: 46px; /* 根据实际Tab高度调整 */\n  flex-shrink: 0; /* 防止压缩 */\n}\n/* 确保Tab栏固定高度 */\n.ant-tabs-nav {\n  margin-bottom: 0;\n  margin-top: 0;\n  height: 46px; /* 根据实际Tab高度调整 */\n  flex-shrink: 0; /* 防止压缩 */\n}",
+    "color": "#f9f0ff",
+    "alwaysOnTop": true
+  },
+  {
+    "id": "1751376582556",
+    "text": "[eslint] \nsrc\\FlashNote.js\n  Line 180:23:  Parsing error: Unexpected token (180:23)",
+    "color": "",
+    "alwaysOnTop": true
+  },
+  {
+    "id": "1751376795119",
+    "text": "[eslint] \nsrc\\FlashNote.js\n  Line 180:23:  Parsing error: Unexpected token (180:23)",
+    "color": "",
+    "alwaysOnTop": true
+  },
+  {
+    "id": "1751376792405",
+    "text": "[eslint] \nsrc\\FlashNote.js\n  Line 180:23:  Parsing error: Unexpected token (180:23)",
+    "color": "",
+    "alwaysOnTop": true
+  },
+  {
+    "id": "1751377521243",
+    "text": "  // 删除小窗口按钮\n  <Button\n    className=\"note-action-btn\"\n    type=\"text\"\n    icon={<PushpinOutlined />}\n    onClick={handleOpenWindow}\n    key=\"window\"\n    size=\"small\"\n    title=\"独立窗口\"\n  />\n  const colorBtn = expanded && (\n    <Popover\n      content={\n        <div className=\"color-palette-container\">\n          {COLOR_PALETTE.map(color => (\n            <div\n              key={color}\n              onClick={() => { onChangeColor(item.id, color); setColorPopoverOpen(false); }}\n              className=\"color-palette-item\"\n              style={{\n                background: color,\n                border: color === item.color ? '2px solid #1890ff' : '1px solid #eee'\n              }}\n            />\n          ))}\n        </div>\n      }\n      trigger=\"click\"\n      open={colorPopoverOpen}\n      onOpenChange={setColorPopoverOpen}\n    >\n      <Button type=\"text\" icon={<BgColorsOutlined />} size=\"small\" className=\"note-action-btn\" />\n    </Popover>\n  );\n",
+    "color": "",
+    "alwaysOnTop": true
+  },
+  {
+    "id": "1751378170865",
+    "text": "  /* 关闭按钮 */\n/* 自定义关闭按钮的样式，包括颜色和鼠标悬浮时的效果。 */\n  .close-btn {\n    -webkit-app-region: no-drag;\n    color: #888;\n    font-size: 18px;\n  }\n  \n  .close-btn:hover {\n    color: #f5222d;\n    background: #eee;\n  }",
+    "color": "",
+    "alwaysOnTop": true
+  },
+  {
+    "id": "1751378181111",
+    "text": "  /* 关闭按钮 */\n/* 自定义关闭按钮的样式，包括颜色和鼠标悬浮时的效果。 */\n  .close-btn {\n    -webkit-app-region: no-drag;\n    color: #888;\n    font-size: 18px;\n  }\n  \n  .close-btn:hover {\n    color: #f5222d;\n    background: #eee;\n  }",
+    "color": "#f9f0ff",
+    "alwaysOnTop": true
+  },
+  {
+    "id": "1751380102078",
+    "text": "ERROR\nantd__WEBPACK_IMPORTED_MODULE_2__.default.warn is not a function\nTypeError: antd__WEBPACK_IMPORTED_MODULE_2__.default.warn is not a function\n    at Object.handleOpenWindow [as onClick] (http://localhost:3000/static/js/bundle.js:119423:52)\n    at http://localhost:3000/static/js/bundle.js:20584:66\n    at HTMLUnknownElement.callCallback (http://localhost:3000/static/js/bundle.js:86775:18)\n    at Object.invokeGuardedCallbackDev (http://localhost:3000/static/js/bundle.js:86819:20)\n    at invokeGuardedCallback (http://localhost:3000/static/js/bundle.js:86876:35)\n    at invokeGuardedCallbackAndCatchFirstError (http://localhost:3000/static/js/bundle.js:86890:29)\n    at executeDispatch (http://localhost:3000/static/js/bundle.js:91033:7)\n    at processDispatchQueueItemsInOrder (http://localhost:3000/static/js/bundle.js:91059:11)\n    at processDispatchQueue (http://localhost:3000/static/js/bundle.js:91070:9)\n    at dispatchEventsForPlugins (http://localhost:3000/static/js/bundle.js:91079:7)",
+    "color": "",
+    "alwaysOnTop": true
+  },
+  {
+    "id": "1751380401281",
+    "text": "Uncaught Exception:\n\nReferenceError: updateNoteFile is not defined at lpcMainlmpl. <anonymous>\n\n(C: \\Users\\KevinYe\\Desktop\\code\\note\\main. js: 109: 5) at lpcMainlmpl.emit (node: events: 517: 28)\n\nat WebContents. <anonymous>(node:electron/js2c/browser_init:2:77585) at WebContents.emit (node:events: 517: 28)Uncaught Exception:\n\nReferenceError: updateNoteFile is not defined at lpcMainlmpl. <anonymous>\n\n(C: \\Users\\KevinYe\\Desktop\\code\\note\\main. js: 109: 5) at lpcMainlmpl.emit (node: events: 517: 28)\n\nat WebContents. <anonymous>(node:electron/js2c/browser_init:2:77585) at WebContents.emit (node:events: 517: 28)",
+    "color": "",
+    "alwaysOnTop": true
+  },
+  {
+    "id": "1751381108449",
+    "text": "在主页面中点编辑按钮就会变成白色在主页面中点编辑按钮就会变成白色在主页面中点编辑按钮就会变成白色",
+    "color": "",
+    "alwaysOnTop": true
+  },
+  {
+    "id": "1751381163865",
+    "text": "2",
+    "color": "",
+    "alwaysOnTop": true
+  },
+  {
+    "id": "1751381161792",
+    "text": "Uncaught Exception:\nReferenceError: updateNoteFile is not defined at lpcMainlmpl. <anonymous>\n(C: \\Users\\KevinYe\\Desktop\\code\\note\\main. js: 109: 5) at lpcMainlmpl.emit (node: events: 517: 28)\nat WebContents. <anonymous>(node:electron/js2c/browser_init:2:77585) at WebContents.emit (node:events: 517: 28)\n\n\n",
+    "color": "",
+    "alwaysOnTop": true
   }
 ]
