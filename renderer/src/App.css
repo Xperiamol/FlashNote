@@ -56,6 +56,17 @@ html, body, #root {
     color: #f5222d;
     background: #eee;
   }
+
+  .minimize-btn {
+    -webkit-app-region: no-drag;
+    color: #888;
+    font-size: 18px;
+  }
+
+  .minimize-btn:hover {
+    color: #333;
+    background: #eee;
+  }
   
   /* 滚动区域 */
 /* 内容滚动区域的样式，包括滚动条的美化。 */

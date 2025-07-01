@@ -178,5 +178,29 @@
     "text": "Uncaught Exception:\nReferenceError: updateNoteFile is not defined at lpcMainlmpl. <anonymous>\n(C: \\Users\\KevinYe\\Desktop\\code\\note\\main. js: 109: 5) at lpcMainlmpl.emit (node: events: 517: 28)\nat WebContents. <anonymous>(node:electron/js2c/browser_init:2:77585) at WebContents.emit (node:events: 517: 28)\n\n\n",
     "color": "",
     "alwaysOnTop": true
+  },
+  {
+    "id": "1751384339012",
+    "text": "npm run distnpm run distnpm run dist",
+    "color": "",
+    "alwaysOnTop": false
+  },
+  {
+    "id": "1751384805700",
+    "text": "npm startnpm startnpm startnpm startnpm startnpm startnpm start",
+    "color": "",
+    "alwaysOnTop": true
+  },
+  {
+    "id": "1751385217721",
+    "text": "npm",
+    "color": "",
+    "alwaysOnTop": true
+  },
+  {
+    "id": "1751385373698",
+    "text": "npm startnpm startnpm start",
+    "color": "",
+    "alwaysOnTop": true
   }
 ]

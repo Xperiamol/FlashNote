@@ -39,11 +39,36 @@ function registerIpcHandlers() {
       settings.alwaysOnTop = !!value;
       writeSettings(settings);
     } else {
-      // 处理来自小窗口的置顶请求
       const win = BrowserWindow.fromWebContents(event.sender);
       if (win) {
         win.setAlwaysOnTop(!!value);
+
+        // 获取小窗口对应的笔记数据并更新其置顶状态
+        const url = win.webContents.getURL();
+        const noteId = url.substring(url.lastIndexOf('/') + 1);
+
+        let notes = [];
+        if (fs.existsSync(notesFile)) {
+            try {
+                notes = JSON.parse(fs.readFileSync(notesFile, 'utf-8'));
+            } catch (e) {
+                notes = [];
+            }
+        }
+
+        const noteIndex = notes.findIndex(n => n.id === noteId);
+        if (noteIndex !== -1) {
+            notes[noteIndex].alwaysOnTop = !!value;
+            fs.writeFileSync(notesFile, JSON.stringify(notes, null, 2), 'utf-8');
+        }
       }
+    }
+  });
+
+  // IPC: 最小化窗口
+  ipcMain.on('minimize-window', () => {
+    if (mainWin) {
+      mainWin.minimize();
     }
   });
 
@@ -73,6 +98,7 @@ function registerIpcHandlers() {
       webPreferences: {
         nodeIntegration: true,
         contextIsolation: false,
+        spellcheck: false
       },
     });
     
@@ -111,6 +137,8 @@ function registerIpcHandlers() {
       mainWin.webContents.send('refresh-notes');
     }
   });
+
+
 }
 
 function createWindow() {
@@ -126,7 +154,9 @@ function createWindow() {
     webPreferences: {
       nodeIntegration: true,
       contextIsolation: false,
-    },
+      enableRemoteModule: true,
+      spellcheck: false
+    }
   });
 
   if (app.isPackaged) {

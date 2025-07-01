@@ -1,11 +1,18 @@
 import React, { useState, useEffect } from 'react';
 import { Tabs, Layout, Button, Menu, Dropdown, message, Modal, Slider } from 'antd';
-import { CloseOutlined, SettingOutlined, GithubOutlined } from '@ant-design/icons';
+import { CloseOutlined, SettingOutlined, GithubOutlined, MinusOutlined } from '@ant-design/icons';
 import FlashNote from './FlashNote';
 import Todo from './Todo';
 import './App.css';
 
 const { Content } = Layout;
+
+function handleMinimize() {
+  if (window.require) {
+    const { ipcRenderer } = window.require('electron');
+    ipcRenderer.send('minimize-window');
+  }
+}
 
 function handleClose() {
   if (window && window.close) {
@@ -70,12 +77,20 @@ function App() {
     <Layout className="app-layout">
       <div className="custom-title-bar">
         <span className="title">闪念速记</span>
-        <Button
-          type="text"
-          icon={<CloseOutlined />}
-          onClick={handleClose}
-          className="close-btn"
-        />
+        <div>
+          <Button
+            type="text"
+            icon={<MinusOutlined />}
+            onClick={handleMinimize}
+            className="minimize-btn"
+          />
+          <Button
+            type="text"
+            icon={<CloseOutlined />}
+            onClick={handleClose}
+            className="close-btn"
+          />
+        </div>
       </div>
       <Content className="main-content">
         <Tabs
