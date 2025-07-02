@@ -4,7 +4,7 @@ import { DeleteOutlined, DownOutlined, UpOutlined, EditOutlined, BgColorsOutline
 
 const STORAGE_KEY = 'flash_notes';
 const COLLAPSED_MAX_HEIGHT = 72; // 2行内容高度+padding
-const EXPANDED_MAX_HEIGHT = 500; // 展开最大高度
+
 const COLOR_PALETTE = [
   '#fffbe6', '#e6fffb', '#f6ffed', '#f9f0ff', '#fff0f6', '#f0f5ff', '#ffffff'
 ];
@@ -49,17 +49,12 @@ function darkenAndSaturate(hex, darkenAmount = 0.25, saturateAmount = 0.2) {
 
 function NoteItem({ item, expanded, onToggleExpand, onDelete, onEdit, editingId, setEditingId, onSaveEdit, onChangeColor, pendingDeleteId, deleteBtnRef }) {
   const contentRef = useRef(null);
-  const [maxHeight, setMaxHeight] = useState(COLLAPSED_MAX_HEIGHT + 'px');
   const [editValue, setEditValue] = useState(item.text);
   const [colorPopoverOpen, setColorPopoverOpen] = useState(false);
   const [needCollapse, setNeedCollapse] = useState(false);
   const singleLine = isSingleLine(item.text);
   const isEditing = editingId === item.id;
   const isDark = typeof document !== 'undefined' && document.body.classList.contains('dark-mode');
-
-  useEffect(() => {
-    setMaxHeight(expanded ? EXPANDED_MAX_HEIGHT + 'px' : COLLAPSED_MAX_HEIGHT + 'px');
-  }, [expanded, item.text]);
 
   useEffect(() => {
     if (isEditing) setEditValue(item.text);
@@ -156,7 +151,6 @@ function NoteItem({ item, expanded, onToggleExpand, onDelete, onEdit, editingId,
         className={`note-content-anim${expanded ? ' expanded' : ''}`}
         ref={contentRef}
         style={{
-          maxHeight,
           background: isDark ? '#232323' : (item.color || '#fff'),
         }}
       >

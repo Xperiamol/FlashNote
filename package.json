@@ -13,7 +13,6 @@
   },
   "dependencies": {
     "concurrently": "^8.2.2",
-    "moment": "^2.30.1",
     "wait-on": "^7.0.1"
   },
   "build": {
@@ -44,8 +43,8 @@
     }
   },
   "devDependencies": {
-    "electron-builder": "^26.0.12",
-    "electron": "^28.2.3"
+    "electron": "^28.2.3",
+    "electron-builder": "^26.0.12"
   },
   "author": "Kevin Ye"
 }

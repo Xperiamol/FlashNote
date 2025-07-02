@@ -1,7 +1,8 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { Input, Button, List, Checkbox, Space, message, Popover, DatePicker, Select } from 'antd';
 import { DeleteOutlined, MoreOutlined, PlusOutlined } from '@ant-design/icons';
-import moment from 'moment';
+import dayjs from 'dayjs'; // Import dayjs because antd v5 uses it
+
 
 const STORAGE_KEY = 'todo_list';
 
@@ -67,8 +68,9 @@ function Todo() {
     }
   };
 
-  const handleDdlChange = (id, date) => {
-    setTodos(todos.map(t => t.id === id ? { ...t, ddl: date ? date.format('YYYY-MM-DD') : null } : t));
+    const handleDdlChange = (id, date) => {
+    const dateString = date ? date.format('YYYY-MM-DD') : null;
+    setTodos(todos.map(t => t.id === id ? { ...t, ddl: dateString } : t));
   };
 
   const handleQuadrantChange = (id, value) => {
@@ -131,7 +133,7 @@ function Todo() {
                       <div className="todo-popover-item">
                         <span>截止日期：</span>
                         <DatePicker
-                          value={item.ddl ? window.moment?.(item.ddl) : null}
+                          value={item.ddl ? dayjs(item.ddl, 'YYYY-MM-DD') : null}
                           onChange={date => handleDdlChange(item.id, date)}
                           allowClear
                           className="todo-datepicker"
@@ -162,11 +164,15 @@ function Todo() {
                   <span className="todo-ddl">
                     [DDL: {item.ddl}
                     {(() => {
-                      const now = moment().startOf('day');
-                      const ddl = moment(item.ddl, 'YYYY-MM-DD');
-                      const diff = ddl.diff(now, 'days');
-                      if (diff > 0) return `，剩${diff}天`;
-                      if (diff === 0) return '，今天截止';
+                      if (!item.ddl) return '';
+                      const now = new Date();
+                      now.setHours(0, 0, 0, 0);
+                      const ddl = new Date(item.ddl + 'T00:00:00');
+                      const diffTime = ddl.getTime() - now.getTime();
+                      const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
+
+                      if (diffDays > 0) return `，剩${diffDays}天`;
+                      if (diffDays === 0) return '，今天截止';
                       return '，已过期';
                     })()}]
                   </span>

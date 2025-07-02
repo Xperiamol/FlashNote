@@ -3,6 +3,7 @@ import { Tabs, Layout, Button, Menu, Dropdown, message, Modal, Slider } from 'an
 import { CloseOutlined, SettingOutlined, GithubOutlined, MinusOutlined } from '@ant-design/icons';
 import FlashNote from './FlashNote';
 import Todo from './Todo';
+import Settings from './Settings';
 import './App.css';
 
 const { Content } = Layout;
@@ -32,6 +33,7 @@ function App() {
   const [blockRadius, setBlockRadius] = useState(() => Number(localStorage.getItem('blockRadius')) || 6);
   // 添加关于页面的状态
   const [aboutModalOpen, setAboutModalOpen] = useState(false);
+  const [settingsModalOpen, setSettingsModalOpen] = useState(false);
 
   useEffect(() => {
     document.documentElement.style.setProperty('--input-radius', inputRadius + 'px');
@@ -57,6 +59,10 @@ function App() {
       case 'customizeRadius':
         setRadiusModalOpen(true);
         break;
+      case 'settings':
+        setSettingsModalOpen(true);
+        break;
+
       default:
         break;
     }
@@ -67,6 +73,7 @@ function App() {
       onClick={handleMenuClick}
       items={[
         { label: `切换到${currentTheme === 'light' ? '暗色' : '亮色'}模式`, key: 'toggleTheme' },
+        { label: '更多设置', key: 'settings' },
         { label: '关于', key: 'about' },
         { label: '自定义圆角', key: 'customizeRadius' },
       ]}
@@ -157,6 +164,16 @@ function App() {
           </Button>
         </div>
       </Modal>
+
+      <Modal
+        title="设置"
+        open={settingsModalOpen}
+        onCancel={() => setSettingsModalOpen(false)}
+        footer={null}
+      >
+        <Settings />
+      </Modal>
+
     </Layout>
   );
 }

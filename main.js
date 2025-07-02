@@ -1,4 +1,4 @@
-const { app, BrowserWindow, ipcMain } = require('electron');
+const { app, BrowserWindow, ipcMain, Tray, Menu } = require('electron');
 const path = require('path');
 const fs = require('fs');
 const notesFile = path.join(__dirname, 'notes.json');
@@ -15,7 +15,7 @@ function readSettings() {
     console.error('Failed to read settings file:', error);
   }
   // 默认设置
-  return { alwaysOnTop: true };
+  return { alwaysOnTop: true, openAtLogin: false, restoreWindows: false };
 }
 
 // 写入设置
@@ -28,8 +28,11 @@ function writeSettings(settings) {
 }
 
 let mainWin = null;
+let tray = null;
 
 // 注册所有 IPC 处理程序
+registerIpcHandlers();
+
 function registerIpcHandlers() {
   // IPC: 设置窗口置顶
   ipcMain.on('set-always-on-top', (event, { id, value }) => {
@@ -38,6 +41,8 @@ function registerIpcHandlers() {
       const settings = readSettings();
       settings.alwaysOnTop = !!value;
       writeSettings(settings);
+    } else if (id === 'settings') {
+      // This is for settings from the settings page
     } else {
       const win = BrowserWindow.fromWebContents(event.sender);
       if (win) {
@@ -65,6 +70,29 @@ function registerIpcHandlers() {
     }
   });
 
+  // IPC: 设置开机自启
+  ipcMain.on('set-open-at-login', (event, value) => {
+    const settings = readSettings();
+    settings.openAtLogin = !!value;
+    writeSettings(settings);
+    app.setLoginItemSettings({
+      openAtLogin: settings.openAtLogin,
+      path: app.getPath('exe'),
+    });
+  });
+
+  // IPC: 设置是否恢复窗口
+  ipcMain.on('set-restore-windows', (event, value) => {
+    const settings = readSettings();
+    settings.restoreWindows = !!value;
+    writeSettings(settings);
+  });
+
+  // IPC: 获取设置
+  ipcMain.handle('get-settings', async () => {
+    return readSettings();
+  });
+
   // IPC: 最小化窗口
   ipcMain.on('minimize-window', () => {
     if (mainWin) {
@@ -87,6 +115,7 @@ function registerIpcHandlers() {
   
   // 添加：处理打开笔记小窗口的事件
   ipcMain.on('open-note-window', (event, noteData) => {
+    const settings = readSettings();
     // 创建新的小窗口
     const noteWindow = new BrowserWindow({
       width: 300,
@@ -98,10 +127,15 @@ function registerIpcHandlers() {
       webPreferences: {
         nodeIntegration: true,
         contextIsolation: false,
-        spellcheck: false
+        spellcheck: false,
+
       },
     });
     
+    noteWindow.on('close', () => {
+      updateNoteFile({ ...noteData, isOpen: false });
+    });
+
     // 加载相同的页面
     if (app.isPackaged) {
       noteWindow.loadFile(path.join(__dirname, 'renderer', 'build', 'index.html'), {
@@ -112,7 +146,7 @@ function registerIpcHandlers() {
     }
     
     // 将笔记数据保存到文件
-    updateNoteFile(noteData);
+    updateNoteFile({ ...noteData, isOpen: true });
   });
   function updateNoteFile(noteData) {
     let notes = [];
@@ -155,7 +189,8 @@ function createWindow() {
       nodeIntegration: true,
       contextIsolation: false,
       enableRemoteModule: true,
-      spellcheck: false
+      spellcheck: false,
+
     }
   });
 
@@ -168,8 +203,47 @@ function createWindow() {
 
 // 在应用准备就绪时注册 IPC 处理程序并创建窗口
 app.whenReady().then(() => {
-  registerIpcHandlers();
   createWindow();
+
+  const iconPath = path.join(__dirname, 'renderer', 'public', 'favicon.ico');
+  tray = new Tray(iconPath);
+
+  const contextMenu = Menu.buildFromTemplate([
+    {
+      label: '退出',
+      click: () => {
+        app.quit();
+      }
+    }
+  ]);
+
+  tray.setToolTip('Note App');
+  tray.setContextMenu(contextMenu);
+
+  const settings = readSettings();
+
+  // 根据设置初始化开机自启
+  app.setLoginItemSettings({
+    openAtLogin: settings.openAtLogin,
+    path: app.getPath('exe'),
+  });
+
+  // 根据设置恢复独立窗口
+  if (settings.restoreWindows) {
+    let notes = [];
+    if (fs.existsSync(notesFile)) {
+      try {
+        notes = JSON.parse(fs.readFileSync(notesFile, 'utf-8'));
+      } catch (e) {
+        notes = [];
+      }
+    }
+    notes.forEach(note => {
+      if (note.isOpen) { // 假设笔记对象有一个isOpen属性
+        ipcMain.emit('open-note-window', null, note);
+      }
+    });
+  }
 });
 
 app.on('window-all-closed', () => {
