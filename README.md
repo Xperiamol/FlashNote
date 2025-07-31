@@ -19,6 +19,7 @@ Todo：自动排序和管理您的待办事项
 开发环境运行
 
 ```bash
+$env:ELECTRON_MIRROR="https://npmmirror.com/mirrors/electron/"; $env:ELECTRON_BUILDER_BINARIES_MIRROR="https://npmmirror.com/mirrors/electron-builder-binaries/"
 npm install
 cd renderer && npm install
 cd ..
