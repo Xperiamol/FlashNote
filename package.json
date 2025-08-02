@@ -1,6 +1,6 @@
 {
   "name": "floating-note-app",
-  "version": "1.3.0",
+  "version": "1.3.1",
   "main": "main.js",
   "description": "A floating note app with Flash Note and Todo modules.",
   "scripts": {
@@ -26,7 +26,14 @@
     "files": [
       "main.js",
       "notes.json",
-      "renderer/build/**/*"
+      "renderer/build/**/*",
+      "renderer/public/favicon.ico"
+    ],
+    "extraResources": [
+      {
+        "from": "renderer/public/favicon.ico",
+        "to": "app.ico"
+      }
     ],
     "win": {
       "icon": "renderer/public/favicon.ico",

@@ -81,13 +81,27 @@ let floatingBallWin = null; // 悬浮球窗口
 
 // 更新托盘菜单的函数
 function updateTrayMenu() {
-  if (!tray || tray.isDestroyed()) return;
+  if (!tray || tray.isDestroyed()) {
+    console.log('托盘不存在或已销毁，跳过菜单更新');
+    return;
+  }
   
   const updatedContextMenu = Menu.buildFromTemplate([
     {
       label: '打开主程序',
       click: () => {
-        showMainWindow();
+        console.log('托盘菜单：打开主程序被点击');
+        try {
+          showMainWindow();
+        } catch (error) {
+          console.error('打开主程序时出错:', error);
+          // 如果出错，尝试创建新窗口
+          try {
+            createWindow();
+          } catch (createError) {
+            console.error('创建新窗口也失败:', createError);
+          }
+        }
       }
     },
     {
@@ -96,14 +110,19 @@ function updateTrayMenu() {
     {
       label: floatingBallWin && !floatingBallWin.isDestroyed() ? '隐藏悬浮球' : '显示悬浮球',
       click: () => {
-        if (floatingBallWin && !floatingBallWin.isDestroyed()) {
-          floatingBallWin.close();
-          floatingBallWin = null;
-        } else {
-          createFloatingBall();
+        console.log('托盘菜单：悬浮球切换被点击');
+        try {
+          if (floatingBallWin && !floatingBallWin.isDestroyed()) {
+            floatingBallWin.close();
+            floatingBallWin = null;
+          } else {
+            createFloatingBall();
+          }
+          // 更新托盘菜单
+          updateTrayMenu();
+        } catch (error) {
+          console.error('切换悬浮球时出错:', error);
         }
-        // 更新托盘菜单
-        updateTrayMenu();
       }
     },
     {
@@ -112,12 +131,121 @@ function updateTrayMenu() {
     {
       label: '退出',
       click: () => {
-        app.quit();
+        console.log('托盘菜单：退出被点击');
+        try {
+          // 强制退出应用，确保所有窗口和进程都被关闭
+          forceQuitApplication();
+        } catch (error) {
+          console.error('退出应用时出错:', error);
+          // 如果正常退出失败，使用强制退出
+          process.exit(0);
+        }
       }
     }
   ]);
   
-  tray.setContextMenu(updatedContextMenu);
+  try {
+    tray.setContextMenu(updatedContextMenu);
+    console.log('托盘菜单更新成功');
+  } catch (error) {
+    console.error('设置托盘菜单时出错:', error);
+  }
+}
+
+// 强制退出应用程序
+function forceQuitApplication() {
+  console.log('开始强制退出应用程序...');
+  
+  try {
+    // 1. 关闭所有窗口（包括笔记小窗口）
+    const allWindows = BrowserWindow.getAllWindows();
+    console.log(`发现 ${allWindows.length} 个窗口，正在关闭...`);
+    
+    allWindows.forEach((window, index) => {
+      try {
+        if (!window.isDestroyed()) {
+          console.log(`关闭窗口 ${index + 1}:`, window.getTitle() || '未知窗口');
+          // 移除所有事件监听器，防止 close 事件被阻止
+          window.removeAllListeners('close');
+          window.destroy(); // 使用 destroy() 而不是 close() 确保强制关闭
+        }
+      } catch (error) {
+        console.error(`关闭窗口 ${index + 1} 时出错:`, error);
+      }
+    });
+    
+    // 2. 清理全局窗口引用
+    mainWin = null;
+    floatingBallWin = null;
+    
+    // 3. 销毁托盘
+    if (tray && !tray.isDestroyed()) {
+      console.log('销毁托盘图标...');
+      tray.destroy();
+      tray = null;
+    }
+    
+    // 4. 清理IPC监听器
+    ipcMain.removeAllListeners();
+    console.log('清理所有IPC监听器');
+    
+    console.log('所有资源清理完成，退出应用');
+    
+    // 5. 退出应用
+    app.quit();
+    
+    // 6. 如果 app.quit() 在2秒内没有生效，强制退出进程
+    setTimeout(() => {
+      console.log('应用退出超时，强制终止进程');
+      process.exit(0);
+    }, 2000);
+    
+  } catch (error) {
+    console.error('强制退出过程中出错:', error);
+    // 最后的保险措施：直接终止进程
+    process.exit(1);
+  }
+}
+
+// 防止多实例运行
+const gotTheLock = app.requestSingleInstanceLock();
+
+if (!gotTheLock) {
+  console.log('应用已经在运行，退出新实例');
+  app.quit();
+} else {
+  app.on('second-instance', (event, commandLine, workingDirectory) => {
+    console.log('检测到第二个实例启动，显示现有窗口');
+    console.log('当前主窗口状态:', mainWin ? '存在' : '不存在');
+    
+    // 当运行第二个实例时，将主窗口置于顶层并聚焦
+    if (mainWin && !mainWin.isDestroyed()) {
+      try {
+        console.log('主窗口存在且未销毁，尝试显示');
+        if (mainWin.isMinimized()) {
+          console.log('主窗口已最小化，正在恢复');
+          mainWin.restore();
+        }
+        if (!mainWin.isVisible()) {
+          console.log('主窗口不可见，使用动画显示');
+          showMainWindow();
+        } else {
+          console.log('主窗口可见，聚焦到前台');
+          mainWin.focus();
+          mainWin.show(); // 确保窗口显示在前台
+        }
+      } catch (error) {
+        console.error('操作主窗口时出错:', error);
+        // 如果操作现有窗口失败，创建新窗口
+        mainWin = null;
+        createWindow();
+      }
+    } else {
+      console.log('主窗口不存在或已销毁，创建新窗口');
+      // 如果主窗口不存在或已销毁，创建一个新的
+      createWindow();
+    }
+  });
 }
 
 // 注册所有 IPC 处理程序
@@ -511,6 +639,27 @@ function createWindow() {
     }
   });
 
+  // 处理窗口关闭按钮点击（防止应用完全退出）
+  mainWin.on('close', (event) => {
+    console.log('主窗口关闭事件触发');
+    if (process.platform !== 'darwin') {
+      // 在非macOS平台上，关闭窗口时隐藏到托盘而不是退出应用
+      event.preventDefault();
+      try {
+        mainWin.hide();
+        console.log('主窗口已隐藏到托盘');
+      } catch (error) {
+        console.error('隐藏主窗口时出错:', error);
+      }
+    }
+  });
+
+  // 添加窗口关闭事件监听器（只有在真正销毁时才会触发）
+  mainWin.on('closed', () => {
+    console.log('主窗口已销毁，清理窗口引用');
+    mainWin = null;
+  });
+
   if (app.isPackaged) {
     mainWin.loadFile(path.join(__dirname, 'renderer', 'build', 'index.html'));
   } else {
@@ -617,21 +766,39 @@ function showWindowWithAnimation(window) {
 
 // 智能显示主窗口函数（包含动画）
 function showMainWindow() {
-  if (mainWin && !mainWin.isDestroyed()) {
-    if (mainWin.isVisible()) {
-      // 如果窗口已经可见，只需要聚焦
-      mainWin.focus();
-    } else {
-      // 如果窗口存在但不可见，使用动画显示
-      if (process.platform === 'win32') {
-        showWindowWithAnimation(mainWin);
-      } else {
-        mainWin.show();
+  console.log('showMainWindow被调用，当前主窗口状态:', mainWin ? (mainWin.isDestroyed() ? '已销毁' : '存在') : '不存在');
+  
+  try {
+    if (mainWin && !mainWin.isDestroyed()) {
+      console.log('主窗口存在且未销毁');
+      if (mainWin.isVisible()) {
+        console.log('窗口可见，聚焦到前台');
+        // 如果窗口已经可见，只需要聚焦
         mainWin.focus();
+        mainWin.show(); // 确保窗口在最前面
+      } else {
+        console.log('窗口不可见，显示窗口');
+        // 如果窗口存在但不可见，使用动画显示
+        if (process.platform === 'win32') {
+          showWindowWithAnimation(mainWin);
+        } else {
+          mainWin.show();
+          mainWin.focus();
+        }
       }
+    } else {
+      console.log('主窗口不存在或已销毁，创建新窗口');
+      createWindow();
     }
-  } else {
-    createWindow();
+  } catch (error) {
+    console.error('showMainWindow执行时出错:', error);
+    // 如果出现错误，重置窗口引用并创建新窗口
+    mainWin = null;
+    try {
+      createWindow();
+    } catch (createError) {
+      console.error('创建新窗口也失败:', createError);
+    }
   }
 }
 
@@ -648,13 +815,86 @@ app.whenReady().then(() => {
     console.log('隐藏启动模式，不创建主窗口');
   }
 
-  const iconPath = path.join(__dirname, 'renderer', 'public', 'favicon.ico');
-  tray = new Tray(iconPath);
+  // 创建托盘图标
+  let iconPath;
+  if (app.isPackaged) {
+    // 生产环境：从打包后的资源目录获取图标
+    iconPath = path.join(process.resourcesPath, 'app', 'renderer', 'public', 'favicon.ico');
+    // 如果上述路径不存在，尝试备用路径
+    if (!fs.existsSync(iconPath)) {
+      iconPath = path.join(__dirname, 'renderer', 'public', 'favicon.ico');
+    }
+    // 如果仍然不存在，使用应用图标
+    if (!fs.existsSync(iconPath)) {
+      iconPath = path.join(process.resourcesPath, 'app.ico');
+    }
+  } else {
+    // 开发环境
+    iconPath = path.join(__dirname, 'renderer', 'public', 'favicon.ico');
+  }
 
-  const contextMenu = Menu.buildFromTemplate([
+  console.log('托盘图标路径:', iconPath);
+  console.log('图标文件是否存在:', fs.existsSync(iconPath));
+
+  try {
+    tray = new Tray(iconPath);
+    console.log('托盘创建成功');
+  } catch (error) {
+    console.error('创建托盘失败:', error);
+    // 如果创建失败，尝试使用系统默认图标
+    try {
+      // 在Windows上创建一个简单的白色正方形作为备用图标
+      const nativeImage = require('electron').nativeImage;
+      const image = nativeImage.createFromDataURL('data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAACAAAAAgCAYAAABzenr0AAAAEklEQVR42u3BAQ0AAADCoPdPbQ8HFAABw8TJmwAAAABJRU5ErkJggg==');
+      tray = new Tray(image);
+      console.log('使用备用图标创建托盘成功');
+    } catch (fallbackError) {
+      console.error('创建备用托盘也失败:', fallbackError);
+      return; // 如果托盘创建完全失败，就不设置托盘功能
+    }
+  }
+
+  // 设置托盘提示和双击事件
+  tray.setToolTip('闪念速记');
+  
+  // 添加托盘双击事件监听
+  tray.on('double-click', () => {
+    console.log('托盘图标被双击');
+    try {
+      showMainWindow();
+    } catch (error) {
+      console.error('双击托盘图标时出错:', error);
+      try {
+        createWindow();
+      } catch (createError) {
+        console.error('创建新窗口也失败:', createError);
+      }
+    }
+  });
+
+  // 添加托盘左键单击事件（Windows上需要特殊处理）
+  if (process.platform === 'win32') {
+    tray.on('click', () => {
+      console.log('托盘图标被单击');
+      try {
+        showMainWindow();
+      } catch (error) {
+        console.error('单击托盘图标时出错:', error);
+        try {
+          createWindow();
+        } catch (createError) {
+          console.error('创建新窗口也失败:', createError);
+        }
+      }
+    });
+  }
+
+  // 初始化托盘菜单
+  const initialContextMenu = Menu.buildFromTemplate([
     {
       label: '打开主程序',
       click: () => {
+        console.log('托盘菜单：打开主程序被点击');
         showMainWindow();
       }
     },
@@ -662,8 +902,9 @@ app.whenReady().then(() => {
       type: 'separator'
     },
     {
-      label: floatingBallWin && !floatingBallWin.isDestroyed() ? '隐藏悬浮球' : '显示悬浮球',
+      label: '显示悬浮球',
       click: () => {
+        console.log('托盘菜单：显示悬浮球被点击');
         if (floatingBallWin && !floatingBallWin.isDestroyed()) {
           floatingBallWin.close();
           floatingBallWin = null;
@@ -680,13 +921,22 @@ app.whenReady().then(() => {
     {
       label: '退出',
       click: () => {
-        app.quit();
+        console.log('托盘菜单：退出被点击');
+        try {
+          // 强制退出应用，确保所有窗口和进程都被关闭
+          forceQuitApplication();
+        } catch (error) {
+          console.error('退出应用时出错:', error);
+          // 如果正常退出失败，使用强制退出
+          process.exit(0);
+        }
       }
     }
   ]);
 
-  tray.setToolTip('Note App');
-  tray.setContextMenu(contextMenu);
+  // 设置初始上下文菜单
+  tray.setContextMenu(initialContextMenu);
+  console.log('托盘菜单设置完成');
 
   const settings = readSettings();
 
@@ -734,11 +984,65 @@ app.whenReady().then(() => {
 });
 
 app.on('window-all-closed', () => {
-  if (process.platform !== 'darwin') app.quit();
+  // 在Windows和Linux上，当所有窗口关闭时保持应用运行（托盘模式）
+  // 在macOS上，通常应用会完全退出
+  if (process.platform === 'darwin') {
+    app.quit();
+  }
+  // 在其他平台上不退出，因为我们有托盘图标
 });
 
 app.on('activate', () => {
-  if (BrowserWindow.getAllWindows().length === 0) createWindow();
+  // 在macOS上，当应用被激活时重新创建窗口
+  if (BrowserWindow.getAllWindows().length === 0) {
+    createWindow();
+  }
+});
+
+// 添加应用退出前的清理
+app.on('before-quit', (event) => {
+  console.log('应用准备退出，进行清理...');
+  
+  try {
+    // 关闭所有窗口（包括笔记小窗口）
+    const allWindows = BrowserWindow.getAllWindows();
+    console.log(`清理 ${allWindows.length} 个窗口`);
+    
+    allWindows.forEach((window, index) => {
+      try {
+        if (!window.isDestroyed()) {
+          console.log(`清理窗口 ${index + 1}`);
+          // 移除事件监听器，防止阻止退出
+          window.removeAllListeners('close');
+          window.destroy();
+        }
+      } catch (error) {
+        console.error(`清理窗口 ${index + 1} 时出错:`, error);
+      }
+    });
+    
+    // 清理全局引用
+    mainWin = null;
+    floatingBallWin = null;
+    
+    // 销毁托盘
+    if (tray && !tray.isDestroyed()) {
+      tray.destroy();
+      tray = null;
+    }
+    
+    // 清理IPC监听器
+    ipcMain.removeAllListeners();
+    
+    console.log('清理完成');
+  } catch (error) {
+    console.error('清理过程中出错:', error);
+  }
+});
+
+// 处理应用退出
+app.on('will-quit', (event) => {
+  console.log('应用即将退出');
 });
 
 // 创建悬浮球窗口函数
@@ -746,12 +1050,15 @@ function createFloatingBall() {
   // 获取屏幕尺寸
   const { width, height } = screen.getPrimaryDisplay().workAreaSize;
   
+  // 声明超时变量
+  let showTimeout;
+  
   // 创建一个全屏透明的悬浮球窗口
   floatingBallWin = new BrowserWindow({
     width: width,
     height: height,
     frame: false,
-    show: true,
+    show: false, // 🔧 修复：初始不显示，等待页面加载完成
     skipTaskbar: true,
     transparent: true,
     resizable: false,
@@ -794,9 +1101,22 @@ function createFloatingBall() {
     console.log('加载悬浮球URL:', 'http://localhost:3000/#floatingball');
   }
 
+  // 🔧 添加超时保险机制：如果3秒内页面没有加载完成，强制显示窗口
+  showTimeout = setTimeout(() => {
+    if (!floatingBallWin.isDestroyed() && !floatingBallWin.isVisible()) {
+      console.log('悬浮球加载超时，强制显示窗口');
+      floatingBallWin.show();
+    }
+  }, 3000);
+
   // 当页面加载完成时
   floatingBallWin.webContents.on('did-finish-load', () => {
     console.log('悬浮球窗口加载完成');
+    
+    // 清除超时定时器
+    if (showTimeout) {
+      clearTimeout(showTimeout);
+    }
     
     // 注入CSS确保背景透明
     floatingBallWin.webContents.insertCSS(`
@@ -811,7 +1131,19 @@ function createFloatingBall() {
         width: 100%;
         height: 100%;
       }
-    `).catch(err => console.error('插入CSS失败:', err));
+    `).then(() => {
+      // 🔧 修复：CSS注入完成后再显示窗口，避免白色闪屏
+      console.log('CSS注入完成，显示悬浮球窗口');
+      if (!floatingBallWin.isDestroyed()) {
+        floatingBallWin.show();
+      }
+    }).catch(err => {
+      console.error('插入CSS失败:', err);
+      // 即使CSS注入失败，也要显示窗口
+      if (!floatingBallWin.isDestroyed()) {
+        floatingBallWin.show();
+      }
+    });
   });
 
   // 开发环境下打开开发者工具
@@ -821,6 +1153,12 @@ function createFloatingBall() {
 
   // 当悬浮球窗口关闭时的处理
   floatingBallWin.on('closed', () => {
+    // 清理超时定时器
+    if (showTimeout) {
+      clearTimeout(showTimeout);
+      showTimeout = null;
+    }
+    
     floatingBallWin = null;
     // 更新托盘菜单，反映悬浮球状态变化
     if (tray && !tray.isDestroyed()) {

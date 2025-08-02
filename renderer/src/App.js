@@ -325,7 +325,7 @@ function App() {
         ]}
       >
         <div className="about-content">
-          <h3>闪念速记 v1.3.0</h3>
+          <h3>闪念速记 v1.3.1</h3>
           <p>一个简单而实用的桌面笔记应用，帮助您随时记录想法和管理待办事项。</p>
           <p>技术栈：Electron+React+Ant Design</p>
           <p>主要功能：</p>
