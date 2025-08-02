@@ -1,4 +1,4 @@
-const { app, BrowserWindow, ipcMain, Tray, Menu, screen } = require('electron');
+const { app, BrowserWindow, ipcMain, Tray, Menu, screen, dialog } = require('electron');
 const path = require('path');
 const fs = require('fs');
 const { execFile } = require('child_process');
@@ -7,11 +7,13 @@ const os = require('os');
 // 使用用户数据目录存储设置和数据
 const userDataPath = app.getPath('userData');
 const notesFile = path.join(userDataPath, 'notes.json');
+const todosFile = path.join(userDataPath, 'todos.json');
 const settingsFile = path.join(userDataPath, 'settings.json');
 
 console.log('用户数据目录:', userDataPath);
 console.log('设置文件路径:', settingsFile);
 console.log('笔记文件路径:', notesFile);
+console.log('待办文件路径:', todosFile);
 
 // 读取设置
 function readSettings() {
@@ -46,7 +48,22 @@ function readSettings() {
     backgroundBlur: 0,
     backgroundBrightness: 100,
     inputRadius: 25,
-    blockRadius: 6
+    blockRadius: 6,
+    floatingBallSettings: {
+      // 外观设置
+      size: 50, // 悬浮球大小
+      idleOpacity: 0.7, // 闲置状态透明度
+      activeOpacity: 0.9, // 激活状态透明度
+      brightnessChange: 0.2, // 激活时亮度变化量 (-1 到 1, 负数变暗，正数变亮)
+      flashColor: '#1890ff', // 闪记模式颜色
+      todoColor: '#52c41a', // Todo模式颜色
+      customIcon: '', // 自定义图标路径
+      useCustomIcon: false // 是否使用自定义图标
+    },
+    todoSettings: {
+      autoSort: true, // 自动排序开关
+      sortBy: 'priority' // 排序方式: 'priority'(优先级), 'deadline'(截止日期), 'created'(创建时间)
+    }
   };
   console.log('使用默认设置:', defaultSettings);
   return defaultSettings;
@@ -403,6 +420,29 @@ function setWindowsAutoStart(enable) {
     return settings.floatingBallPosition || null;
   });
 
+  // IPC: 保存悬浮球设置
+  ipcMain.on('save-floating-ball-settings', (event, floatingBallSettings) => {
+    console.log('收到保存悬浮球设置请求:', floatingBallSettings);
+    const settings = readSettings();
+    settings.floatingBallSettings = floatingBallSettings;
+    writeSettings(settings);
+    console.log('保存悬浮球设置完成:', floatingBallSettings);
+    
+    // 通知悬浮球窗口更新设置
+    if (floatingBallWin && !floatingBallWin.isDestroyed()) {
+      floatingBallWin.webContents.send('floating-ball-settings-updated', floatingBallSettings);
+    }
+  });
+
+  // IPC: 保存Todo设置
+  ipcMain.on('save-todo-settings', (event, todoSettings) => {
+    console.log('收到保存Todo设置请求:', todoSettings);
+    const settings = readSettings();
+    settings.todoSettings = todoSettings;
+    writeSettings(settings);
+    console.log('保存Todo设置完成:', todoSettings);
+  });
+
   // IPC: 保存颜色设置
   ipcMain.on('save-custom-colors', (event, colors) => {
     console.log('收到保存颜色设置请求:', colors);
@@ -505,23 +545,256 @@ function setWindowsAutoStart(enable) {
     // 将笔记数据保存到文件
     updateNoteFile({ ...noteData, isOpen: true });
   });
-  function updateNoteFile(noteData) {
+  // 笔记文件操作函数
+  function readNotes() {
     let notes = [];
     if (fs.existsSync(notesFile)) {
       try {
         notes = JSON.parse(fs.readFileSync(notesFile, 'utf-8'));
-      } catch (e) { notes = []; }
+        console.log('成功读取笔记文件，共', notes.length, '条笔记');
+      } catch (e) { 
+        console.error('读取笔记文件失败:', e);
+        notes = []; 
+      }
+    } else {
+      console.log('笔记文件不存在，创建空数组');
     }
+    return notes;
+  }
+
+  function writeNotes(notes) {
+    try {
+      // 确保目录存在
+      const notesDir = path.dirname(notesFile);
+      if (!fs.existsSync(notesDir)) {
+        fs.mkdirSync(notesDir, { recursive: true });
+      }
+      
+      fs.writeFileSync(notesFile, JSON.stringify(notes, null, 2), 'utf-8');
+      console.log('成功保存笔记文件，共', notes.length, '条笔记');
+    } catch (e) {
+      console.error('写入笔记文件失败:', e);
+    }
+  }
+
+  // Todo文件操作函数
+  function readTodos() {
+    let todos = [];
+    if (fs.existsSync(todosFile)) {
+      try {
+        todos = JSON.parse(fs.readFileSync(todosFile, 'utf-8'));
+        console.log('成功读取待办文件，共', todos.length, '条待办');
+      } catch (e) { 
+        console.error('读取待办文件失败:', e);
+        todos = []; 
+      }
+    } else {
+      console.log('待办文件不存在，创建空数组');
+    }
+    return todos;
+  }
+
+  function writeTodos(todos) {
+    try {
+      // 确保目录存在
+      const todosDir = path.dirname(todosFile);
+      if (!fs.existsSync(todosDir)) {
+        fs.mkdirSync(todosDir, { recursive: true });
+      }
+      
+      fs.writeFileSync(todosFile, JSON.stringify(todos, null, 2), 'utf-8');
+      console.log('成功保存待办文件，共', todos.length, '条待办');
+    } catch (e) {
+      console.error('写入待办文件失败:', e);
+    }
+  }
+
+  function updateNoteFile(noteData) {
+    let notes = readNotes();
     const idx = notes.findIndex(n => n.id === noteData.id);
     if (idx > -1) {
       notes[idx] = { ...notes[idx], ...noteData };
     } else {
       notes.push(noteData);
     }
-    fs.writeFileSync(notesFile, JSON.stringify(notes, null, 2), 'utf-8');
+    writeNotes(notes);
   }
 
-  ipcMain.on('update-note', (event, noteData) => {
+  // IPC: 笔记管理功能
+  ipcMain.handle('get-notes', async () => {
+    console.log('收到获取笔记请求');
+    const notes = readNotes();
+    console.log('返回笔记数据:', notes.length, '条');
+    return notes;
+  });
+
+  ipcMain.handle('save-notes', async (event, notes) => {
+    console.log('收到保存笔记请求，共', notes.length, '条笔记');
+    writeNotes(notes);
+    return true;
+  });
+
+  ipcMain.handle('add-note', async (event, noteData) => {
+    console.log('收到添加笔记请求:', noteData);
+    let notes = readNotes();
+    
+    // 确保笔记有唯一ID
+    if (!noteData.id) {
+      noteData.id = Date.now().toString();
+    }
+    
+    // 检查是否已存在相同ID的笔记，避免重复添加
+    const existingIndex = notes.findIndex(n => n.id === noteData.id);
+    if (existingIndex !== -1) {
+      console.log('笔记已存在，更新而不是添加');
+      notes[existingIndex] = { ...notes[existingIndex], ...noteData };
+    } else {
+      notes.unshift(noteData); // 添加到开头
+    }
+    
+    writeNotes(notes);
+    
+    // 通知主窗口刷新
+    if (mainWin && !mainWin.isDestroyed()) {
+      mainWin.webContents.send('refresh-notes');
+    }
+    
+    return noteData;
+  });
+
+  ipcMain.handle('update-note', async (event, noteData) => {
+    console.log('收到更新笔记请求:', noteData);
+    let notes = readNotes();
+    const idx = notes.findIndex(n => n.id === noteData.id);
+    
+    if (idx > -1) {
+      notes[idx] = { ...notes[idx], ...noteData };
+      writeNotes(notes);
+      
+      // 通知主窗口刷新
+      if (mainWin && !mainWin.isDestroyed()) {
+        mainWin.webContents.send('refresh-notes');
+      }
+      
+      return true;
+    }
+    return false;
+  });
+
+  // 添加：获取单个笔记的处理器
+  ipcMain.handle('get-note-by-id', async (event, noteId) => {
+    console.log('收到获取笔记请求:', noteId);
+    try {
+      const notes = readNotes();
+      const note = notes.find(n => n.id.toString() === noteId.toString());
+      console.log('找到笔记:', note ? '是' : '否');
+      return note || null;
+    } catch (error) {
+      console.error('获取笔记失败:', error);
+      return null;
+    }
+  });
+
+  ipcMain.handle('delete-note', async (event, noteId) => {
+    console.log('收到删除笔记请求:', noteId);
+    let notes = readNotes();
+    const originalLength = notes.length;
+    notes = notes.filter(n => n.id !== noteId);
+    
+    if (notes.length < originalLength) {
+      writeNotes(notes);
+      
+      // 通知主窗口刷新
+      if (mainWin && !mainWin.isDestroyed()) {
+        mainWin.webContents.send('refresh-notes');
+      }
+      
+      return true;
+    }
+    return false;
+  });
+
+  // IPC: Todo管理功能
+  ipcMain.handle('get-todos', async () => {
+    console.log('收到获取待办请求');
+    const todos = readTodos();
+    console.log('返回待办数据:', todos.length, '条');
+    return todos;
+  });
+
+  ipcMain.handle('save-todos', async (event, todos) => {
+    console.log('收到保存待办请求，共', todos.length, '条待办');
+    writeTodos(todos);
+    return true;
+  });
+
+  ipcMain.handle('add-todo', async (event, todoData) => {
+    console.log('收到添加待办请求:', todoData);
+    let todos = readTodos();
+    
+    // 确保待办有唯一ID
+    if (!todoData.id) {
+      todoData.id = Date.now();
+    }
+    
+    // 检查是否已存在相同ID的待办，避免重复添加
+    const existingIndex = todos.findIndex(t => t.id === todoData.id);
+    if (existingIndex !== -1) {
+      console.log('待办已存在，更新而不是添加');
+      todos[existingIndex] = { ...todos[existingIndex], ...todoData };
+    } else {
+      todos.unshift(todoData); // 添加到开头
+    }
+    
+    writeTodos(todos);
+    
+    // 通知主窗口刷新
+    if (mainWin && !mainWin.isDestroyed()) {
+      mainWin.webContents.send('refresh-todos');
+    }
+    
+    return todoData;
+  });
+
+  ipcMain.handle('update-todo', async (event, todoData) => {
+    console.log('收到更新待办请求:', todoData);
+    let todos = readTodos();
+    const idx = todos.findIndex(t => t.id === todoData.id);
+    
+    if (idx > -1) {
+      todos[idx] = { ...todos[idx], ...todoData };
+      writeTodos(todos);
+      
+      // 通知主窗口刷新
+      if (mainWin && !mainWin.isDestroyed()) {
+        mainWin.webContents.send('refresh-todos');
+      }
+      
+      return true;
+    }
+    return false;
+  });
+
+  ipcMain.handle('delete-todo', async (event, todoId) => {
+    console.log('收到删除待办请求:', todoId);
+    let todos = readTodos();
+    const originalLength = todos.length;
+    todos = todos.filter(t => t.id !== todoId);
+    
+    if (todos.length < originalLength) {
+      writeTodos(todos);
+      
+      // 通知主窗口刷新
+      if (mainWin && !mainWin.isDestroyed()) {
+        mainWin.webContents.send('refresh-todos');
+      }
+      
+      return true;
+    }
+    return false;
+  });
+
+  ipcMain.on('update-note-legacy', (event, noteData) => {
     updateNoteFile(noteData);
     // 通知主窗口刷新
     if (mainWin) {
@@ -579,16 +852,43 @@ function setWindowsAutoStart(enable) {
   });
 
   // 添加待办
-  ipcMain.on('add-todo', (event, todoData) => {
+  ipcMain.on('add-todo', async (event, todoData) => {
     // 判断事件来源是否为悬浮球
     const isFromFloatingBall = floatingBallWin && 
       event.sender.id === floatingBallWin.webContents.id;
     
     // 只有来自悬浮球的事件才需要直接发送到主窗口
     // 避免主窗口自己的添加操作被重复处理
-    if (isFromFloatingBall && mainWin && !mainWin.isDestroyed()) {
-      console.log('从悬浮球发送待办事项到主窗口:', todoData);
-      mainWin.webContents.send('add-todo', todoData);
+    if (isFromFloatingBall) {
+      console.log('从悬浮球添加待办事项:', todoData);
+      
+      // 使用新的IPC方法添加到文件
+      try {
+        let todos = readTodos();
+        
+        // 确保待办有唯一ID
+        if (!todoData.id) {
+          todoData.id = Date.now();
+        }
+        
+        // 检查是否已存在相同ID的待办，避免重复添加
+        const existingIndex = todos.findIndex(t => t.id === todoData.id);
+        if (existingIndex !== -1) {
+          console.log('待办已存在，更新而不是添加');
+          todos[existingIndex] = { ...todos[existingIndex], ...todoData };
+        } else {
+          todos.unshift(todoData); // 添加到开头
+        }
+        
+        writeTodos(todos);
+        
+        // 通知主窗口刷新
+        if (mainWin && !mainWin.isDestroyed()) {
+          mainWin.webContents.send('refresh-todos');
+        }
+      } catch (error) {
+        console.error('添加待办失败:', error);
+      }
     } else if (!mainWin) {
       console.log('主窗口不存在，无法发送待办事项');
     }
@@ -601,6 +901,174 @@ function setWindowsAutoStart(enable) {
       // 当需要交互时 (ignore=false)，窗口必须是可聚焦的才能接收键盘输入
       floatingBallWin.setFocusable(!ignore);
       console.log(`悬浮球点击穿透状态: ${ignore ? '启用' : '禁用'}, 可聚焦: ${!ignore}`);
+    }
+  });
+
+  // 导出数据功能
+  ipcMain.handle('export-data', async (event) => {
+    try {
+      const result = await dialog.showSaveDialog(mainWin, {
+        title: '导出笔记和待办数据',
+        defaultPath: `FlashNote_导出_${new Date().toISOString().slice(0, 10)}.json`,
+        filters: [
+          { name: 'JSON 文件', extensions: ['json'] },
+          { name: '所有文件', extensions: ['*'] }
+        ]
+      });
+
+      if (result.canceled) {
+        return { success: false, message: '用户取消导出' };
+      }
+
+      // 读取笔记和待办数据
+      const notes = readNotes();
+      const todos = readTodos();
+      const settings = readSettings();
+
+      // 构建导出数据
+      const exportData = {
+        version: '1.0',
+        exportTime: new Date().toISOString(),
+        appVersion: '1.3.2-release',
+        data: {
+          notes: notes,
+          todos: todos,
+          settings: {
+            // 只导出安全的设置项，不包含系统相关的设置
+            customColors: settings.customColors,
+            backgroundImage: settings.backgroundImage,
+            backgroundBlur: settings.backgroundBlur,
+            backgroundBrightness: settings.backgroundBrightness,
+            inputRadius: settings.inputRadius,
+            blockRadius: settings.blockRadius,
+            floatingBallSettings: settings.floatingBallSettings
+          }
+        }
+      };
+
+      // 写入文件
+      fs.writeFileSync(result.filePath, JSON.stringify(exportData, null, 2), 'utf-8');
+      
+      console.log('数据导出成功:', result.filePath);
+      return { 
+        success: true, 
+        message: `数据已成功导出到: ${result.filePath}`,
+        path: result.filePath,
+        count: {
+          notes: notes.length,
+          todos: todos.length
+        }
+      };
+
+    } catch (error) {
+      console.error('导出数据失败:', error);
+      return { 
+        success: false, 
+        message: `导出失败: ${error.message}` 
+      };
+    }
+  });
+
+  // 导入数据功能
+  ipcMain.handle('import-data', async (event) => {
+    try {
+      const result = await dialog.showOpenDialog(mainWin, {
+        title: '选择要导入的数据文件',
+        filters: [
+          { name: 'JSON 文件', extensions: ['json'] },
+          { name: '所有文件', extensions: ['*'] }
+        ],
+        properties: ['openFile']
+      });
+
+      if (result.canceled || result.filePaths.length === 0) {
+        return { success: false, message: '用户取消导入' };
+      }
+
+      const filePath = result.filePaths[0];
+      
+      // 读取文件内容
+      const fileContent = fs.readFileSync(filePath, 'utf-8');
+      const importData = JSON.parse(fileContent);
+
+      // 验证数据格式
+      if (!importData.data) {
+        return { success: false, message: '无效的数据文件格式' };
+      }
+
+      let importCount = { notes: 0, todos: 0 };
+
+      // 导入笔记数据
+      if (importData.data.notes && Array.isArray(importData.data.notes)) {
+        const currentNotes = readNotes();
+        const importNotes = importData.data.notes;
+        
+        // 合并数据，避免重复（基于ID）
+        const existingIds = new Set(currentNotes.map(note => note.id));
+        const newNotes = importNotes.filter(note => !existingIds.has(note.id));
+        
+        if (newNotes.length > 0) {
+          const mergedNotes = [...currentNotes, ...newNotes];
+          writeNotes(mergedNotes);
+          importCount.notes = newNotes.length;
+        }
+      }
+
+      // 导入待办数据
+      if (importData.data.todos && Array.isArray(importData.data.todos)) {
+        const currentTodos = readTodos();
+        const importTodos = importData.data.todos;
+        
+        // 合并数据，避免重复（基于ID）
+        const existingIds = new Set(currentTodos.map(todo => todo.id));
+        const newTodos = importTodos.filter(todo => !existingIds.has(todo.id));
+        
+        if (newTodos.length > 0) {
+          const mergedTodos = [...currentTodos, ...newTodos];
+          writeTodos(mergedTodos);
+          importCount.todos = newTodos.length;
+        }
+      }
+
+      // 导入设置（可选）
+      if (importData.data.settings) {
+        const currentSettings = readSettings();
+        const importSettings = importData.data.settings;
+        
+        // 只导入安全的设置项
+        const safeSettings = {
+          ...currentSettings,
+          customColors: importSettings.customColors || currentSettings.customColors,
+          backgroundImage: importSettings.backgroundImage || currentSettings.backgroundImage,
+          backgroundBlur: importSettings.backgroundBlur || currentSettings.backgroundBlur,
+          backgroundBrightness: importSettings.backgroundBrightness || currentSettings.backgroundBrightness,
+          inputRadius: importSettings.inputRadius || currentSettings.inputRadius,
+          blockRadius: importSettings.blockRadius || currentSettings.blockRadius,
+          floatingBallSettings: importSettings.floatingBallSettings || currentSettings.floatingBallSettings
+        };
+        
+        writeSettings(safeSettings);
+      }
+
+      // 通知主窗口刷新数据
+      if (mainWin && !mainWin.isDestroyed()) {
+        mainWin.webContents.send('refresh-notes');
+        mainWin.webContents.send('refresh-todos');
+      }
+
+      console.log('数据导入成功:', importCount);
+      return { 
+        success: true, 
+        message: `数据导入成功！新增 ${importCount.notes} 条笔记，${importCount.todos} 条待办`,
+        count: importCount
+      };
+
+    } catch (error) {
+      console.error('导入数据失败:', error);
+      return { 
+        success: false, 
+        message: `导入失败: ${error.message}` 
+      };
     }
   });
 }
@@ -1158,8 +1626,13 @@ function createFloatingBall() {
       clearTimeout(showTimeout);
       showTimeout = null;
     }
-    
     floatingBallWin = null;
+
+    // 通知主窗口刷新悬浮球状态（用于设置界面按钮同步）
+    if (mainWin && !mainWin.isDestroyed()) {
+      mainWin.webContents.send('floating-ball-status-changed', { visible: false });
+    }
+
     // 更新托盘菜单，反映悬浮球状态变化
     if (tray && !tray.isDestroyed()) {
       updateTrayMenu();

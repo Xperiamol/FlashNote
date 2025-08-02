@@ -1,14 +1,16 @@
 import React, { useState, useEffect } from 'react';
-import { Switch, Row, Col, message, Card, ColorPicker, Button, Upload, Slider } from 'antd';
-import { UploadOutlined, DeleteOutlined } from '@ant-design/icons';
+import { Switch, Row, Col, message, Card, ColorPicker, Button, Upload, Slider, Select } from 'antd';
+import { UploadOutlined, DeleteOutlined, ExportOutlined, ImportOutlined, DownloadOutlined } from '@ant-design/icons';
 
 const { ipcRenderer } = window.require ? window.require('electron') : { ipcRenderer: null };
 
-function Settings({ customColors, setCustomColors, backgroundImage, setBackgroundImage, backgroundBlur, setBackgroundBlur, backgroundBrightness, setBackgroundBrightness }) {
+function Settings({ customColors, setCustomColors, backgroundImage, setBackgroundImage, backgroundBlur, setBackgroundBlur, backgroundBrightness, setBackgroundBrightness, floatingBallSettings, setFloatingBallSettings, todoSettings, setTodoSettings }) {
   const [openAtLogin, setOpenAtLogin] = useState(false);
   const [restoreWindows, setRestoreWindows] = useState(false);
   const [alwaysOnTop, setAlwaysOnTop] = useState(true);
   const [loading, setLoading] = useState(true);
+  const [exporting, setExporting] = useState(false);
+  const [importing, setImporting] = useState(false);
 
   // 颜色处理函数
   const handleColorChange = (colorKey, color) => {
@@ -49,6 +51,80 @@ function Settings({ customColors, setCustomColors, backgroundImage, setBackgroun
     };
     reader.readAsDataURL(file);
     return false; // 阻止自动上传
+  };
+
+  // 悬浮球设置处理函数
+  const handleFloatingBallSettingChange = (key, value) => {
+    console.log('悬浮球设置改变:', key, '新值:', value);
+    setFloatingBallSettings(prev => {
+      const newSettings = {
+        ...prev,
+        [key]: value
+      };
+      console.log('更新后的悬浮球设置:', newSettings);
+      return newSettings;
+    });
+  };
+
+  // 处理悬浮球自定义图标上传
+  const handleFloatingBallIconUpload = (file) => {
+    const reader = new FileReader();
+    reader.onload = (e) => {
+      const imageDataUrl = e.target.result;
+      handleFloatingBallSettingChange('customIcon', imageDataUrl);
+      handleFloatingBallSettingChange('useCustomIcon', true);
+      message.success('悬浮球图标已设置');
+    };
+    reader.readAsDataURL(file);
+    return false; // 阻止自动上传
+  };
+
+  // 移除悬浮球自定义图标
+  const removeFloatingBallIcon = () => {
+    handleFloatingBallSettingChange('customIcon', '');
+    handleFloatingBallSettingChange('useCustomIcon', false);
+    message.success('悬浮球图标已重置');
+  };
+
+  // 重置悬浮球设置为默认值
+  const resetFloatingBallSettings = () => {
+    const defaultFloatingBallSettings = {
+      size: 50,
+      idleOpacity: 0.7,
+      activeOpacity: 0.9,
+      brightnessChange: 0.2,
+      flashColor: '#1890ff',
+      todoColor: '#52c41a',
+      customIcon: '',
+      useCustomIcon: false
+    };
+    console.log('重置悬浮球设置为默认值:', defaultFloatingBallSettings);
+    setFloatingBallSettings(defaultFloatingBallSettings);
+    message.success('悬浮球设置已重置为默认值');
+  };
+
+  // Todo设置处理函数
+  const handleTodoSettingChange = (key, value) => {
+    console.log('Todo设置改变:', key, '新值:', value);
+    setTodoSettings(prev => {
+      const newSettings = {
+        ...prev,
+        [key]: value
+      };
+      console.log('更新后的Todo设置:', newSettings);
+      return newSettings;
+    });
+  };
+
+  // 重置Todo设置为默认值
+  const resetTodoSettings = () => {
+    const defaultTodoSettings = {
+      autoSort: true,
+      sortBy: 'priority'
+    };
+    console.log('重置Todo设置为默认值:', defaultTodoSettings);
+    setTodoSettings(defaultTodoSettings);
+    message.success('Todo设置已重置为默认值');
   };
 
   // 移除背景图片
@@ -157,6 +233,60 @@ function Settings({ customColors, setCustomColors, backgroundImage, setBackgroun
         // 恢复状态
         setAlwaysOnTop(!checked);
       }
+    }
+  };
+
+  // 导出数据
+  const handleExportData = async () => {
+    if (!ipcRenderer) {
+      message.error('无法访问系统功能');
+      return;
+    }
+
+    setExporting(true);
+    try {
+      const result = await ipcRenderer.invoke('export-data');
+      
+      if (result.success) {
+        message.success({
+          content: `${result.message}\n导出了 ${result.count.notes} 条笔记和 ${result.count.todos} 条待办`,
+          duration: 4
+        });
+      } else {
+        message.error(result.message);
+      }
+    } catch (error) {
+      console.error('导出数据时发生错误:', error);
+      message.error('导出数据失败，请重试');
+    } finally {
+      setExporting(false);
+    }
+  };
+
+  // 导入数据
+  const handleImportData = async () => {
+    if (!ipcRenderer) {
+      message.error('无法访问系统功能');
+      return;
+    }
+
+    setImporting(true);
+    try {
+      const result = await ipcRenderer.invoke('import-data');
+      
+      if (result.success) {
+        message.success({
+          content: result.message,
+          duration: 4
+        });
+      } else {
+        message.error(result.message);
+      }
+    } catch (error) {
+      console.error('导入数据时发生错误:', error);
+      message.error('导入数据失败，请重试');
+    } finally {
+      setImporting(false);
     }
   };
 
@@ -331,7 +461,7 @@ function Settings({ customColors, setCustomColors, backgroundImage, setBackgroun
       </Card>
 
       {/* 系统设置 */}
-      <Card title="系统设置" size="small">
+      <Card title="系统设置" style={{ marginBottom: '16px' }} size="small">
         <Row align="middle" style={{ marginBottom: '16px' }}>
           <Col span={18}>
             <p style={{ margin: 0 }}>开机自启</p>
@@ -354,6 +484,274 @@ function Settings({ customColors, setCustomColors, backgroundImage, setBackgroun
           </Col>
           <Col span={6} style={{ textAlign: 'right' }}>
             <Switch checked={alwaysOnTop} onChange={handleAlwaysOnTopChange} />
+          </Col>
+        </Row>
+      </Card>
+
+      {/* 悬浮球设置 */}
+      <Card 
+        title={
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+            <span>悬浮球设置</span>
+            <a onClick={resetFloatingBallSettings} style={{ fontSize: '12px' }}>
+              重置为默认
+            </a>
+          </div>
+        } 
+        style={{ marginBottom: '16px' }} 
+        size="small"
+      >
+        <Row align="middle" style={{ marginBottom: '12px' }}>
+          <Col span={16}>
+            <span style={{ fontSize: '14px' }}>悬浮球大小</span>
+            <div style={{ fontSize: '12px', color: '#666', marginTop: '2px' }}>
+              当前大小: {floatingBallSettings.size}px
+            </div>
+          </Col>
+          <Col span={8} style={{ textAlign: 'right' }}>
+            <div style={{ width: '100px' }}>
+              <Slider
+                min={30}
+                max={80}
+                value={floatingBallSettings.size}
+                onChange={(value) => handleFloatingBallSettingChange('size', value)}
+                size="small"
+              />
+            </div>
+          </Col>
+        </Row>
+
+        <Row align="middle" style={{ marginBottom: '12px' }}>
+          <Col span={16}>
+            <span style={{ fontSize: '14px' }}>闲置状态透明度</span>
+            <div style={{ fontSize: '12px', color: '#666', marginTop: '2px' }}>
+              鼠标离开悬浮球2秒后的透明度: {Math.round(floatingBallSettings.idleOpacity * 100)}%
+            </div>
+          </Col>
+          <Col span={8} style={{ textAlign: 'right' }}>
+            <div style={{ width: '100px' }}>
+              <Slider
+                min={0.1}
+                max={1}
+                step={0.1}
+                value={floatingBallSettings.idleOpacity}
+                onChange={(value) => handleFloatingBallSettingChange('idleOpacity', value)}
+                size="small"
+              />
+            </div>
+          </Col>
+        </Row>
+
+        <Row align="middle" style={{ marginBottom: '12px' }}>
+          <Col span={16}>
+            <span style={{ fontSize: '14px' }}>激活状态透明度</span>
+            <div style={{ fontSize: '12px', color: '#666', marginTop: '2px' }}>
+              鼠标悬停在悬浮球上时的透明度: {Math.round(floatingBallSettings.activeOpacity * 100)}%
+            </div>
+          </Col>
+          <Col span={8} style={{ textAlign: 'right' }}>
+            <div style={{ width: '100px' }}>
+              <Slider
+                min={0.1}
+                max={1}
+                step={0.1}
+                value={floatingBallSettings.activeOpacity}
+                onChange={(value) => handleFloatingBallSettingChange('activeOpacity', value)}
+                size="small"
+              />
+            </div>
+          </Col>
+        </Row>
+
+        <Row align="middle" style={{ marginBottom: '12px' }}>
+          <Col span={16}>
+            <span style={{ fontSize: '14px' }}>激活时亮度变化</span>
+            <div style={{ fontSize: '12px', color: '#666', marginTop: '2px' }}>
+              鼠标悬停时的亮度调整: {floatingBallSettings.brightnessChange > 0 ? '+' : ''}{Math.round(floatingBallSettings.brightnessChange * 100)}%
+            </div>
+          </Col>
+          <Col span={8} style={{ textAlign: 'right' }}>
+            <div style={{ width: '100px' }}>
+              <Slider
+                min={-0.5}
+                max={0.5}
+                step={0.1}
+                value={floatingBallSettings.brightnessChange}
+                onChange={(value) => handleFloatingBallSettingChange('brightnessChange', value)}
+                size="small"
+              />
+            </div>
+          </Col>
+        </Row>
+
+        <Row align="middle" style={{ marginBottom: '12px' }}>
+          <Col span={16}>
+            <span style={{ fontSize: '14px' }}>闪记模式颜色</span>
+            <div style={{ fontSize: '12px', color: '#666', marginTop: '2px' }}>
+              闪记功能时悬浮球的颜色
+            </div>
+          </Col>
+          <Col span={8} style={{ textAlign: 'right' }}>
+            <ColorPicker
+              value={floatingBallSettings.flashColor}
+              onChange={(color) => handleFloatingBallSettingChange('flashColor', color.toHexString())}
+              size="small"
+              showText
+            />
+          </Col>
+        </Row>
+
+        <Row align="middle" style={{ marginBottom: '12px' }}>
+          <Col span={16}>
+            <span style={{ fontSize: '14px' }}>Todo模式颜色</span>
+            <div style={{ fontSize: '12px', color: '#666', marginTop: '2px' }}>
+              Todo功能时悬浮球的颜色
+            </div>
+          </Col>
+          <Col span={8} style={{ textAlign: 'right' }}>
+            <ColorPicker
+              value={floatingBallSettings.todoColor}
+              onChange={(color) => handleFloatingBallSettingChange('todoColor', color.toHexString())}
+              size="small"
+              showText
+            />
+          </Col>
+        </Row>
+
+        <Row align="middle" style={{ marginBottom: '16px' }}>
+          <Col span={16}>
+            <span style={{ fontSize: '14px' }}>自定义图标</span>
+            <div style={{ fontSize: '12px', color: '#666', marginTop: '2px' }}>
+              {floatingBallSettings.useCustomIcon ? '已设置自定义图标' : '使用默认图标'}
+            </div>
+          </Col>
+          <Col span={8} style={{ textAlign: 'right' }}>
+            <div style={{ display: 'flex', gap: '4px', flexDirection: 'column', alignItems: 'flex-end' }}>
+              <Upload
+                accept="image/*"
+                beforeUpload={beforeUpload}
+                customRequest={({ file }) => handleFloatingBallIconUpload(file)}
+                showUploadList={false}
+              >
+                <Button size="small" icon={<UploadOutlined />}>
+                  {floatingBallSettings.useCustomIcon ? '更换' : '上传'}
+                </Button>
+              </Upload>
+              {floatingBallSettings.useCustomIcon && (
+                <Button 
+                  size="small" 
+                  icon={<DeleteOutlined />}
+                  onClick={removeFloatingBallIcon}
+                  danger
+                >
+                  重置
+                </Button>
+              )}
+              {floatingBallSettings.customIcon && (
+                <div style={{ width: '32px', height: '32px', border: '1px solid #d9d9d9', borderRadius: '4px', overflow: 'hidden', marginTop: '4px' }}>
+                  <img 
+                    src={floatingBallSettings.customIcon} 
+                    alt="预览" 
+                    style={{ width: '100%', height: '100%', objectFit: 'cover' }}
+                  />
+                </div>
+              )}
+            </div>
+          </Col>
+        </Row>
+      </Card>
+
+      {/* Todo设置 */}
+      <Card 
+        title={
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+            <span>Todo设置</span>
+            <a onClick={resetTodoSettings} style={{ fontSize: '12px' }}>
+              重置为默认
+            </a>
+          </div>
+        } 
+        style={{ marginBottom: '16px' }} 
+        size="small"
+      >
+        <Row align="middle" style={{ marginBottom: '12px' }}>
+          <Col span={18}>
+            <span style={{ fontSize: '14px' }}>自动排序</span>
+            <div style={{ fontSize: '12px', color: '#666', marginTop: '2px' }}>
+              {todoSettings.autoSort ? '已启用自动排序' : '已禁用自动排序'}
+            </div>
+          </Col>
+          <Col span={6} style={{ textAlign: 'right' }}>
+            <Switch 
+              checked={todoSettings.autoSort} 
+              onChange={(value) => handleTodoSettingChange('autoSort', value)} 
+            />
+          </Col>
+        </Row>
+
+        {todoSettings.autoSort && (
+          <Row align="middle" style={{ marginBottom: '12px' }}>
+            <Col span={12}>
+              <span style={{ fontSize: '14px' }}>排序方式</span>
+              <div style={{ fontSize: '12px', color: '#666', marginTop: '2px' }}>
+                选择Todo项目的排序规则
+              </div>
+            </Col>
+            <Col span={12} style={{ textAlign: 'right' }}>
+              <Select
+                value={todoSettings.sortBy}
+                onChange={(value) => handleTodoSettingChange('sortBy', value)}
+                style={{ width: '140px' }}
+                size="small"
+              >
+                <Select.Option value="priority">优先级排序</Select.Option>
+                <Select.Option value="deadline">截止日期</Select.Option>
+                <Select.Option value="created">创建时间</Select.Option>
+              </Select>
+            </Col>
+          </Row>
+        )}
+      </Card>
+
+      {/* 数据管理 */}
+      <Card title="数据管理" size="small">
+        <Row style={{ marginBottom: '16px' }}>
+          <Col span={24}>
+            <p style={{ margin: '0 0 8px 0', fontSize: '14px', color: '#666' }}>
+              导出你的笔记和待办数据，或从备份文件中恢复数据
+            </p>
+          </Col>
+        </Row>
+        <Row gutter={12}>
+          <Col span={12}>
+            <Button
+              type="primary"
+              icon={<ExportOutlined />}
+              onClick={handleExportData}
+              loading={exporting}
+              block
+              size="small"
+            >
+              {exporting ? '导出中...' : '导出数据'}
+            </Button>
+          </Col>
+          <Col span={12}>
+            <Button
+              icon={<ImportOutlined />}
+              onClick={handleImportData}
+              loading={importing}
+              block
+              size="small"
+            >
+              {importing ? '导入中...' : '导入数据'}
+            </Button>
+          </Col>
+        </Row>
+        <Row style={{ marginTop: '8px' }}>
+          <Col span={24}>
+            <p style={{ margin: 0, fontSize: '12px', color: '#999' }}>
+              💡 导出的数据包含所有笔记、待办和个性化设置，可用于备份或迁移到其他设备
+            </p>
           </Col>
         </Row>
       </Card>

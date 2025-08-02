@@ -2,7 +2,6 @@ import React, { useState, useEffect, useRef } from 'react';
 import { Input, Button, List, Row, Col, message, Popover } from 'antd';
 import { DeleteOutlined, DownOutlined, UpOutlined, EditOutlined, BgColorsOutlined, PlusOutlined, PushpinOutlined } from '@ant-design/icons';
 
-const STORAGE_KEY = 'flash_notes';
 const COLLAPSED_MAX_HEIGHT = 72; // 2行内容高度+padding
 
 const COLOR_PALETTE = [
@@ -140,7 +139,7 @@ function NoteItem({ item, expanded, onToggleExpand, onDelete, onEdit, editingId,
       open={colorPopoverOpen}
       onOpenChange={setColorPopoverOpen}
     >
-      <Button type="text" icon={<BgColorsOutlined />} size="small" className="note-action-btn" />
+      <Button type="text" icon={<BgColorsOutlined />} size="small" className="note-action-btn" title="更改背景色" />
     </Popover>
   );
 
@@ -197,6 +196,7 @@ function NoteItem({ item, expanded, onToggleExpand, onDelete, onEdit, editingId,
             key="edit"
             size="small"
             style={{ display: expanded || isEditing ? undefined : 'none' }}
+            title={isEditing ? "保存编辑" : "编辑"}
           />
           {colorBtn}
           <Button
@@ -218,6 +218,7 @@ function NoteItem({ item, expanded, onToggleExpand, onDelete, onEdit, editingId,
             size="small"
             danger={pendingDeleteId === item.id}
             ref={deleteBtnRef}
+            title={pendingDeleteId === item.id ? "确认删除" : "删除"}
           />
           <Button
             className="note-action-btn"
@@ -226,6 +227,7 @@ function NoteItem({ item, expanded, onToggleExpand, onDelete, onEdit, editingId,
             onClick={handleExpandClick}
             key="expand"
             size="small"
+            title={expanded ? "收起" : "展开"}
           />
         </div>
       </div>
@@ -242,86 +244,145 @@ function FlashNote() {
   const deleteBtnRef = useRef(null);
   const textareaRef = useRef(null);
 
-  // 跟踪最近添加的笔记ID，用于防止重复添加
-  const recentlyAddedIds = useRef(new Set());
-  
-  // 加载笔记数据的函数
-  const loadNotes = () => {
-    console.log("加载所有笔记");
-    const saved = localStorage.getItem(STORAGE_KEY);
-    if (saved) {
-      const savedNotes = JSON.parse(saved);
-      // 过滤掉最近通过悬浮球添加的笔记
-      setNotes(savedNotes);
-      
-      // 清空最近添加的笔记ID集合（因为它们已经被加载了）
-      recentlyAddedIds.current.clear();
+  // 获取IPC渲染器
+  const getIpcRenderer = () => {
+    try {
+      return window.require && window.require('electron').ipcRenderer;
+    } catch (e) {
+      console.error('无法获取IPC渲染器:', e);
+      return null;
     }
+  };
+
+  // 从文件系统加载笔记数据
+  const loadNotes = async () => {
+    console.log("开始加载笔记数据");
+    const ipcRenderer = getIpcRenderer();
+    if (ipcRenderer) {
+      try {
+        const savedNotes = await ipcRenderer.invoke('get-notes');
+        console.log('从文件系统加载笔记:', savedNotes.length, '条');
+        setNotes(savedNotes || []);
+      } catch (error) {
+        console.error('加载笔记失败:', error);
+        message.error('加载笔记失败');
+      }
+    } else {
+      console.warn('IPC不可用，无法加载笔记');
+    }
+  };
+
+  // 保存所有笔记到文件系统
+  const saveNotes = async (notesToSave) => {
+    const ipcRenderer = getIpcRenderer();
+    if (ipcRenderer) {
+      try {
+        await ipcRenderer.invoke('save-notes', notesToSave);
+        console.log('笔记已保存到文件系统');
+      } catch (error) {
+        console.error('保存笔记失败:', error);
+        message.error('保存笔记失败');
+      }
+    }
+  };
+
+  // 添加新笔记
+  const addNoteToFile = async (noteData) => {
+    const ipcRenderer = getIpcRenderer();
+    if (ipcRenderer) {
+      try {
+        const savedNote = await ipcRenderer.invoke('add-note', noteData);
+        console.log('笔记已添加到文件系统:', savedNote);
+        return savedNote;
+      } catch (error) {
+        console.error('添加笔记失败:', error);
+        message.error('添加笔记失败');
+        return null;
+      }
+    }
+    return null;
+  };
+
+  // 更新笔记
+  const updateNoteInFile = async (noteData) => {
+    const ipcRenderer = getIpcRenderer();
+    if (ipcRenderer) {
+      try {
+        const success = await ipcRenderer.invoke('update-note', noteData);
+        if (success) {
+          console.log('笔记已更新到文件系统:', noteData);
+        }
+        return success;
+      } catch (error) {
+        console.error('更新笔记失败:', error);
+        message.error('更新笔记失败');
+        return false;
+      }
+    }
+    return false;
+  };
+
+  // 删除笔记
+  const deleteNoteFromFile = async (noteId) => {
+    const ipcRenderer = getIpcRenderer();
+    if (ipcRenderer) {
+      try {
+        const success = await ipcRenderer.invoke('delete-note', noteId);
+        if (success) {
+          console.log('笔记已从文件系统删除:', noteId);
+        }
+        return success;
+      } catch (error) {
+        console.error('删除笔记失败:', error);
+        message.error('删除笔记失败');
+        return false;
+      }
+    }
+    return false;
   };
 
   useEffect(() => {
     // 初始加载笔记
     loadNotes();
     
-    // 监听来自主进程的刷新事件
-    let ipcRenderer;
-    try {
-      ipcRenderer = window.require && window.require('electron').ipcRenderer;
-      if (ipcRenderer) {
-        // 监听刷新笔记事件
-        ipcRenderer.on('refresh-notes', loadNotes);
+    const ipcRenderer = getIpcRenderer();
+    if (ipcRenderer) {
+      // 监听来自主进程的刷新事件
+      const handleRefreshNotes = () => {
+        console.log('收到刷新笔记事件');
+        loadNotes();
+      };
+      
+      // 监听添加笔记事件（来自悬浮球）
+      const handleAddNote = async (event, noteData) => {
+        console.log('收到悬浮球添加笔记事件:', noteData);
         
-        // 监听添加笔记事件（来自悬浮球）
-        const handleAddNote = (event, noteData) => {
-          console.log('收到添加笔记事件:', noteData);
-          
-          // 记录这个笔记ID，避免通过refresh-notes重复添加
-          if (noteData && noteData.id) {
-            recentlyAddedIds.current.add(noteData.id.toString());
-            
-            // 5秒后从集合中移除，避免集合无限增长
-            setTimeout(() => {
-              recentlyAddedIds.current.delete(noteData.id.toString());
-            }, 5000);
+        // 直接更新本地状态，因为笔记已经通过IPC添加到文件了
+        setNotes(prevNotes => {
+          // 检查是否已存在相同ID的笔记
+          if (prevNotes.some(note => note.id && note.id.toString() === noteData.id.toString())) {
+            console.log('笔记已存在，不重复添加');
+            return prevNotes;
           }
           
-          setNotes(prevNotes => {
-            // 检查是否已存在相同ID的笔记
-            if (prevNotes.some(note => note.id && note.id.toString() === noteData.id.toString())) {
-              console.log('笔记已存在，不重复添加');
-              return prevNotes;
-            }
-            
-            const newNotes = [noteData, ...prevNotes];
-            // 同步保存到localStorage
-            localStorage.setItem(STORAGE_KEY, JSON.stringify(newNotes));
-            return newNotes;
-          });
-        };
-        
-        ipcRenderer.on('add-note', handleAddNote);
-      }
-    } catch (e) {
-      console.error('Error setting up IPC listener:', e);
-    }
-    
-    // 组件卸载时移除事件监听
-    return () => {
-      if (ipcRenderer) {
+          return [noteData, ...prevNotes];
+        });
+      };
+      
+      ipcRenderer.on('refresh-notes', handleRefreshNotes);
+      ipcRenderer.on('add-note', handleAddNote);
+      
+      // 组件卸载时移除事件监听
+      return () => {
         try {
-          ipcRenderer.removeListener('refresh-notes', loadNotes);
-          // 使用removeAllListeners来确保所有的add-note处理函数都被清理
-          ipcRenderer.removeAllListeners('add-note');
+          ipcRenderer.removeListener('refresh-notes', handleRefreshNotes);
+          ipcRenderer.removeListener('add-note', handleAddNote);
         } catch (e) {
-          console.error('Error removing IPC listener:', e);
+          console.error('移除IPC监听器失败:', e);
         }
-      }
-    };
+      };
+    }
   }, []);
-
-  useEffect(() => {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(notes));
-  }, [notes]);
 
   useEffect(() => {
     if (pendingDeleteId == null) return;
@@ -338,19 +399,34 @@ function FlashNote() {
     };
   }, [pendingDeleteId]);
 
-  const addNote = () => {
+  const addNote = async () => {
     if (!input.trim()) return message.warning('内容不能为空');
-    setNotes([{ text: input, id: Date.now() }, ...notes]);
-    setInput('');
-    if (textareaRef.current) textareaRef.current.focus();
+    
+    const newNote = { 
+      text: input.trim(), 
+      id: Date.now().toString(),
+      color: '',
+      alwaysOnTop: false,
+      createdAt: new Date().toISOString()
+    };
+    
+    const savedNote = await addNoteToFile(newNote);
+    if (savedNote) {
+      setNotes(prevNotes => [savedNote, ...prevNotes]);
+      setInput('');
+      if (textareaRef.current) textareaRef.current.focus();
+    }
   };
 
-  const handleDeleteClick = (id) => {
+  const handleDeleteClick = async (id) => {
     if (pendingDeleteId === id) {
-      setNotes(notes.filter(n => n.id !== id));
-      setExpandedIds(expandedIds.filter(eid => eid !== id));
-      setEditingId(editingId === id ? null : editingId);
-      setPendingDeleteId(null);
+      const success = await deleteNoteFromFile(id);
+      if (success) {
+        setNotes(notes.filter(n => n.id !== id));
+        setExpandedIds(expandedIds.filter(eid => eid !== id));
+        setEditingId(editingId === id ? null : editingId);
+        setPendingDeleteId(null);
+      }
     } else {
       setPendingDeleteId(id);
     }
@@ -363,12 +439,26 @@ function FlashNote() {
     );
   };
 
-  const saveEdit = (id, newText) => {
-    setNotes(notes.map(n => n.id === id ? { ...n, text: newText } : n));
+  const saveEdit = async (id, newText) => {
+    const noteToUpdate = notes.find(n => n.id === id);
+    if (noteToUpdate) {
+      const updatedNote = { ...noteToUpdate, text: newText.trim() };
+      const success = await updateNoteInFile(updatedNote);
+      if (success) {
+        setNotes(notes.map(n => n.id === id ? updatedNote : n));
+      }
+    }
   };
 
-  const changeColor = (id, color) => {
-    setNotes(notes.map(n => n.id === id ? { ...n, color } : n));
+  const changeColor = async (id, color) => {
+    const noteToUpdate = notes.find(n => n.id === id);
+    if (noteToUpdate) {
+      const updatedNote = { ...noteToUpdate, color };
+      const success = await updateNoteInFile(updatedNote);
+      if (success) {
+        setNotes(notes.map(n => n.id === id ? updatedNote : n));
+      }
+    }
   };
 
   return (
@@ -401,6 +491,7 @@ function FlashNote() {
               height: '32px'
             }}
             className="add-button"
+            title="添加闪记"
           />
         </Col>
       </Row>

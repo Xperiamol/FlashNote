@@ -14,23 +14,46 @@ function NoteWindow() {
     // 从URL hash中获取笔记ID
     const noteId = window.location.hash.replace('#note/', '');
 
-    // 从localStorage或文件中加载笔记数据
-    const loadNote = () => {
+    // 从主进程或localStorage中加载笔记数据
+    const loadNote = async () => {
       try {
-        // 尝试从localStorage加载
+        // 首先尝试从主进程获取数据
+        const ipcRenderer = window.require ? window.require('electron').ipcRenderer : null;
+        if (ipcRenderer) {
+          try {
+            console.log('从主进程获取笔记数据, ID:', noteId);
+            const foundNote = await ipcRenderer.invoke('get-note-by-id', noteId);
+            if (foundNote) {
+              console.log('从主进程加载笔记成功:', foundNote);
+              setNote(foundNote);
+              setEditValue(foundNote.text || '');
+              // 设置置顶状态
+              ipcRenderer.send('set-always-on-top', { id: noteId, value: foundNote.alwaysOnTop !== false });
+              setAlwaysOnTop(foundNote.alwaysOnTop !== false);
+              return;
+            }
+          } catch (error) {
+            console.error('从主进程获取笔记失败:', error);
+          }
+        }
+        
+        // 备用方案：从localStorage加载
+        console.log('尝试从 localStorage 加载笔记');
         const savedNotes = JSON.parse(localStorage.getItem('flash_notes') || '[]');
         const foundNote = savedNotes.find(n => n.id.toString() === noteId);
         if (foundNote) {
+          console.log('从 localStorage 加载笔记成功:', foundNote);
           setNote(foundNote);
           setEditValue(foundNote.text || '');
           // 初始化时设置一次置顶
-          const ipcRenderer = window.require ? window.require('electron').ipcRenderer : null;
           if (ipcRenderer) {
             ipcRenderer.send('set-always-on-top', { id: noteId, value: foundNote.alwaysOnTop !== false });
             setAlwaysOnTop(foundNote.alwaysOnTop !== false);
           }
           return;
         }
+        
+        console.error('未找到笔记，ID:', noteId);
       } catch (e) {
         console.error('Error loading note:', e);
       }
@@ -42,9 +65,9 @@ function NoteWindow() {
     setIsDark(document.body.classList.contains('dark-mode'));
   }, []);
   
-  const handleClose = () => {
+  const handleClose = async () => {
     if (isEditing) {
-      saveEdit();
+      await saveEdit();
     }
     if (window && window.close) {
       window.close();
@@ -61,46 +84,54 @@ function NoteWindow() {
     }
   };
   
-  const handleEditClick = () => {
+  const handleEditClick = async () => {
     if (isEditing) {
       // 保存编辑
-      saveEdit();
+      await saveEdit();
     } else {
       // 进入编辑模式
       setIsEditing(true);
     }
   };
   
-  const saveEdit = () => {
+  const saveEdit = async () => {
     if (!note) return;
     
     // 更新本地状态
-    setNote({...note, text: editValue});
+    const updatedNote = {...note, text: editValue};
+    setNote(updatedNote);
     setIsEditing(false);
     
     try {
-      // 更新localStorage
+      // 优先通过IPC通知主进程更新
+      const ipcRenderer = window.require ? window.require('electron').ipcRenderer : null;
+      if (ipcRenderer) {
+        try {
+          const success = await ipcRenderer.invoke('update-note', {
+            id: note.id.toString(),
+            text: editValue,
+            color: note.color || ''
+          });
+          console.log('通过IPC更新笔记:', success ? '成功' : '失败');
+        } catch (error) {
+          console.error('通过IPC更新笔记失败:', error);
+        }
+      }
+      
+      // 同时更新localStorage（作为备用）
       const savedNotes = JSON.parse(localStorage.getItem('flash_notes') || '[]');
       const updatedNotes = savedNotes.map(n => 
         n.id.toString() === note.id.toString() ? {...n, text: editValue} : n
       );
       localStorage.setItem('flash_notes', JSON.stringify(updatedNotes));
+      console.log('更新localStorage成功');
       
-      // 通过IPC通知主进程更新
-      const ipcRenderer = window.require ? window.require('electron').ipcRenderer : null;
-      if (ipcRenderer) {
-        ipcRenderer.send('update-note', {
-          id: note.id.toString(),
-          text: editValue,
-          color: note.color || ''
-        });
-      }
     } catch (e) {
       console.error('Error saving note:', e);
     }
   };
   
-  if (!note) return <div className="loading">加载中...</div>;
+  if (!note) return <div className="loading">加载中...若无反应请在任务栏关闭窗口再打开QAQ</div>;
   
   return (
     <div 
@@ -132,6 +163,7 @@ function NoteWindow() {
           onClick={handleClose}
           className="close-btn"
           size="small"
+          title="关闭窗口"
         />
       </div>
       <div className="note-content-window">
@@ -140,7 +172,7 @@ function NoteWindow() {
             autoSize={{ minRows: 4 }}
             value={editValue}
             onChange={e => setEditValue(e.target.value)}
-            onPressEnter={e => { if (!e.shiftKey) { e.preventDefault(); saveEdit(); } }}
+            onPressEnter={async (e) => { if (!e.shiftKey) { e.preventDefault(); await saveEdit(); } }}
             className="edit-textarea"
           />
         ) : (

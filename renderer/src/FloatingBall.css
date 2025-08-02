@@ -8,17 +8,22 @@
   pointer-events: none;
   z-index: 999;
   background-color: transparent !important; /* 强制设置透明背景 */
+  background-image: none !important; /* 阻止任何背景图片 */
   margin: 0;
   padding: 0;
   overflow: visible; /* 确保内容可见 */
 }
 
+/* 确保悬浮球容器不受全局背景图片影响 */
+.floating-ball-container::before {
+  display: none !important;
+}
+
 .floating-ball {
   position: absolute;
-  width: 50px;
-  height: 50px;
+  /* 宽度和高度将通过内联样式动态设置 */
   border-radius: 50%;
-  background: rgba(24, 144, 255, 0.9); /* 增加不透明度，使用蓝色背景 */
+  background: rgba(24, 144, 255, 0.9); /* 默认背景，将被内联样式覆盖 */
   backdrop-filter: blur(8px);
   -webkit-backdrop-filter: blur(8px);
   box-shadow: 0 2px 12px rgba(0, 0, 0, 0.3); /* 增强阴影 */
@@ -30,7 +35,7 @@
   user-select: none;
   pointer-events: auto;
   z-index: 1000;
-  transition: transform 0.2s, box-shadow 0.2s;
+  transition: transform 0.2s, box-shadow 0.2s, opacity 0.3s ease-in-out, background-color 0.3s ease-in-out;
   overflow: hidden; /* 确保水波纹不会溢出 */
   position: relative; /* 为水波纹定位做准备 */
 }

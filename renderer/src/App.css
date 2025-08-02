@@ -49,6 +49,16 @@ html[data-route="floatingBall"] #root {
   background: transparent !important;
 }
 
+/* 悬浮球模式下阻止背景图片显示 */
+html[data-route="floatingBall"] body.has-background-image::before {
+  display: none !important;
+}
+
+html[data-route="floatingBall"] body {
+  background-image: none !important;
+  background: transparent !important;
+}
+
 /* ========== 布局与主内容 ========== */
 .app-layout {
   height: 100vh;

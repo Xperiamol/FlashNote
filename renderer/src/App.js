@@ -55,6 +55,24 @@ function App() {
   const [backgroundBrightness, setBackgroundBrightness] = useState(100);
   const [settingsLoaded, setSettingsLoaded] = useState(false);
 
+  // 悬浮球设置状态
+  const [floatingBallSettings, setFloatingBallSettings] = useState({
+    size: 50,
+    idleOpacity: 0.7,
+    activeOpacity: 0.9,
+    brightnessChange: 0.2,
+    flashColor: '#1890ff',
+    todoColor: '#52c41a',
+    customIcon: '',
+    useCustomIcon: false
+  });
+
+  // Todo设置状态
+  const [todoSettings, setTodoSettings] = useState({
+    autoSort: true,
+    sortBy: 'priority'
+  });
+
   // 从主进程加载设置
   useEffect(() => {
     if (window.require) {
@@ -80,6 +98,12 @@ function App() {
           if (settings.blockRadius !== undefined) {
             setBlockRadius(settings.blockRadius);
           }
+          if (settings.floatingBallSettings) {
+            setFloatingBallSettings(settings.floatingBallSettings);
+          }
+          if (settings.todoSettings) {
+            setTodoSettings(settings.todoSettings);
+          }
           setSettingsLoaded(true);
         })
         .catch(error => {
@@ -101,6 +125,22 @@ function App() {
       ipcRenderer.send('save-radius-settings', { inputRadius, blockRadius });
     }
   }, [inputRadius, blockRadius, settingsLoaded]);
+
+  // 保存悬浮球设置到主进程
+  useEffect(() => {
+    if (settingsLoaded && window.require) {
+      const { ipcRenderer } = window.require('electron');
+      ipcRenderer.send('save-floating-ball-settings', floatingBallSettings);
+    }
+  }, [floatingBallSettings, settingsLoaded]);
+
+  // 保存Todo设置到主进程
+  useEffect(() => {
+    if (settingsLoaded && window.require) {
+      const { ipcRenderer } = window.require('electron');
+      ipcRenderer.send('save-todo-settings', todoSettings);
+    }
+  }, [todoSettings, settingsLoaded]);
 
   // 应用自定义颜色和背景
   useEffect(() => {
@@ -253,6 +293,22 @@ function App() {
     onClick: handleMenuClick
   };
 
+  useEffect(() => {
+    if (window.require) {
+      const { ipcRenderer } = window.require('electron');
+
+      // 监听悬浮球状态变化事件
+      ipcRenderer.on('floating-ball-status-changed', (event, { visible }) => {
+        setFloatingBallVisible(visible);
+      });
+
+      // 清理事件监听器
+      return () => {
+        ipcRenderer.removeAllListeners('floating-ball-status-changed');
+      };
+    }
+  }, []);
+
   // 根据路由渲染不同内容
   if (currentRoute === 'floatingBall') {
     return <FloatingBall />;
@@ -288,7 +344,7 @@ function App() {
           onChange={setActiveKey}
           items={[
             { key: 'flash', label: '闪记', children: <FlashNote /> },
-            { key: 'todo', label: 'Todo', children: <Todo /> },
+            { key: 'todo', label: 'Todo', children: <Todo todoSettings={todoSettings} /> },
           ]}
           tabBarExtraContent={
             <Dropdown menu={menu} trigger={['click']}>
@@ -325,7 +381,7 @@ function App() {
         ]}
       >
         <div className="about-content">
-          <h3>闪念速记 v1.3.1</h3>
+          <h3>闪念速记 1.3.2-release</h3>
           <p>一个简单而实用的桌面笔记应用，帮助您随时记录想法和管理待办事项。</p>
           <p>技术栈：Electron+React+Ant Design</p>
           <p>主要功能：</p>
@@ -364,6 +420,10 @@ function App() {
           setBackgroundBlur={setBackgroundBlur}
           backgroundBrightness={backgroundBrightness}
           setBackgroundBrightness={setBackgroundBrightness}
+          floatingBallSettings={floatingBallSettings}
+          setFloatingBallSettings={setFloatingBallSettings}
+          todoSettings={todoSettings}
+          setTodoSettings={setTodoSettings}
         />
       </Modal>
 

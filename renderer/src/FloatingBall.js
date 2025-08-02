@@ -10,10 +10,55 @@ function FloatingBall() {
   const [dragStart, setDragStart] = useState({ x: 0, y: 0 }); // 拖拽起始位置
   const [input, setInput] = useState(''); // 输入内容
   const [inputType, setInputType] = useState('flash'); // 输入类型：flash 或 todo
+  const [menuVisible, setMenuVisible] = useState(false); // 控制右键菜单的显示状态
   const ballRef = useRef(null);
   const [ipcRenderer, setIpcRenderer] = useState(null);
   const leaveTimer = useRef(null); // 用于处理鼠标离开的计时器
   const clickTimeoutRef = useRef(null); // 用于处理单击延迟的计时器
+  const hoverStateTimer = useRef(null); // 用于处理悬停状态计时器
+  
+  // 悬浮球设置状态
+  const [floatingBallSettings, setFloatingBallSettings] = useState({
+    size: 50,
+    idleOpacity: 0.7,
+    activeOpacity: 0.9,
+    brightnessChange: 0.2,
+    flashColor: '#1890ff',
+    todoColor: '#52c41a',
+    customIcon: '',
+    useCustomIcon: false
+  });
+
+  // 悬浮球状态：idle（闲置）、active（激活）
+  const [ballState, setBallState] = useState('idle');
+
+  // 辅助函数：调整颜色亮度
+  const adjustColorBrightness = (color, amount) => {
+    // 将十六进制颜色转换为RGB
+    const hex = color.replace('#', '');
+    const r = parseInt(hex.substr(0, 2), 16);
+    const g = parseInt(hex.substr(2, 2), 16);
+    const b = parseInt(hex.substr(4, 2), 16);
+    
+    // 调整亮度 (amount: -1 到 1, 负数变暗，正数变亮)
+    const adjust = (component) => {
+      if (amount > 0) {
+        // 变亮：向255靠近
+        return Math.round(component + (255 - component) * amount);
+      } else {
+        // 变暗：向0靠近
+        return Math.round(component * (1 + amount));
+      }
+    };
+    
+    const newR = Math.max(0, Math.min(255, adjust(r)));
+    const newG = Math.max(0, Math.min(255, adjust(g)));
+    const newB = Math.max(0, Math.min(255, adjust(b)));
+    
+    // 转换回十六进制
+    const toHex = (component) => component.toString(16).padStart(2, '0');
+    return `#${toHex(newR)}${toHex(newG)}${toHex(newB)}`;
+  };
   
   // 初始化 ipcRenderer
   useEffect(() => {
@@ -25,6 +70,25 @@ function FloatingBall() {
         
         // 测试 IPC 是否工作正常
         console.log('ipcRenderer 初始化成功:', ipc ? '是' : '否');
+        
+        // 加载悬浮球设置
+        ipc.invoke('get-settings')
+          .then((settings) => {
+            console.log('从主进程获取设置:', settings);
+            if (settings.floatingBallSettings) {
+              setFloatingBallSettings(settings.floatingBallSettings);
+              console.log('悬浮球设置已加载:', settings.floatingBallSettings);
+            }
+          })
+          .catch(error => {
+            console.error('获取悬浮球设置失败:', error);
+          });
+        
+        // 监听设置更新
+        ipc.on('floating-ball-settings-updated', (event, newSettings) => {
+          console.log('收到悬浮球设置更新:', newSettings);
+          setFloatingBallSettings(newSettings);
+        });
       } else {
         console.warn('window.require 不可用，可能不在 Electron 环境中');
       }
@@ -110,11 +174,11 @@ function FloatingBall() {
     }
   }, [position, isDragging, ipcRenderer]);
 
-  // 统一处理鼠标进入交互区域（悬浮球或输入框）
+  // 统一处理鼠标进入交互区域（悬浮球、输入框、菜单）
   const handleMouseEnter = () => {
-    // 清除任何待处理的启用点击穿透的计时器
     clearTimeout(leaveTimer.current);
-    // 禁用点击穿透，使窗口可交互
+    clearTimeout(hoverStateTimer.current);
+    setBallState('active');
     if (ipcRenderer) {
       ipcRenderer.send('set-ignore-mouse-events', false);
     }
@@ -122,13 +186,16 @@ function FloatingBall() {
 
   // 统一处理鼠标离开交互区域
   const handleMouseLeave = () => {
-    // 设置一个短暂的延迟后启用点击穿透
-    // 这可以防止在悬浮球和输入框之间移动时意外触发
     leaveTimer.current = setTimeout(() => {
       if (ipcRenderer) {
         ipcRenderer.send('set-ignore-mouse-events', true);
       }
     }, 100);
+
+    // 设置2秒后变为闲置状态
+    hoverStateTimer.current = setTimeout(() => {
+      setBallState('idle');
+    }, 2000);
   };
 
   // 处理鼠标按下事件，开始拖拽
@@ -219,32 +286,28 @@ function FloatingBall() {
       if (leaveTimer.current) {
         clearTimeout(leaveTimer.current);
       }
+      if (hoverStateTimer.current) {
+        clearTimeout(hoverStateTimer.current);
+      }
     };
   }, []);
 
   // 处理左键点击，显示/隐藏输入框
   const handleClick = (event) => {
-    // 创建水波纹动效
+    if (menuVisible) {
+      setMenuVisible(false);
+      return;
+    }
     createRipple(event);
-    
-    // 清除之前的单击延迟计时器
     if (clickTimeoutRef.current) {
       clearTimeout(clickTimeoutRef.current);
       clickTimeoutRef.current = null;
-      return; // 如果是双击的第二次点击，直接返回
+      return;
     }
-    
-    // 设置单击延迟，如果在延迟时间内没有第二次点击，则执行单击操作
     clickTimeoutRef.current = setTimeout(() => {
-      // 立即禁用点击穿透，确保输入框可以正常工作
-      if (ipcRenderer) {
-        ipcRenderer.send('set-ignore-mouse-events', false);
-      }
-      
       setVisible(!visible);
       if (!visible) {
         setTimeout(() => {
-          // 对于 Antd 的 TextArea，需要选择内部的 textarea 元素
           const inputElement = document.querySelector('.floating-input textarea');
           if (inputElement) {
             inputElement.focus();
@@ -252,70 +315,71 @@ function FloatingBall() {
         }, 100);
       }
       clickTimeoutRef.current = null;
-    }, 250); // 250ms 内没有第二次点击则认为是单击
+    }, 250);
   };
 
   // 处理双击，切换输入类型
   const handleDoubleClick = (event) => {
-    // 创建水波纹动效
+    if (menuVisible) {
+      setMenuVisible(false);
+      return;
+    }
     createRipple(event);
-    
-    // 清除单击延迟计时器
     if (clickTimeoutRef.current) {
       clearTimeout(clickTimeoutRef.current);
       clickTimeoutRef.current = null;
     }
-    
-    // 切换输入类型
     setInputType(prev => prev === 'flash' ? 'todo' : 'flash');
     console.log('双击切换输入类型:', inputType === 'flash' ? 'todo' : 'flash');
   };
 
   // 处理保存按钮点击
-  const handleSave = () => {
+  const handleSave = async () => {
     if (!input.trim()) return;
-    
     try {
       console.log('悬浮球保存内容:', inputType, input);
-      
       if (ipcRenderer) {
-        // 保存闪记
         if (inputType === 'flash') {
           const noteData = {
-            text: input,
+            text: input.trim(),
             id: Date.now().toString(),
-            color: '#ffffff'
+            color: '',
+            alwaysOnTop: false,
+            createdAt: new Date().toISOString()
           };
           console.log('发送闪记到主进程:', noteData);
-          ipcRenderer.send('add-note', noteData);
-        } 
-        // 保存 Todo
-        else if (inputType === 'todo') {
+          try {
+            const savedNote = await ipcRenderer.invoke('add-note', noteData);
+            console.log('闪记添加成功:', savedNote);
+          } catch (error) {
+            console.error('通过IPC添加闪记失败:', error);
+            ipcRenderer.send('add-note', noteData);
+          }
+        } else if (inputType === 'todo') {
           const todoData = {
-            text: input,
+            text: input.trim(),
             id: Date.now(),
             done: false,
             ddl: null,
-            quadrant: null
+            quadrant: null,
+            createdAt: new Date().toISOString()
           };
           console.log('发送待办到主进程:', todoData);
           ipcRenderer.send('add-todo', todoData);
         }
       } else {
         console.warn('ipcRenderer未初始化，使用localStorage备用方案');
-        
-        // 在非 Electron 环境中的备用处理
         if (inputType === 'flash') {
           const savedNotes = JSON.parse(localStorage.getItem('flash_notes') || '[]');
           const newNotes = [
-            { text: input, id: Date.now() },
+            { text: input.trim(), id: Date.now().toString(), color: '', alwaysOnTop: false },
             ...savedNotes
           ];
           localStorage.setItem('flash_notes', JSON.stringify(newNotes));
         } else if (inputType === 'todo') {
           const savedTodos = JSON.parse(localStorage.getItem('todo_list') || '[]');
           const newTodos = [
-            { text: input, id: Date.now(), done: false, ddl: null, quadrant: null },
+            { text: input.trim(), id: Date.now(), done: false, ddl: null, quadrant: null, createdAt: new Date().toISOString() },
             ...savedTodos
           ];
           localStorage.setItem('todo_list', JSON.stringify(newTodos));
@@ -324,24 +388,14 @@ function FloatingBall() {
     } catch (error) {
       console.error('保存内容时出错:', error);
     }
-
-    // 清空输入并隐藏输入框
     setInput('');
     setVisible(false);
-    // 保存后立即启用点击穿透
-    if (ipcRenderer) {
-      ipcRenderer.send('set-ignore-mouse-events', true);
-    }
   };
 
   // 处理取消按钮点击
   const handleCancel = () => {
     setInput('');
     setVisible(false);
-    // 取消后立即启用点击穿透
-    if (ipcRenderer) {
-      ipcRenderer.send('set-ignore-mouse-events', true);
-    }
   };
 
   // 定义菜单项和处理函数
@@ -377,6 +431,22 @@ function FloatingBall() {
       default:
         break;
     }
+    // 菜单项点击后关闭菜单
+    setMenuVisible(false);
+  };
+
+  // 处理菜单显示状态变化
+  const handleMenuVisibleChange = (visible) => {
+    setMenuVisible(visible);
+    if (visible) {
+      setTimeout(() => {
+        const dropdown = document.querySelector('.ant-dropdown');
+        if (dropdown) {
+          dropdown.onmouseenter = handleMouseEnter;
+          dropdown.onmouseleave = handleMouseLeave;
+        }
+      }, 50);
+    }
   };
 
   // 菜单配置
@@ -407,35 +477,69 @@ function FloatingBall() {
   return (
     <div className="floating-ball-container">
       {/* 悬浮球 */}
-      <div
-        ref={ballRef}
-        className="floating-ball"
-        style={{ 
-          left: `${position.x}px`, 
-          top: `${position.y}px`,
-          backgroundColor: inputType === 'flash' ? 'rgba(24, 144, 255, 0.7)' : 'rgba(82, 196, 26, 0.7)'
+      <Dropdown 
+        open={menuVisible}
+        onOpenChange={handleMenuVisibleChange}
+        menu={{
+          items: menuItems,
+          onClick: handleMenuClick
         }}
-        onMouseDown={handleMouseDown}
-        onMouseEnter={handleMouseEnter}
-        onMouseLeave={handleMouseLeave}
-        onClick={handleClick}
-        onDoubleClick={handleDoubleClick}
-        onContextMenu={(e) => {
-          e.stopPropagation();
-        }}
-        title={`${inputType === 'flash' ? '闪记模式' : 'Todo模式'} - 左键点击输入，双击切换模式，右键点击显示菜单`}
+        trigger={['contextMenu']}
+        getPopupContainer={() => document.body}
       >
-        <Dropdown 
-          menu={{
-            items: menuItems,
-            onClick: handleMenuClick
+        <div
+          ref={ballRef}
+          className="floating-ball"
+          style={{ 
+            left: `${position.x}px`, 
+            top: `${position.y}px`,
+            width: `${floatingBallSettings.size}px`,
+            height: `${floatingBallSettings.size}px`,
+            backgroundColor: (() => {
+              // 根据模式选择基础颜色
+              const baseColor = inputType === 'flash' 
+                ? floatingBallSettings.flashColor 
+                : floatingBallSettings.todoColor;
+              
+              // 根据状态调整亮度
+              return ballState === 'active' 
+                ? adjustColorBrightness(baseColor, floatingBallSettings.brightnessChange)
+                : baseColor;
+            })(),
+            opacity: ballState === 'active' 
+              ? floatingBallSettings.activeOpacity 
+              : floatingBallSettings.idleOpacity
           }}
-          trigger={['contextMenu']}
-          getPopupContainer={() => document.body}
+          onMouseDown={handleMouseDown}
+          onMouseEnter={handleMouseEnter}
+          onMouseLeave={handleMouseLeave}
+          onClick={handleClick}
+          onDoubleClick={handleDoubleClick}
+          onContextMenu={(e) => {
+            e.stopPropagation();
+            // 如果菜单已经打开，则关闭它
+            if (menuVisible) {
+              setMenuVisible(false);
+            }
+          }}
+          title={`${inputType === 'flash' ? '闪记模式' : 'Todo模式'} - 左键点击输入，双击切换模式，右键点击显示菜单`}
         >
-          <EditOutlined className="floating-ball-icon" />
-        </Dropdown>
-      </div>
+          {floatingBallSettings.useCustomIcon && floatingBallSettings.customIcon ? (
+            <img 
+              src={floatingBallSettings.customIcon} 
+              alt="自定义图标" 
+              style={{ 
+                width: '70%', 
+                height: '70%', 
+                objectFit: 'cover',
+                borderRadius: '50%'
+              }}
+            />
+          ) : (
+            <EditOutlined className="floating-ball-icon" />
+          )}
+        </div>
+      </Dropdown>
       
       {/* 输入框 */}
       {visible && (
@@ -467,11 +571,13 @@ function FloatingBall() {
               icon={<CheckOutlined />}
               onClick={handleSave}
               className="save-button"
+              title="保存"
             />
             <Button
               icon={<CloseOutlined />}
               onClick={handleCancel}
               className="cancel-button"
+              title="取消"
             />
           </div>
         </div>
