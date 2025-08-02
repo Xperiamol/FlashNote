@@ -1,13 +1,52 @@
 /* ========== 全局基础 ========== */
+:root {
+  --tab-text-color: #000000;
+  --tab-indicator-color: #1890ff;
+  --input-border-color: #1890ff;
+  --add-button-color: #1890ff;
+  --background-color: #f5f5f5;
+  --note-background-color: #ffffff;
+  --background-image: none;
+  --background-blur: 0px;
+  --background-brightness: 100%;
+}
+
 body {
   font-family: var(--custom-font-family), -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial,
     'Noto Sans', sans-serif, 'Apple Color Emoji', 'Segoe UI Emoji', 'Segoe UI Symbol',
     'Noto Color Emoji';
+  position: relative;
 }
+
+/* 背景图片伪元素实现 */
+body.has-background-image::before {
+  content: '';
+  position: fixed;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  background-image: var(--background-image);
+  background-size: cover;
+  background-position: center;
+  background-repeat: no-repeat;
+  background-attachment: fixed;
+  filter: blur(var(--background-blur)) brightness(var(--background-brightness));
+  z-index: -1;
+}
+
 html, body, #root {
   height: 100vh;
   margin: 0;
-  background: #f5f5f5;
+  background: var(--background-color);
+}
+
+/* 悬浮球模式下的透明背景 */
+html[data-route="floatingBall"], 
+html[data-route="floatingBall"] body, 
+html[data-route="floatingBall"] #root {
+  background-color: transparent !important;
+  background: transparent !important;
 }
 
 /* ========== 布局与主内容 ========== */
@@ -23,10 +62,13 @@ html, body, #root {
   display: flex;
   flex-direction: column;
   padding: 0px 13px;
-  background: rgba(255, 255, 255, 0.25);
-  backdrop-filter: blur(16px);
-  -webkit-backdrop-filter: blur(16px);
+  background: rgba(255, 255, 255, 0.85);
   overflow: hidden;
+}
+
+/* 当有背景图片时，调整主内容区域的透明度 */
+body.has-background-image .main-content {
+  background: rgba(255, 255, 255, 0.75);
 }
 .content-scroll-area {
   height: calc(100vh - 100px);
@@ -75,9 +117,14 @@ html, body, #root {
   margin-left: 8px !important;
   transition: all 0.3s;
   transform: rotate(0deg);
+  background-color: var(--add-button-color) !important;
+  border-color: var(--add-button-color) !important;
 }
 .add-button:hover {
   transform: rotate(90deg) !important;
+  background-color: var(--add-button-color) !important;
+  border-color: var(--add-button-color) !important;
+  opacity: 0.8;
 }
 .add-button .anticon {
   font-size: 16px;
@@ -95,7 +142,7 @@ html, body, #root {
   width: 100%;
   box-shadow: 0 1px 4px #eee;
   margin: 8px 0;
-  background: rgba(255, 255, 255, 0.35);
+  background: var(--note-background-color);
   backdrop-filter: blur(8px);
   -webkit-backdrop-filter: blur(8px);
   border-radius: var(--block-radius, 6px);
@@ -103,6 +150,7 @@ html, body, #root {
   max-height: 72px;
   display: -webkit-box;
   -webkit-line-clamp: 1;
+  line-clamp: 1;
   -webkit-box-orient: vertical;
   white-space: normal;
   text-overflow: ellipsis;
@@ -112,6 +160,7 @@ html, body, #root {
 }
 .note-content-anim.expanded {
   -webkit-line-clamp: unset;
+  line-clamp: unset;
   display: block;
   max-height: 1000px;
 }
@@ -188,7 +237,7 @@ html, body, #root {
   box-sizing: border-box;
   display: flex;
   align-items: center;
-  background: #fff;
+  background: var(--note-background-color);
   border-radius: 6px;
   box-shadow: 0 1px 4px #eee;
   margin: 8px 0;
@@ -206,6 +255,7 @@ html, body, #root {
 .note-text-collapsed {
   display: -webkit-box;
   -webkit-line-clamp: 2;
+  line-clamp: 2;
   -webkit-box-orient: vertical;
   overflow: hidden;
   white-space: normal;
@@ -317,8 +367,14 @@ html, body, #root {
   border-radius: var(--input-radius, 25px) !important;
   padding: 8px 16px !important;
 }
+.ant-input:focus, .ant-input:hover {
+  border-color: var(--input-border-color) !important;
+}
 .ant-input-textarea textarea {
   border-radius: var(--input-radius, 25px) !important;
+}
+.ant-input-textarea textarea:focus, .ant-input-textarea textarea:hover {
+  border-color: var(--input-border-color) !important;
 }
 .ant-tabs-content-holder,
 .ant-tabs-content {
@@ -333,6 +389,57 @@ html, body, #root {
   height: 100%;
   display: flex;
   flex-direction: column;
+}
+
+/* 整个Tab栏禁用文本选择 */
+.ant-tabs-nav {
+  user-select: none !important;
+  -webkit-user-select: none !important;
+  -moz-user-select: none !important;
+  -ms-user-select: none !important;
+}
+
+.ant-tabs-nav-list {
+  user-select: none !important;
+  -webkit-user-select: none !important;
+  -moz-user-select: none !important;
+  -ms-user-select: none !important;
+}
+
+/* Tab 文字颜色自定义 */
+.ant-tabs-tab {
+  color: var(--tab-text-color) !important;
+  user-select: none !important;
+  -webkit-user-select: none !important;
+  -moz-user-select: none !important;
+  -ms-user-select: none !important;
+}
+.ant-tabs-tab:hover {
+  color: var(--tab-text-color) !important;
+}
+.ant-tabs-tab.ant-tabs-tab-active .ant-tabs-tab-btn {
+  color: var(--tab-text-color) !important;
+  user-select: none !important;
+  -webkit-user-select: none !important;
+  -moz-user-select: none !important;
+  -ms-user-select: none !important;
+}
+.ant-tabs-tab-btn {
+  user-select: none !important;
+  -webkit-user-select: none !important;
+  -moz-user-select: none !important;
+  -ms-user-select: none !important;
+}
+
+/* Tab 指示器颜色自定义 */
+.ant-tabs-ink-bar {
+  background: var(--tab-indicator-color) !important;
+}
+.ant-tabs-tab.ant-tabs-tab-active::after {
+  border-bottom-color: var(--tab-indicator-color) !important;
+}
+.ant-tabs-tab:hover::after {
+  border-bottom-color: var(--tab-indicator-color) !important;
 }
 
 /* ========== 暗色模式 ========== */

@@ -1,0 +1,166 @@
+/* FloatingBall.css */
+.floating-ball-container {
+  position: fixed;
+  top: 0;
+  left: 0;
+  width: 100vw;
+  height: 100vh;
+  pointer-events: none;
+  z-index: 999;
+  background-color: transparent !important; /* 强制设置透明背景 */
+  margin: 0;
+  padding: 0;
+  overflow: visible; /* 确保内容可见 */
+}
+
+.floating-ball {
+  position: absolute;
+  width: 50px;
+  height: 50px;
+  border-radius: 50%;
+  background: rgba(24, 144, 255, 0.9); /* 增加不透明度，使用蓝色背景 */
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+  box-shadow: 0 2px 12px rgba(0, 0, 0, 0.3); /* 增强阴影 */
+  border: 2px solid rgba(255, 255, 255, 0.8); /* 添加白色边框增加可见度 */
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  cursor: pointer;
+  user-select: none;
+  pointer-events: auto;
+  z-index: 1000;
+  transition: transform 0.2s, box-shadow 0.2s;
+  overflow: hidden; /* 确保水波纹不会溢出 */
+  position: relative; /* 为水波纹定位做准备 */
+}
+
+.floating-ball:hover {
+  transform: scale(1.05);
+  box-shadow: 0 4px 15px rgba(0, 0, 0, 0.2);
+}
+
+/* 水波纹动效样式 */
+.ripple {
+  position: absolute;
+  border-radius: 50%;
+  transform: scale(0);
+  animation: ripple-animation 0.6s ease-out;
+  background-color: rgba(255, 255, 255, 0.3);
+  pointer-events: none;
+  z-index: 1;
+}
+
+@keyframes ripple-animation {
+  0% {
+    transform: scale(0);
+    opacity: 1;
+  }
+  100% {
+    transform: scale(3);
+    opacity: 0;
+  }
+}
+
+.floating-ball:hover {
+  transform: scale(1.05);
+  box-shadow: 0 4px 15px rgba(0, 0, 0, 0.2);
+}
+
+.floating-ball-icon {
+  font-size: 24px;
+  color: #ffffff; /* 改为白色图标，在蓝色背景上更清晰 */
+  z-index: 2; /* 确保图标在水波纹之上 */
+  position: relative;
+}
+
+.floating-input-container {
+  position: absolute;
+  display: flex;
+  background: rgba(255, 255, 255, 0.9);
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+  border-radius: var(--input-radius, 25px);
+  box-shadow: 0 4px 15px rgba(0, 0, 0, 0.15);
+  padding: 10px;
+  width: 300px;
+  pointer-events: auto;
+  z-index: 999;
+  animation: slideIn 0.2s ease-out;
+}
+
+@keyframes slideIn {
+  from {
+    opacity: 0;
+    transform: translateX(-20px);
+  }
+  to {
+    opacity: 1;
+    transform: translateX(0);
+  }
+}
+
+.floating-input {
+  flex: 1;
+  border: none;
+  background: transparent;
+  resize: none;
+  padding: 8px;
+  font-size: 14px;
+  border-radius: var(--input-radius, 25px);
+}
+
+.floating-input:focus {
+  outline: none;
+  box-shadow: none;
+}
+
+.floating-input-buttons {
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  gap: 5px;
+  margin-left: 8px;
+}
+
+.save-button {
+  background: #52c41a;
+  border-color: #52c41a;
+}
+
+.save-button:hover {
+  background: #73d13d;
+  border-color: #73d13d;
+}
+
+.cancel-button {
+  color: #ff4d4f;
+  border-color: #ff4d4f;
+}
+
+.cancel-button:hover {
+  color: #ff7875;
+  border-color: #ff7875;
+}
+
+.menu-item-selected {
+  background-color: #e6f7ff;
+  color: #1890ff;
+}
+
+/* 暗色模式 */
+body.dark-mode .floating-ball {
+  background: rgba(40, 40, 40, 0.7);
+}
+
+body.dark-mode .floating-input-container {
+  background: rgba(40, 40, 40, 0.9);
+}
+
+body.dark-mode .floating-input {
+  color: #f5f5f5;
+}
+
+body.dark-mode .floating-ball-icon {
+  color: #40a9ff;
+}

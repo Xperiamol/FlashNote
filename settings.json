@@ -2,5 +2,15 @@
   "alwaysOnTop": false,
   "fontFamily": "",
   "openAtLogin": true,
-  "restoreWindows": true
+  "restoreWindows": false,
+  "customColors": {
+    "tabTextColor": "#000000",
+    "tabIndicatorColor": "#1890ff",
+    "inputBorderColor": "#1890ff",
+    "addButtonColor": "#1890ff",
+    "backgroundColor": "#f5f5f5",
+    "noteBackgroundColor": "#ffffff"
+  },
+  "inputRadius": 25,
+  "blockRadius": 6
 }

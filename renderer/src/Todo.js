@@ -19,12 +19,65 @@ function Todo() {
   const [pendingDeleteId, setPendingDeleteId] = useState(null);
   const deleteBtnRef = useRef(null);
 
+  // 跟踪最近添加的待办事项ID，用于防止重复添加
+  const recentlyAddedIds = useRef(new Set());
+  
   useEffect(() => {
+    // 从localStorage加载待办事项
     const saved = localStorage.getItem(STORAGE_KEY);
     if (saved) setTodos(JSON.parse(saved));
+    
+    // 监听来自主进程的添加待办事项事件
+    let ipcRenderer;
+    try {
+      ipcRenderer = window.require && window.require('electron').ipcRenderer;
+      if (ipcRenderer) {
+        // 处理添加待办事项的函数
+        const handleAddTodo = (event, todoData) => {
+          console.log('收到添加待办事项事件:', todoData);
+          
+          // 记录这个待办事项ID，避免重复添加
+          if (todoData && todoData.id) {
+            recentlyAddedIds.current.add(todoData.id.toString());
+            
+            // 5秒后从集合中移除，避免集合无限增长
+            setTimeout(() => {
+              recentlyAddedIds.current.delete(todoData.id.toString());
+            }, 5000);
+          }
+          
+          setTodos(prevTodos => {
+            // 检查是否已存在相同ID的待办事项
+            if (prevTodos.some(todo => todo.id && todo.id.toString() === todoData.id.toString())) {
+              console.log('待办事项已存在，不重复添加');
+              return prevTodos;
+            }
+            
+            const newTodos = [todoData, ...prevTodos];
+            // 保存到本地存储
+            localStorage.setItem(STORAGE_KEY, JSON.stringify(newTodos));
+            return newTodos;
+          });
+        };
+        
+        // 添加事件监听器
+        ipcRenderer.on('add-todo', handleAddTodo);
+        
+        // 组件卸载时清除监听器
+        return () => {
+          ipcRenderer.removeAllListeners('add-todo');
+        };
+      }
+    } catch (e) {
+      console.error('Error setting up IPC listener:', e);
+      return () => {}; // 空清理函数，避免错误
+    }
   }, []);
 
+  // 当todos变化时保存到localStorage
   useEffect(() => {
+    // 只有当todos发生用户操作改变时（而非来自IPC消息）才保存
+    // 这避免了与IPC消息处理中的localStorage.setItem重复
     localStorage.setItem(STORAGE_KEY, JSON.stringify(todos));
   }, [todos]);
 

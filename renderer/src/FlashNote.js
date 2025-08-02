@@ -242,10 +242,21 @@ function FlashNote() {
   const deleteBtnRef = useRef(null);
   const textareaRef = useRef(null);
 
+  // 跟踪最近添加的笔记ID，用于防止重复添加
+  const recentlyAddedIds = useRef(new Set());
+  
   // 加载笔记数据的函数
   const loadNotes = () => {
+    console.log("加载所有笔记");
     const saved = localStorage.getItem(STORAGE_KEY);
-    if (saved) setNotes(JSON.parse(saved));
+    if (saved) {
+      const savedNotes = JSON.parse(saved);
+      // 过滤掉最近通过悬浮球添加的笔记
+      setNotes(savedNotes);
+      
+      // 清空最近添加的笔记ID集合（因为它们已经被加载了）
+      recentlyAddedIds.current.clear();
+    }
   };
 
   useEffect(() => {
@@ -257,7 +268,38 @@ function FlashNote() {
     try {
       ipcRenderer = window.require && window.require('electron').ipcRenderer;
       if (ipcRenderer) {
+        // 监听刷新笔记事件
         ipcRenderer.on('refresh-notes', loadNotes);
+        
+        // 监听添加笔记事件（来自悬浮球）
+        const handleAddNote = (event, noteData) => {
+          console.log('收到添加笔记事件:', noteData);
+          
+          // 记录这个笔记ID，避免通过refresh-notes重复添加
+          if (noteData && noteData.id) {
+            recentlyAddedIds.current.add(noteData.id.toString());
+            
+            // 5秒后从集合中移除，避免集合无限增长
+            setTimeout(() => {
+              recentlyAddedIds.current.delete(noteData.id.toString());
+            }, 5000);
+          }
+          
+          setNotes(prevNotes => {
+            // 检查是否已存在相同ID的笔记
+            if (prevNotes.some(note => note.id && note.id.toString() === noteData.id.toString())) {
+              console.log('笔记已存在，不重复添加');
+              return prevNotes;
+            }
+            
+            const newNotes = [noteData, ...prevNotes];
+            // 同步保存到localStorage
+            localStorage.setItem(STORAGE_KEY, JSON.stringify(newNotes));
+            return newNotes;
+          });
+        };
+        
+        ipcRenderer.on('add-note', handleAddNote);
       }
     } catch (e) {
       console.error('Error setting up IPC listener:', e);
@@ -268,6 +310,8 @@ function FlashNote() {
       if (ipcRenderer) {
         try {
           ipcRenderer.removeListener('refresh-notes', loadNotes);
+          // 使用removeAllListeners来确保所有的add-note处理函数都被清理
+          ipcRenderer.removeAllListeners('add-note');
         } catch (e) {
           console.error('Error removing IPC listener:', e);
         }
