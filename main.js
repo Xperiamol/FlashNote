@@ -58,7 +58,10 @@ function readSettings() {
       flashColor: '#1890ff', // 闪记模式颜色
       todoColor: '#52c41a', // Todo模式颜色
       customIcon: '', // 自定义图标路径
-      useCustomIcon: false // 是否使用自定义图标
+      useCustomIcon: false, // 是否使用自定义图标
+      // 功能设置
+      launchWithApp: true, // 随主程序启动
+      silentLaunch: false // 静默自启（不显示主窗口）
     },
     todoSettings: {
       autoSort: true, // 自动排序开关
@@ -929,7 +932,7 @@ function setWindowsAutoStart(enable) {
       const exportData = {
         version: '1.0',
         exportTime: new Date().toISOString(),
-        appVersion: '1.3.2-release',
+        appVersion: '1.3.3',
         data: {
           notes: notes,
           todos: todos,
@@ -1272,15 +1275,30 @@ function showMainWindow() {
 
 // 在应用准备就绪时注册 IPC 处理程序并创建窗口
 app.whenReady().then(() => {
+  // 读取设置
+  const appSettings = readSettings();
+  
   // 检查命令行参数，如果包含 --hidden 则不创建主窗口
   const shouldStartHidden = process.argv.includes('--hidden');
   console.log('应用启动参数:', process.argv);
   console.log('是否隐藏启动:', shouldStartHidden);
+  console.log('悬浮球设置:', appSettings.floatingBallSettings);
   
-  if (!shouldStartHidden) {
+  // 根据设置决定是否静默启动
+  const silentLaunch = appSettings.floatingBallSettings && appSettings.floatingBallSettings.silentLaunch;
+  
+  if (!shouldStartHidden && !silentLaunch) {
     createWindow();
   } else {
-    console.log('隐藏启动模式，不创建主窗口');
+    console.log(silentLaunch ? '静默启动模式，不创建主窗口' : '隐藏启动模式，不创建主窗口');
+  }
+  
+  // 根据设置决定是否启动时创建悬浮球
+  if (appSettings.floatingBallSettings && appSettings.floatingBallSettings.launchWithApp) {
+    console.log('根据设置，随主程序启动悬浮球');
+    createFloatingBall();
+  } else {
+    console.log('根据设置，不随主程序启动悬浮球');
   }
 
   // 创建托盘图标
@@ -1406,7 +1424,7 @@ app.whenReady().then(() => {
   tray.setContextMenu(initialContextMenu);
   console.log('托盘菜单设置完成');
 
-  const settings = readSettings();
+  const loginSettings = readSettings();
 
   // 根据设置初始化开机自启（仅在生产环境）
   if (app.isPackaged) {
@@ -1415,17 +1433,17 @@ app.whenReady().then(() => {
       console.log(`初始化开机自启，可执行文件路径: ${executablePath}`);
       
       app.setLoginItemSettings({
-        openAtLogin: settings.openAtLogin,
+        openAtLogin: loginSettings.openAtLogin,
         path: executablePath,
         args: ['--hidden'] // 启动时隐藏主窗口
       });
       
       // Windows 环境下，额外使用注册表方法提高可靠性
-      if (process.platform === 'win32' && settings.openAtLogin) {
-        setWindowsAutoStart(settings.openAtLogin);
+      if (process.platform === 'win32' && loginSettings.openAtLogin) {
+        setWindowsAutoStart(loginSettings.openAtLogin);
       }
       
-      console.log(`初始化开机自启: ${settings.openAtLogin}, 路径: ${executablePath}`);
+      console.log(`初始化开机自启: ${loginSettings.openAtLogin}, 路径: ${executablePath}`);
     } catch (error) {
       console.error('初始化开机自启时发生错误:', error);
     }
@@ -1434,7 +1452,7 @@ app.whenReady().then(() => {
   }
 
   // 根据设置恢复独立窗口
-  if (settings.restoreWindows) {
+  if (loginSettings.restoreWindows) {
     let notes = [];
     if (fs.existsSync(notesFile)) {
       try {

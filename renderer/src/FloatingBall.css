@@ -105,6 +105,22 @@
   }
 }
 
+/* 向左展开的动画 */
+@keyframes slideInLeft {
+  from {
+    opacity: 0;
+    transform: translateX(20px);
+  }
+  to {
+    opacity: 1;
+    transform: translateX(0);
+  }
+}
+
+.floating-input-container.expand-left {
+  animation: slideInLeft 0.2s ease-out;
+}
+
 .floating-input {
   flex: 1;
   border: none;

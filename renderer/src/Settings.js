@@ -11,6 +11,8 @@ function Settings({ customColors, setCustomColors, backgroundImage, setBackgroun
   const [loading, setLoading] = useState(true);
   const [exporting, setExporting] = useState(false);
   const [importing, setImporting] = useState(false);
+  const [launchWithApp, setLaunchWithApp] = useState(true);
+  const [silentLaunch, setSilentLaunch] = useState(false);
 
   // 颜色处理函数
   const handleColorChange = (colorKey, color) => {
@@ -160,6 +162,10 @@ function Settings({ customColors, setCustomColors, backgroundImage, setBackgroun
           setOpenAtLogin(settings.openAtLogin || false);
           setRestoreWindows(settings.restoreWindows || false);
           setAlwaysOnTop(settings.alwaysOnTop === undefined ? true : settings.alwaysOnTop);
+          if (settings.floatingBallSettings) {
+            setLaunchWithApp(settings.floatingBallSettings.launchWithApp === undefined ? true : settings.floatingBallSettings.launchWithApp);
+            setSilentLaunch(settings.floatingBallSettings.silentLaunch || false);
+          }
           setLoading(false);
         })
         .catch(error => {
@@ -233,6 +239,31 @@ function Settings({ customColors, setCustomColors, backgroundImage, setBackgroun
         // 恢复状态
         setAlwaysOnTop(!checked);
       }
+    }
+  };
+
+  const handleLaunchSettingChange = (key, value) => {
+    const newSettings = {
+      ...floatingBallSettings,
+      launchWithApp: key === 'launchWithApp' ? value : launchWithApp,
+      silentLaunch: key === 'silentLaunch' ? value : silentLaunch,
+    };
+
+    if (key === 'launchWithApp') {
+      setLaunchWithApp(value);
+      if (!value) {
+        // 如果关闭了随程序启动，静默启动也应该关闭
+        setSilentLaunch(false);
+        newSettings.silentLaunch = false;
+      }
+    }
+    if (key === 'silentLaunch') {
+      setSilentLaunch(value);
+    }
+
+    if (ipcRenderer) {
+      ipcRenderer.send('save-floating-ball-settings', newSettings);
+      message.success('设置已保存');
     }
   };
 
@@ -501,6 +532,37 @@ function Settings({ customColors, setCustomColors, backgroundImage, setBackgroun
         style={{ marginBottom: '16px' }} 
         size="small"
       >
+        <Row align="middle" style={{ marginBottom: '12px' }}>
+          <Col span={18}>
+            <span style={{ fontSize: '14px' }}>随主程序启动</span>
+            <div style={{ fontSize: '12px', color: '#666', marginTop: '2px' }}>
+              启动应用时自动显示悬浮球
+            </div>
+          </Col>
+          <Col span={6} style={{ textAlign: 'right' }}>
+            <Switch 
+              checked={launchWithApp} 
+              onChange={(checked) => handleLaunchSettingChange('launchWithApp', checked)} 
+            />
+          </Col>
+        </Row>
+
+        <Row align="middle" style={{ marginBottom: '12px' }}>
+          <Col span={18}>
+            <span style={{ fontSize: '14px' }}>静默自启</span>
+            <div style={{ fontSize: '12px', color: '#666', marginTop: '2px' }}>
+              开机或启动应用时不显示主窗口，仅显示悬浮球
+            </div>
+          </Col>
+          <Col span={6} style={{ textAlign: 'right' }}>
+            <Switch 
+              checked={silentLaunch} 
+              onChange={(checked) => handleLaunchSettingChange('silentLaunch', checked)} 
+              disabled={!launchWithApp} // 如果不启动悬浮球，则此项不可用
+            />
+          </Col>
+        </Row>
+        
         <Row align="middle" style={{ marginBottom: '12px' }}>
           <Col span={16}>
             <span style={{ fontSize: '14px' }}>悬浮球大小</span>

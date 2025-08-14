@@ -10,8 +10,10 @@ function FloatingBall() {
   const [dragStart, setDragStart] = useState({ x: 0, y: 0 }); // 拖拽起始位置
   const [input, setInput] = useState(''); // 输入内容
   const [inputType, setInputType] = useState('flash'); // 输入类型：flash 或 todo
+  const [expandLeft, setExpandLeft] = useState(false); // 控制输入框展开方向
   const [menuVisible, setMenuVisible] = useState(false); // 控制右键菜单的显示状态
   const ballRef = useRef(null);
+  const inputRef = useRef(null); // 添加输入框引用
   const [ipcRenderer, setIpcRenderer] = useState(null);
   const leaveTimer = useRef(null); // 用于处理鼠标离开的计时器
   const clickTimeoutRef = useRef(null); // 用于处理单击延迟的计时器
@@ -96,6 +98,39 @@ function FloatingBall() {
       console.error('无法初始化 ipcRenderer:', e);
     }
   }, []);
+
+  // 根据悬浮球位置决定输入框展开方向
+  useEffect(() => {
+    const screenWidth = window.innerWidth;
+    // 当悬浮球进入屏幕右侧五分之一区域时，向左展开
+    if (position.x > screenWidth * 4 / 5) {
+      setExpandLeft(true);
+    } else {
+      setExpandLeft(false);
+    }
+  }, [position]);
+
+  // 当输入框显示时自动聚焦
+  useEffect(() => {
+    if (visible && inputRef.current) {
+      // 使用 requestAnimationFrame 确保 DOM 渲染完成后再聚焦
+      requestAnimationFrame(() => {
+        if (inputRef.current) {
+          inputRef.current.focus();
+        }
+      });
+    }
+  }, [visible]);
+
+  // 当输入框隐藏时重新启用点击穿透
+  useEffect(() => {
+    if (!visible && ipcRenderer) {
+      // 延迟一点点时间确保所有事件处理完成
+      setTimeout(() => {
+        ipcRenderer.send('set-ignore-mouse-events', true);
+      }, 50);
+    }
+  }, [visible, ipcRenderer]);
 
   // 监听窗口大小变化，确保悬浮球位置在合理范围内
   useEffect(() => {
@@ -306,14 +341,6 @@ function FloatingBall() {
     }
     clickTimeoutRef.current = setTimeout(() => {
       setVisible(!visible);
-      if (!visible) {
-        setTimeout(() => {
-          const inputElement = document.querySelector('.floating-input textarea');
-          if (inputElement) {
-            inputElement.focus();
-          }
-        }, 100);
-      }
       clickTimeoutRef.current = null;
     }, 250);
   };
@@ -390,12 +417,22 @@ function FloatingBall() {
     }
     setInput('');
     setVisible(false);
+    
+    // 重新启用点击穿透
+    if (ipcRenderer) {
+      ipcRenderer.send('set-ignore-mouse-events', true);
+    }
   };
 
   // 处理取消按钮点击
   const handleCancel = () => {
     setInput('');
     setVisible(false);
+    
+    // 重新启用点击穿透
+    if (ipcRenderer) {
+      ipcRenderer.send('set-ignore-mouse-events', true);
+    }
   };
 
   // 定义菜单项和处理函数
@@ -544,15 +581,16 @@ function FloatingBall() {
       {/* 输入框 */}
       {visible && (
         <div 
-          className="floating-input-container"
+          className={`floating-input-container ${expandLeft ? 'expand-left' : ''}`}
           style={{ 
-            left: `${position.x + 40}px`, 
-            top: `${position.y}px` 
+            top: `${position.y}px`,
+            left: expandLeft ? `${position.x - 300 - 10}px` : `${position.x + floatingBallSettings.size + 10}px`
           }}
           onMouseEnter={handleMouseEnter}
           onMouseLeave={handleMouseLeave}
         >
           <Input.TextArea
+            ref={inputRef}
             className="floating-input"
             autoSize={{ minRows: 1, maxRows: 5 }}
             placeholder={inputType === 'flash' ? "输入闪记..." : "输入 Todo..."}
