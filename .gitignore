@@ -64,3 +64,8 @@ app/
 
 # ESLint cache
 .eslintcache
+
+# Documentation and export files
+*.md
+*_导出_*.json
+FlashNote_导出_*.json
