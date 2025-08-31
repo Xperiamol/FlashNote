@@ -67,5 +67,6 @@ app/
 
 # Documentation and export files
 *.md
+!README.md
 *_导出_*.json
 FlashNote_导出_*.json
