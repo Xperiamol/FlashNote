@@ -84,23 +84,64 @@ function createTray() {
     const iconPath = path.join(__dirname, '../logo.png')
     let trayIcon
     
+    console.log('尝试创建托盘图标，图标路径:', iconPath)
+    
     // 检查图标文件是否存在
     if (fs.existsSync(iconPath)) {
+      console.log('找到logo.png文件')
       trayIcon = nativeImage.createFromPath(iconPath)
-      // 调整图标大小适应托盘
-      trayIcon = trayIcon.resize({ width: 16, height: 16 })
+      
+      // 检查图标是否成功创建
+      if (trayIcon.isEmpty()) {
+        console.log('logo.png创建的图标为空，尝试使用SVG图标')
+        // 如果PNG图标创建失败，尝试使用SVG图标
+        const svgIconPath = path.join(__dirname, '../assets/tray-icon.svg')
+        if (fs.existsSync(svgIconPath)) {
+          trayIcon = nativeImage.createFromPath(svgIconPath)
+        }
+      }
+      
+      // 调整图标大小适应托盘 - Windows推荐16x16
+      if (!trayIcon.isEmpty()) {
+        trayIcon = trayIcon.resize({ width: 16, height: 16 })
+        console.log('图标大小已调整为16x16')
+      }
     } else {
+      console.log('logo.png文件不存在，尝试使用SVG图标')
       // 如果主图标不存在，尝试使用SVG图标
       const svgIconPath = path.join(__dirname, '../assets/tray-icon.svg')
       if (fs.existsSync(svgIconPath)) {
         trayIcon = nativeImage.createFromPath(svgIconPath)
         trayIcon = trayIcon.resize({ width: 16, height: 16 })
       } else {
+        console.log('SVG图标也不存在，创建空图标')
         // 创建一个简单的默认图标
         trayIcon = nativeImage.createEmpty()
       }
     }
     
+    // 确保图标不为空
+    if (trayIcon.isEmpty()) {
+      console.log('所有图标都创建失败，尝试创建默认图标')
+      // 创建一个简单的默认图标 - 使用Electron内置方法
+      try {
+        // 创建一个16x16的简单图标数据
+        const iconData = Buffer.from([
+          // 这是一个简单的16x16 ICO格式图标数据
+          0x00, 0x00, 0x01, 0x00, 0x01, 0x00, 0x10, 0x10, 0x00, 0x00, 0x01, 0x00, 0x20, 0x00, 0x68, 0x04,
+          0x00, 0x00, 0x16, 0x00, 0x00, 0x00, 0x28, 0x00, 0x00, 0x00, 0x10, 0x00, 0x00, 0x00, 0x20, 0x00,
+          0x00, 0x00, 0x01, 0x00, 0x20, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x04, 0x00, 0x00, 0x00, 0x00,
+          0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00
+        ])
+        trayIcon = nativeImage.createFromBuffer(iconData)
+      } catch (error) {
+        console.log('创建默认图标失败，使用空图标:', error.message)
+        // 如果还是失败，就使用空图标
+        trayIcon = nativeImage.createEmpty()
+      }
+    }
+    
+    console.log('创建托盘对象')
     tray = new Tray(trayIcon)
     
     // 设置托盘提示文本
