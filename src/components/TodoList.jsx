@@ -56,6 +56,8 @@ import {
   getPriorityText,
   comparePriority
 } from '../utils/priorityUtils';
+import { createDragHandler } from '../utils/DragManager'
+import { useDragAnimation } from './DragAnimationProvider';
 
 const TodoList = ({ onTodoSelect, onViewModeChange, onShowCompletedChange, viewMode, showCompleted, onMultiSelectChange, onMultiSelectRefChange, refreshTrigger, sortBy, onSortByChange }) => {
   const [todos, setTodos] = useState([]);
@@ -96,6 +98,26 @@ const TodoList = ({ onTodoSelect, onViewModeChange, onShowCompletedChange, viewM
     itemType: '待办事项',
     onMultiSelectChange,
     onMultiSelectRefChange
+  })
+
+  // 使用动画拖拽处理器 - 拖拽整个Todo列表
+  const { createAnimatedDragHandler } = useDragAnimation()
+  const dragHandler = createAnimatedDragHandler('todo', async (todoList) => {
+    try {
+      // 传递当前的todos列表作为参数
+      await window.electronAPI.createTodoWindow({ todos: todoList })
+    } catch (error) {
+      console.error('创建Todo独立窗口失败:', error)
+    }
+  }, {
+    onDragStart: (dragData) => {
+      // 添加Todo拖拽开始时的自定义逻辑
+      console.log('Todo列表拖拽开始，添加视觉反馈');
+    },
+    onCreateWindow: (dragData) => {
+      // Todo独立窗口创建成功后的回调
+      console.log('Todo独立窗口创建成功');
+    }
   })
 
   // 定义loadTodos函数，确保在使用前初始化
@@ -419,7 +441,24 @@ const TodoList = ({ onTodoSelect, onViewModeChange, onShowCompletedChange, viewM
       </Box>
 
       {/* 待办事项列表 */}
-      <Box sx={{ flex: 1, overflow: 'auto' }}>
+      <Box 
+        sx={{ flex: 1, overflow: 'auto' }}
+        onMouseDown={(e) => {
+          // 只在非多选模式下且有待办事项时启用拖拽
+          if (!multiSelect.isMultiSelectMode && todos.length > 0 && e.button === 0) {
+            // 检查是否点击在列表项上，而不是在具体的按钮或输入框上
+            const target = e.target;
+            const isClickOnListArea = target.closest('.MuiList-root') && 
+                                    !target.closest('.MuiIconButton-root') && 
+                                    !target.closest('.MuiCheckbox-root') && 
+                                    !target.closest('.MuiTextField-root');
+            
+            if (isClickOnListArea) {
+              dragHandler.handleDragStart(e, todos)
+            }
+          }
+        }}
+      >
         {isLoading ? (
           renderLoadingState()
         ) : todos.length === 0 ? (

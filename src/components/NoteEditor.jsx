@@ -25,6 +25,7 @@ import {
   ViewColumn as SplitViewIcon
 } from '@mui/icons-material'
 import { useStore } from '../store/useStore'
+import { useStandaloneContext } from './StandaloneProvider'
 import { formatDistanceToNow } from 'date-fns'
 import { zhCN } from 'date-fns/locale/zh-CN'
 import { parseTags, formatTags } from '../utils/tagUtils'
@@ -35,13 +36,25 @@ import MarkdownPreview from './MarkdownPreview'
 import MarkdownToolbar from './MarkdownToolbar'
 
 const NoteEditor = () => {
+  // 检测是否在独立窗口模式下运行
+  let standaloneContext = null
+  try {
+    standaloneContext = useStandaloneContext()
+  } catch (error) {
+    // 不在独立窗口模式下，使用主应用store
+  }
+  
+  // 根据运行环境选择状态管理
+  const mainStore = useStore()
+  const store = standaloneContext || mainStore
+  
   const {
     selectedNoteId,
     notes,
     updateNote,
     togglePinNote,
     autoSaveNote
-  } = useStore()
+  } = store
 
   const [title, setTitle] = useState('')
   const [content, setContent] = useState('')
@@ -225,9 +238,23 @@ const NoteEditor = () => {
   const formatLastSaved = (dateString) => {
     if (!dateString) return ''
     try {
-      // SQLite的CURRENT_TIMESTAMP返回UTC时间，需要转换为本地时间
-      const utcDate = new Date(dateString + 'Z') // 添加Z表示UTC时间
-      return formatDistanceToNow(utcDate, {
+      // 尝试多种时间格式解析
+      let date
+      if (dateString.includes('T') || dateString.includes('Z')) {
+        // ISO格式时间
+        date = new Date(dateString)
+      } else {
+        // SQLite的CURRENT_TIMESTAMP格式，假设为UTC时间
+        date = new Date(dateString + 'Z')
+      }
+      
+      // 检查日期是否有效
+      if (isNaN(date.getTime())) {
+        // 如果解析失败，尝试直接解析
+        date = new Date(dateString)
+      }
+      
+      return formatDistanceToNow(date, {
         addSuffix: true,
         locale: zhCN
       })

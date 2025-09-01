@@ -1,6 +1,6 @@
 {
   "name": "flashnote",
-  "version": "2.0.0",
+  "version": "2.0.1",
   "description": "闪念速记 V2.0 - 现代化本地笔记应用",
   "main": "electron/main.js",
   "homepage": "./",
@@ -9,7 +9,7 @@
     "build": "vite build",
     "preview": "vite preview",
     "electron": "electron .",
-    "electron-dev": "concurrently \"npm run dev\" \"wait-on http://localhost:5174 && electron .\"",
+    "electron-dev": "concurrently \"npm run dev\" \"wait-on http://localhost:5174 && cross-env NODE_ENV=development electron .\"",
     "electron-build": "npm run build && electron-builder",
     "test": "echo \"Error: no test specified\" && exit 1"
   },
@@ -41,6 +41,7 @@
   },
   "devDependencies": {
     "concurrently": "^9.2.1",
+    "cross-env": "^10.0.0",
     "electron": "^37.4.0",
     "electron-builder": "^26.0.12",
     "eslint": "^9.34.0",
@@ -64,7 +65,9 @@
       "target": [
         {
           "target": "nsis",
-          "arch": ["x64"]
+          "arch": [
+            "x64"
+          ]
         }
       ]
     },

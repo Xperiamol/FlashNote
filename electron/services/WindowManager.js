@@ -1,6 +1,7 @@
 const { BrowserWindow, screen, shell } = require('electron');
 const { EventEmitter } = require('events');
 const path = require('path');
+const http = require('http');
 const isDev = process.env.NODE_ENV === 'development';
 
 class WindowManager extends EventEmitter {
@@ -10,6 +11,32 @@ class WindowManager extends EventEmitter {
     this.windows = new Map(); // 存储所有窗口
     this.mainWindow = null;
     this.floatingWindow = null;
+  }
+
+  /**
+   * 检查Vite开发服务器是否可用
+   */
+  async checkViteServer() {
+    if (!isDev) return true;
+    
+    return new Promise((resolve) => {
+      console.log('检查 Vite 服务器状态...');
+      const req = http.get('http://localhost:5174/', (res) => {
+        console.log(`Vite 服务器响应状态: ${res.statusCode}`);
+        resolve(res.statusCode === 200);
+      });
+      
+      req.on('error', (error) => {
+        console.error('Vite服务器连接失败:', error.message);
+        resolve(false);
+      });
+      
+      req.setTimeout(8000, () => {
+        console.error('Vite服务器连接超时 (8秒)');
+        req.destroy();
+        resolve(false);
+      });
+    });
   }
 
   /**
@@ -37,7 +64,7 @@ class WindowManager extends EventEmitter {
           allowRunningInsecureContent: false
         },
         titleBarStyle: process.platform === 'darwin' ? 'hiddenInset' : 'default',
-        frame: true,
+        frame: false,
         transparent: false,
         hasShadow: true,
         resizable: true,
@@ -111,7 +138,7 @@ class WindowManager extends EventEmitter {
 
       // 加载悬浮窗口页面
       if (isDev) {
-        await this.floatingWindow.loadURL('http://localhost:5173/#/floating');
+        await this.floatingWindow.loadURL('http://localhost:5174/#/floating');
       } else {
         await this.floatingWindow.loadFile(path.join(__dirname, '../../dist/index.html'), {
           hash: 'floating'
@@ -139,9 +166,16 @@ class WindowManager extends EventEmitter {
    */
   async createNoteWindow(noteId) {
     try {
+      // 在开发模式下检查Vite服务器是否可用
+      if (isDev) {
+        const isViteServerAvailable = await this.checkViteServer();
+        if (!isViteServerAvailable) {
+          throw new Error('Vite开发服务器不可用，请确保npm run dev正在运行');
+        }
+      }
       const noteWindow = new BrowserWindow({
-        width: 800,
-        height: 600,
+        width: 1000,
+        height: 700,
         minWidth: 600,
         minHeight: 400,
         show: false,
@@ -149,40 +183,207 @@ class WindowManager extends EventEmitter {
         webPreferences: {
           nodeIntegration: false,
           contextIsolation: true,
-          preload: path.join(__dirname, '../preload.js')
+          enableRemoteModule: false,
+          preload: path.join(__dirname, '../preload.js'),
+          webSecurity: true,
+          allowRunningInsecureContent: false
         },
-        parent: this.mainWindow,
-        modal: false
+        titleBarStyle: process.platform === 'darwin' ? 'hiddenInset' : 'default',
+        frame: false,
+        transparent: false,
+        hasShadow: true,
+        resizable: true,
+        maximizable: true,
+        minimizable: true,
+        closable: true
       });
 
-      // 存储窗口引用
-      const windowId = `note-${noteId}`;
+      // 生成窗口ID
+      const windowId = `note-${noteId}-${Date.now()}`;
       this.windows.set(windowId, noteWindow);
-
-      // 加载笔记页面
+      
+      // 加载独立窗口页面并传递笔记ID
       if (isDev) {
-        await noteWindow.loadURL(`http://localhost:5173/#/note/${noteId}`);
+        await noteWindow.loadURL(`http://localhost:5174/standalone.html?type=note&noteId=${noteId}`);
       } else {
-        await noteWindow.loadFile(path.join(__dirname, '../../dist/index.html'), {
-          hash: `note/${noteId}`
+        await noteWindow.loadFile(path.join(__dirname, '../../dist/standalone.html'), {
+          query: { type: 'note', noteId }
         });
       }
 
       // 设置窗口事件
       noteWindow.on('closed', () => {
         this.windows.delete(windowId);
-        this.emit('note-window-closed', noteId);
       });
+
+      // 添加页面加载失败的错误处理
+      noteWindow.webContents.on('did-fail-load', (event, errorCode, errorDescription, validatedURL) => {
+        console.error(`独立窗口加载失败: ${errorDescription} (${errorCode}) - URL: ${validatedURL}`);
+      });
+
+      // 添加控制台消息监听（包括所有级别）
+      noteWindow.webContents.on('console-message', (event, level, message, line, sourceId) => {
+        const levelNames = ['verbose', 'info', 'warning', 'error'];
+        const levelName = levelNames[level] || 'unknown';
+        console.log(`[独立窗口-${levelName}] ${message} (${sourceId}:${line})`);
+      });
+
+      // 设置超时显示窗口，防止 ready-to-show 事件不触发
+      let windowShown = false;
+      const showTimeout = setTimeout(() => {
+        if (!windowShown) {
+          console.log('ready-to-show 事件超时，强制显示窗口');
+          noteWindow.show();
+          windowShown = true;
+          if (isDev) {
+            noteWindow.webContents.openDevTools();
+          }
+        }
+      }, 3000); // 3秒超时
 
       noteWindow.once('ready-to-show', () => {
-        noteWindow.show();
-        this.emit('note-window-ready', { noteId, window: noteWindow });
+        if (!windowShown) {
+          clearTimeout(showTimeout);
+          console.log('ready-to-show 事件触发，显示窗口');
+          noteWindow.show();
+          windowShown = true;
+          if (isDev) {
+            noteWindow.webContents.openDevTools();
+          }
+        }
       });
 
-      console.log(`笔记窗口创建成功: ${noteId}`);
-      return noteWindow;
+      // 添加页面加载完成事件
+      noteWindow.webContents.once('did-finish-load', () => {
+        console.log('独立窗口页面加载完成');
+        if (!windowShown) {
+          clearTimeout(showTimeout);
+          console.log('页面加载完成，显示窗口');
+          noteWindow.show();
+          windowShown = true;
+          if (isDev) {
+            noteWindow.webContents.openDevTools();
+          }
+        }
+      });
+      
+      // 添加DOM内容加载完成事件监听
+      noteWindow.webContents.once('dom-ready', () => {
+        console.log('独立窗口DOM准备就绪');
+        if (!windowShown) {
+          clearTimeout(showTimeout);
+          console.log('DOM准备就绪，显示窗口');
+          noteWindow.show();
+          windowShown = true;
+          if (isDev) {
+            noteWindow.webContents.openDevTools();
+          }
+        }
+      });
+      
+      // 添加页面标题更新事件监听
+      noteWindow.webContents.on('page-title-updated', () => {
+        console.log('独立窗口页面标题已更新');
+        if (!windowShown) {
+          clearTimeout(showTimeout);
+          console.log('页面标题更新，显示窗口');
+          noteWindow.show();
+          windowShown = true;
+          if (isDev) {
+            noteWindow.webContents.openDevTools();
+          }
+        }
+      });
+
+      console.log(`笔记窗口创建成功: ${windowId}`);
+      return { windowId };
     } catch (error) {
       console.error('创建笔记窗口失败:', error);
+      throw error;
+    }
+  }
+
+  /**
+   * 创建独立Todo窗口
+   */
+  async createTodoWindow(todoData) {
+    try {
+      // 在开发模式下检查Vite服务器是否可用
+      if (isDev) {
+        const isViteServerAvailable = await this.checkViteServer();
+        if (!isViteServerAvailable) {
+          throw new Error('Vite开发服务器不可用，请确保npm run dev正在运行');
+        }
+      }
+      const todoWindow = new BrowserWindow({
+        width: 800,
+        height: 600,
+        minWidth: 500,
+        minHeight: 400,
+        show: false,
+        icon: this.getAppIcon(),
+        webPreferences: {
+          nodeIntegration: false,
+          contextIsolation: true,
+          enableRemoteModule: false,
+          preload: path.join(__dirname, '../preload.js'),
+          webSecurity: true,
+          allowRunningInsecureContent: false
+        },
+        titleBarStyle: process.platform === 'darwin' ? 'hiddenInset' : 'default',
+        frame: false,
+        transparent: false,
+        hasShadow: true,
+        resizable: true,
+        maximizable: true,
+        minimizable: true,
+        closable: true
+      });
+
+      // 生成窗口ID
+      const windowId = `todo-${Date.now()}`;
+      this.windows.set(windowId, todoWindow);
+
+      // 序列化Todo数据
+      const encodedTodoData = encodeURIComponent(JSON.stringify(todoData));
+
+      // 加载独立窗口页面并传递Todo数据
+      if (isDev) {
+        await todoWindow.loadURL(`http://localhost:5174/standalone.html?type=todo&todoData=${encodedTodoData}`);
+      } else {
+        await todoWindow.loadFile(path.join(__dirname, '../../dist/standalone.html'), {
+          query: { type: 'todo', todoData: encodedTodoData }
+        });
+      }
+
+      // 设置窗口事件
+      todoWindow.on('closed', () => {
+        this.windows.delete(windowId);
+      });
+
+      // 添加页面加载失败的错误处理
+      todoWindow.webContents.on('did-fail-load', (event, errorCode, errorDescription, validatedURL) => {
+        console.error(`Todo独立窗口加载失败: ${errorDescription} (${errorCode}) - URL: ${validatedURL}`);
+      });
+
+      // 添加控制台错误监听
+      todoWindow.webContents.on('console-message', (event, level, message, line, sourceId) => {
+        if (level === 3) { // 错误级别
+          console.error(`Todo独立窗口控制台错误: ${message} (${sourceId}:${line})`);
+        }
+      });
+
+      todoWindow.once('ready-to-show', () => {
+        todoWindow.show();
+        if (isDev) {
+          todoWindow.webContents.openDevTools();
+        }
+      });
+
+      console.log(`Todo窗口创建成功: ${windowId}`);
+      return { windowId };
+    } catch (error) {
+      console.error('创建Todo窗口失败:', error);
       throw error;
     }
   }
@@ -252,7 +453,7 @@ class WindowManager extends EventEmitter {
     this.mainWindow.webContents.on('will-navigate', (event, navigationUrl) => {
       const parsedUrl = new URL(navigationUrl);
       
-      if (parsedUrl.origin !== 'http://localhost:5173' && !navigationUrl.startsWith('file://')) {
+      if (parsedUrl.origin !== 'http://localhost:5174' && !navigationUrl.startsWith('file://')) {
         event.preventDefault();
         shell.openExternal(navigationUrl);
       }
@@ -284,7 +485,7 @@ class WindowManager extends EventEmitter {
    */
   async loadApp(window) {
     if (isDev) {
-      await window.loadURL('http://localhost:5173');
+      await window.loadURL('http://localhost:5174');
     } else {
       await window.loadFile(path.join(__dirname, '../../dist/index.html'));
     }

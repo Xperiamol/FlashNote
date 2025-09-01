@@ -219,6 +219,10 @@ contextBridge.exposeInMainWorld('electronAPI', {
     }
   },
   
+  // 独立窗口创建API（顶层方法）
+  createNoteWindow: (noteId) => ipcRenderer.invoke('window:create-note-window', noteId),
+  createTodoWindow: (todoData) => ipcRenderer.invoke('window:create-todo-window', todoData),
+
   // 窗口管理API
   window: {
     // 窗口控制
@@ -245,12 +249,14 @@ contextBridge.exposeInMainWorld('electronAPI', {
     
     // 特殊窗口
     createFloatingBall: () => ipcRenderer.invoke('window:create-floating-ball'),
-    createNoteWindow: (noteId) => ipcRenderer.invoke('window:create-note-window', noteId),
     
     // 窗口管理
     getAllWindows: () => ipcRenderer.invoke('window:get-all'),
     getWindowById: (id) => ipcRenderer.invoke('window:get-by-id', id),
     closeWindow: (id) => ipcRenderer.invoke('window:close-window', id),
+    
+    // 窗口准备就绪通知
+    windowReady: () => ipcRenderer.invoke('window:ready'),
     
     // 事件监听
     onWindowStateChanged: (callback) => {

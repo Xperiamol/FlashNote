@@ -269,7 +269,101 @@ async function initializeServices() {
     
     // 初始化快捷键服务
     shortcutService = new ShortcutService()
-    
+
+    // 转发 NoteService 事件到所有渲染进程
+    const broadcastToAll = (channel, data) => {
+      try {
+        BrowserWindow.getAllWindows().forEach(win => {
+          if (win && !win.isDestroyed()) {
+            win.webContents.send(channel, data)
+          }
+        })
+      } catch (err) {
+        console.error(`广播事件失败: ${channel}`, err)
+      }
+    }
+
+    if (services && services.noteService) {
+      services.noteService.on('note-created', (note) => {
+        broadcastToAll('note:created', note)
+      })
+      services.noteService.on('note-updated', (note) => {
+        broadcastToAll('note:updated', note)
+      })
+      services.noteService.on('note-deleted', (payload) => {
+        broadcastToAll('note:deleted', payload)
+      })
+    }
+
+    // 检查是否为首次启动，如果没有笔记则创建示例笔记
+    try {
+      const notesResult = await services.noteService.getNotes({ limit: 1 })
+      if (notesResult.success && notesResult.data && notesResult.data.notes && notesResult.data.notes.length === 0) {
+        console.log('检测到首次启动，创建示例笔记')
+        const welcomeNote = {
+          title: '欢迎使用 FlashNote 2.0！',
+          content: `# 欢迎使用 FlashNote 2.0！ 🎉
+
+恭喜你成功安装了 FlashNote 2.0，这是一个现代化的本地笔记应用。
+
+## 快速开始
+
+### 基本操作
+- **创建笔记**：点击左上角的 "新建" 按钮或使用快捷键 \`Ctrl+N\`
+- **搜索笔记**：使用顶部搜索框快速找到你需要的笔记
+- **标签管理**：为笔记添加标签，方便分类和查找
+- **拖拽窗口**：试试拖动笔记列表到窗口外~
+
+
+### 快捷键
+- \`Ctrl+N\`：新建笔记
+- \`Ctrl+S\`：保存笔记
+- \`Ctrl+F\`：搜索笔记
+- \`Ctrl+Shift+N\`：快速输入（开发中）
+
+## 特色功能
+
+### Markdown 支持
+这个笔记应用支持 **Markdown** 语法，你可以：
+
+- 使用 **粗体** 和 *斜体*
+- 创建 [链接](https://github.com)
+- 添加代码块：
+
+\`\`\`javascript
+console.log('Hello, FlashNote!');
+\`\`\`
+
+- 制作任务列表：
+  - [x] 安装 FlashNote
+  - [x] 阅读欢迎笔记
+  - [ ] 创建第一个笔记
+  - [ ] 探索更多功能
+
+### 数据安全
+- 所有数据都存储在本地，保护你的隐私
+- 支持数据导入导出功能
+- 自动保存，不用担心数据丢失
+
+## 开始使用
+
+现在你可以：
+1. 删除这个示例笔记（如果不需要的话）
+2. 创建你的第一个笔记
+3. 探索设置选项，个性化你的使用体验
+
+祝你使用愉快！ 📝✨`,
+          tags: ['欢迎', '教程'],
+          category: 'default'
+        }
+        
+        await services.noteService.createNote(welcomeNote)
+        console.log('示例笔记创建成功')
+      }
+    } catch (error) {
+      console.error('创建示例笔记失败:', error)
+    }
+
     console.log('所有服务初始化完成')
   } catch (error) {
     console.error('服务初始化失败:', error)
@@ -746,6 +840,10 @@ ipcMain.handle('window:create-note-window', async (event, noteId) => {
   return await windowManager.createNoteWindow(noteId)
 })
 
+ipcMain.handle('window:create-todo-window', async (event, todoListId) => {
+  return await windowManager.createTodoWindow(todoListId)
+})
+
 ipcMain.handle('window:get-all', async (event) => {
   return windowManager.getAllWindows()
 })
@@ -756,6 +854,15 @@ ipcMain.handle('window:get-by-id', async (event, id) => {
 
 ipcMain.handle('window:close-window', async (event, id) => {
   return windowManager.closeWindow(id)
+})
+
+ipcMain.handle('window:ready', async (event) => {
+  const webContents = event.sender
+  const window = BrowserWindow.fromWebContents(webContents)
+  if (window) {
+    console.log('收到窗口准备就绪通知，触发ready-to-show事件')
+    window.emit('ready-to-show')
+  }
 })
 
 // 系统相关IPC处理

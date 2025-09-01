@@ -25,6 +25,7 @@ import Settings from './components/Settings'
 import SecondarySidebar from './components/SecondarySidebar'
 import MultiSelectToolbar from './components/MultiSelectToolbar'
 import TagSelectionDialog from './components/TagSelectionDialog'
+import DragAnimationProvider from './components/DragAnimationProvider'
 
 function App() {
   const { theme, primaryColor, loadNotes, currentView, initializeSettings, setCurrentView, createNote, batchDeleteNotes, batchDeleteTodos, batchCompleteTodos, batchRestoreNotes, batchPermanentDeleteNotes, getAllTags, batchSetTags } = useStore()
@@ -177,6 +178,7 @@ function App() {
   return (
     <ThemeProvider theme={appTheme}>
       <CssBaseline />
+      <DragAnimationProvider>
       <Box sx={{ display: 'flex', flexDirection: 'column', height: '100vh' }}>
         {/* 自定义标题栏 */}
         <TitleBar />
@@ -488,7 +490,8 @@ function App() {
         onConfirm={handleConfirmBatchSetTags}
         noteIds={selectedNotesForTagging}
         getAllTags={getAllTags}
-      />
+      />      
+      </DragAnimationProvider>
     </ThemeProvider>
   )
 }

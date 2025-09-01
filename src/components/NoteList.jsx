@@ -41,6 +41,8 @@ import { useMultiSelectManager } from '../hooks/useMultiSelectManager'
 import { searchNotesAPI } from '../api/searchAPI'
 import TagFilter from './TagFilter'
 import MultiSelectToolbar from './MultiSelectToolbar'
+import { createDragHandler } from '../utils/DragManager'
+import { useDragAnimation } from './DragAnimationProvider'
 
 const NoteList = ({ showDeleted = false, onMultiSelectChange, onMultiSelectRefChange }) => {
   const {
@@ -65,6 +67,25 @@ const NoteList = ({ showDeleted = false, onMultiSelectChange, onMultiSelectRefCh
   const [selectedTagFilters, setSelectedTagFilters] = useState([])
   const [permanentDeleteConfirm, setPermanentDeleteConfirm] = useState(false)
   const [batchPermanentDeleteConfirm, setBatchPermanentDeleteConfirm] = useState(false)
+
+  // 使用动画拖拽处理器
+  const { createAnimatedDragHandler } = useDragAnimation()
+  const dragHandler = createAnimatedDragHandler('note', async (note) => {
+    try {
+      await window.electronAPI.createNoteWindow(note.id)
+    } catch (error) {
+      console.error('创建笔记独立窗口失败:', error)
+    }
+  }, {
+    onDragStart: (dragData) => {
+      // 添加拖拽开始时的自定义逻辑
+      console.log('笔记拖拽开始，添加视觉反馈');
+    },
+    onCreateWindow: (dragData) => {
+      // 独立窗口创建成功后的回调
+      console.log('笔记独立窗口创建成功');
+    }
+  })
 
   // 过滤笔记
   const filteredNotes = notes.filter(note => {
@@ -442,6 +463,12 @@ const NoteList = ({ showDeleted = false, onMultiSelectChange, onMultiSelectRefCh
                         selected={!multiSelect.isMultiSelectMode && selectedNoteId === note.id}
                         onClick={(e) => multiSelect.handleClick(e, note.id, handleNoteClick)}
                         onContextMenu={(e) => multiSelect.handleContextMenu(e, note.id, multiSelect.isMultiSelectMode)}
+                        onMouseDown={(e) => {
+                          // 只在非多选模式下启用拖拽
+                          if (!multiSelect.isMultiSelectMode && e.button === 0) {
+                            dragHandler.handleDragStart(e, note)
+                          }
+                        }}
                         sx={{
                           py: 1.5,
                           pr: multiSelect.isMultiSelectMode ? 2 : 6,
