@@ -38,6 +38,10 @@ const MarkdownPreview = ({ content, sx }) => {
         width: '100%',
         boxSizing: 'border-box',
         wordBreak: 'break-word',
+        userSelect: 'text', // 允许文字选择和复制
+        WebkitUserSelect: 'text',
+        MozUserSelect: 'text',
+        msUserSelect: 'text',
         '& h1, & h2, & h3, & h4, & h5, & h6': {
           marginTop: 2,
           marginBottom: 1,

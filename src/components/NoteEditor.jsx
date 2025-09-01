@@ -524,7 +524,15 @@ const NoteEditor = () => {
             minHeight: 0
           }}>
             {viewMode === 'preview' && (
-              <Box sx={{ p: 2, borderBottom: 1, borderColor: 'divider' }}>
+              <Box sx={{ 
+                p: 2, 
+                borderBottom: 1, 
+                borderColor: 'divider',
+                userSelect: 'text', // 允许标题和标签文字选择
+                WebkitUserSelect: 'text',
+                MozUserSelect: 'text',
+                msUserSelect: 'text'
+              }}>
                 <Typography variant="h5" sx={{ fontWeight: 500, mb: 1 }}>
                   {title || '无标题'}
                 </Typography>
