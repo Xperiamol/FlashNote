@@ -213,6 +213,40 @@ class DatabaseManager {
         this.db.exec("ALTER TABLE todos ADD COLUMN tags TEXT DEFAULT ''");
         console.log('todos表迁移完成');
       }
+      
+      // 检查并添加重复事项相关字段
+      const currentTableInfo = this.db.prepare("PRAGMA table_info(todos)").all();
+      const columnNames = currentTableInfo.map(col => col.name);
+      
+      const repeatColumns = [
+        { name: 'repeat_type', sql: "ALTER TABLE todos ADD COLUMN repeat_type TEXT DEFAULT 'none'" },
+        { name: 'repeat_days', sql: "ALTER TABLE todos ADD COLUMN repeat_days TEXT DEFAULT ''" },
+        { name: 'repeat_interval', sql: "ALTER TABLE todos ADD COLUMN repeat_interval INTEGER DEFAULT 1" },
+        { name: 'next_due_date', sql: "ALTER TABLE todos ADD COLUMN next_due_date DATETIME NULL" },
+        { name: 'is_recurring', sql: "ALTER TABLE todos ADD COLUMN is_recurring INTEGER DEFAULT 0" },
+        { name: 'parent_todo_id', sql: "ALTER TABLE todos ADD COLUMN parent_todo_id INTEGER NULL" }
+      ];
+      
+      for (const column of repeatColumns) {
+        if (!columnNames.includes(column.name)) {
+          console.log(`添加${column.name}字段到todos表...`);
+          this.db.exec(column.sql);
+        }
+      }
+      
+      // 添加重复事项相关索引
+      const repeatIndexes = [
+        'CREATE INDEX IF NOT EXISTS idx_todos_repeat_type ON todos(repeat_type)',
+        'CREATE INDEX IF NOT EXISTS idx_todos_is_recurring ON todos(is_recurring)',
+        'CREATE INDEX IF NOT EXISTS idx_todos_next_due_date ON todos(next_due_date)',
+        'CREATE INDEX IF NOT EXISTS idx_todos_parent_todo_id ON todos(parent_todo_id)'
+      ];
+      
+      for (const indexSql of repeatIndexes) {
+        this.db.exec(indexSql);
+      }
+      
+      console.log('重复事项字段迁移完成');
     } catch (error) {
       console.error('数据库迁移失败:', error);
       // 不抛出错误，允许应用继续运行

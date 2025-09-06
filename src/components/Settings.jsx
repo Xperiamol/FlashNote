@@ -318,6 +318,8 @@ const Settings = () => {
     setTabValue(newValue);
   };
 
+
+
   return (
     <Box sx={{ height: '100%', display: 'flex', flexDirection: 'column' }}>
       {/* 标签页 */}
@@ -382,6 +384,7 @@ const Settings = () => {
                 </Box>
               </ListItemSecondaryAction>
             </ListItem>
+
           </List>
         </TabPanel>
 
@@ -603,7 +606,7 @@ const Settings = () => {
               一个简洁高效的笔记应用
             </Typography>
             <Typography variant="body2" color="text.secondary" sx={{ mb: 4 }}>
-              版本 2.0.0
+              版本 2.0.2
             </Typography>
             
             <Box sx={{ display: 'flex', justifyContent: 'center', gap: 2 }}>

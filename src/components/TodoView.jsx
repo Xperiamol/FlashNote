@@ -41,6 +41,9 @@ import {
 import { format, isToday, isPast, parseISO } from 'date-fns';
 import { zhCN } from 'date-fns/locale';
 import TagInput from './TagInput';
+import DateTimePicker from './DateTimePicker';
+import RepeatSettings from './RepeatSettings';
+import TimeZoneUtils from '../utils/timeZoneUtils';
 
 const TodoView = ({ viewMode, showCompleted, onViewModeChange, onShowCompletedChange, showCreateForm, onCreateFormClose, onRefresh, selectedTodo, onTodoSelect }) => {
   const theme = useTheme();
@@ -55,7 +58,11 @@ const TodoView = ({ viewMode, showCompleted, onViewModeChange, onShowCompletedCh
     content: '',
     is_important: false,
     is_urgent: false,
-    due_date: ''
+    due_date: '',
+    due_time: '',
+    repeat_type: 'none',
+    repeat_interval: 1,
+    repeat_days: ''
   });
 
   // 监听selectedTodo变化，自动打开编辑对话框
@@ -143,14 +150,25 @@ const TodoView = ({ viewMode, showCompleted, onViewModeChange, onShowCompletedCh
     if (!newTodo.content.trim()) return;
     
     try {
+      // 使用TimeZoneUtils转换日期时间为UTC
+      const dueDateUTC = TimeZoneUtils.toUTC(newTodo.due_date, newTodo.due_time);
+      
+      console.log('[TodoView] 创建待办事项:');
+      console.log('  - 本地日期:', newTodo.due_date);
+      console.log('  - 本地时间:', newTodo.due_time);
+      console.log('  - UTC时间:', dueDateUTC);
+      
       const result = await window.electronAPI.todos.create({
         content: newTodo.content,
         is_important: newTodo.is_important,
         is_urgent: newTodo.is_urgent,
-        due_date: newTodo.due_date || null
+        due_date: dueDateUTC,
+        repeat_type: newTodo.repeat_type,
+        repeat_interval: newTodo.repeat_interval,
+        repeat_days: newTodo.repeat_days
       });
       if (result.success) {
-        setNewTodo({ content: '', is_important: false, is_urgent: false, due_date: '' });
+        setNewTodo({ content: '', is_important: false, is_urgent: false, due_date: '', due_time: '', repeat_type: 'none', repeat_interval: 1, repeat_days: '' });
         if (onCreateFormClose) {
           onCreateFormClose();
         }
@@ -169,9 +187,31 @@ const TodoView = ({ viewMode, showCompleted, onViewModeChange, onShowCompletedCh
   // 更新待办事项
   const handleUpdateTodo = async (id, updates) => {
     try {
+      // 如果更新包含日期时间，需要转换为UTC
+      if (updates.due_date !== undefined || updates.due_time !== undefined) {
+        const currentTodo = editingTodo;
+        const { date: currentDate, time: currentTime } = TimeZoneUtils.fromUTC(currentTodo.due_date);
+        
+        const finalDate = updates.due_date !== undefined ? updates.due_date : currentDate;
+        const finalTime = updates.due_time !== undefined ? updates.due_time : currentTime;
+        
+        const dueDateUTC = TimeZoneUtils.toUTC(finalDate, finalTime);
+        
+        console.log('[TodoView] 更新待办事项:');
+        console.log('  - 本地日期:', finalDate);
+        console.log('  - 本地时间:', finalTime);
+        console.log('  - UTC时间:', dueDateUTC);
+        
+        updates = { ...updates, due_date: dueDateUTC };
+        delete updates.due_time; // 移除due_time，因为已经合并到due_date中
+      }
+      
       const result = await window.electronAPI.todos.update(id, updates);
       if (result.success) {
         setEditingTodo(null);
+        if (onTodoSelect) {
+          onTodoSelect(null); // 清除选中状态
+        }
         loadTodos();
         if (onRefresh) {
           onRefresh();
@@ -186,8 +226,8 @@ const TodoView = ({ viewMode, showCompleted, onViewModeChange, onShowCompletedCh
 
   // 渲染单个待办事项
   const renderTodoItem = (todo) => {
-    const isOverdue = todo.due_date && isPast(parseISO(todo.due_date)) && !todo.is_completed;
-    const isDueToday = todo.due_date && isToday(parseISO(todo.due_date));
+    const isOverdue = todo.due_date && TimeZoneUtils.isOverdue(todo.due_date) && !todo.is_completed;
+    const isDueToday = todo.due_date && TimeZoneUtils.isToday(todo.due_date);
     
     return (
       <Paper
@@ -252,7 +292,10 @@ const TodoView = ({ viewMode, showCompleted, onViewModeChange, onShowCompletedCh
                 <Chip
                   size="small"
                   icon={<ScheduleIcon sx={{ fontSize: '0.8rem !important' }} />}
-                  label={format(parseISO(todo.due_date), 'MM/dd', { locale: zhCN })}
+                  label={TimeZoneUtils.formatForDisplay(todo.due_date, { 
+                    shortFormat: true, 
+                    showTime: TimeZoneUtils.hasTime(todo.due_date) 
+                  })}
                   color={isOverdue ? 'error' : isDueToday ? 'warning' : 'default'}
                   variant={isOverdue || isDueToday ? 'filled' : 'outlined'}
                   sx={{ fontSize: '0.7rem', height: 20 }}
@@ -504,7 +547,7 @@ const TodoView = ({ viewMode, showCompleted, onViewModeChange, onShowCompletedCh
             if (onCreateFormClose) {
               onCreateFormClose();
             }
-            setNewTodo({ content: '', is_important: false, is_urgent: false, due_date: '' });
+            setNewTodo({ content: '', is_important: false, is_urgent: false, due_date: '', due_time: '', repeat_type: 'none', repeat_interval: 1, repeat_days: '' });
           }}
         />
       )}
@@ -528,17 +571,81 @@ const TodoView = ({ viewMode, showCompleted, onViewModeChange, onShowCompletedCh
 
 // 编辑待办事项表单组件
 const EditTodoForm = ({ todo, onSave, onCancel }) => {
+  // 使用TimeZoneUtils正确转换UTC时间为本地时间
+  const { date: localDate, time: localTime } = TimeZoneUtils.fromUTC(todo.due_date);
+  
+  console.log('[EditTodoForm] 初始化编辑表单:');
+  console.log('  - 原始UTC时间:', todo.due_date);
+  console.log('  - 转换后本地日期:', localDate);
+  console.log('  - 转换后本地时间:', localTime);
+  
   const [formData, setFormData] = useState({
     content: todo.content,
     tags: todo.tags || '',
     is_important: todo.is_important,
     is_urgent: todo.is_urgent,
-    due_date: todo.due_date ? todo.due_date.split('T')[0] : ''
+    due_date: localDate,
+    due_time: localTime,
+    repeat_type: todo.repeat_type || 'none',
+    repeat_interval: todo.repeat_interval || 1,
+    repeat_days: todo.repeat_days || ''
   });
+
+
+
+  const getCombinedDateTime = () => {
+    if (!formData.due_date) return '';
+    if (formData.due_time) {
+      return `${formData.due_date}T${formData.due_time}:00`;
+    }
+    return `${formData.due_date}T00:00:00`;
+  };
+
+  // 处理日期时间变化
+  const handleDateTimeChange = (field, value) => {
+    if (field === 'due_date' && !value) {
+      // 如果清除日期，同时清除时间
+      setFormData({ ...formData, due_date: '', due_time: '' });
+    } else {
+      setFormData({ ...formData, [field]: value });
+    }
+  };
+
+  // 处理重复设置变化
+  const handleRepeatSettingsChange = (repeatSettings) => {
+    const newFormData = { ...formData, ...repeatSettings };
+    
+    // 如果选择了重复类型（非'none'）但没有设置日期，则默认设置为今天
+    if (repeatSettings.repeat_type && repeatSettings.repeat_type !== 'none' && !newFormData.due_date) {
+      const todayDate = TimeZoneUtils.getTodayDateString();
+      newFormData.due_date = todayDate;
+      
+      console.log('[EditTodoForm] 设置重复时自动填入今天日期:', todayDate);
+    }
+    
+    setFormData(newFormData);
+  };
 
   const handleSubmit = () => {
     if (!formData.content.trim()) return;
-    onSave(todo.id, formData);
+    
+    console.log('[EditTodoForm] 提交编辑表单:');
+    console.log('  - 表单日期:', formData.due_date);
+    console.log('  - 表单时间:', formData.due_time);
+    
+    const submitData = {
+      content: formData.content,
+      tags: formData.tags,
+      is_important: formData.is_important,
+      is_urgent: formData.is_urgent,
+      due_date: formData.due_date,
+      due_time: formData.due_time,
+      repeat_type: formData.repeat_type,
+      repeat_interval: formData.repeat_interval,
+      repeat_days: formData.repeat_days
+    };
+    
+    onSave(todo.id, submitData);
   };
 
   return (
@@ -592,14 +699,24 @@ const EditTodoForm = ({ todo, onSave, onCancel }) => {
           sx={{ mb: 2 }}
         />
         
-        <TextField
-          label="截止日期"
-          type="date"
-          fullWidth
-          variant="outlined"
-          value={formData.due_date}
-          onChange={(e) => setFormData({ ...formData, due_date: e.target.value })}
-          InputLabelProps={{ shrink: true }}
+        <RepeatSettings
+          value={{
+            repeat_type: formData.repeat_type,
+            repeat_interval: formData.repeat_interval,
+            repeat_days: formData.repeat_days
+          }}
+          onChange={handleRepeatSettingsChange}
+        />
+        
+        <DateTimePicker
+          dateValue={formData.due_date}
+          timeValue={formData.due_time}
+          onDateChange={(date) => handleDateTimeChange('due_date', date)}
+          onTimeChange={(time) => handleDateTimeChange('due_time', time)}
+          dateLabel="截止日期"
+          timeLabel="截止时间"
+          disableDate={formData.repeat_type && formData.repeat_type !== 'none'}
+          sx={{ mb: 2 }}
         />
       </DialogContent>
       <DialogActions>
@@ -612,6 +729,35 @@ const EditTodoForm = ({ todo, onSave, onCancel }) => {
 
 // 创建待办事项弹窗组件
 const CreateTodoModal = ({ todo, onChange, onSubmit, onCancel }) => {
+  // 处理日期时间变化
+  const handleDateTimeChange = (field, value) => {
+    console.log(`[CreateTodoModal] 日期时间变化: ${field} = ${value}`);
+    
+    const newTodo = { ...todo, [field]: value };
+    
+    // 如果清除日期，同时清除时间字段
+    if (field === 'due_date' && !value) {
+      newTodo.due_time = '';
+    }
+    
+    onChange(newTodo);
+  };
+
+  // 处理重复设置变化
+  const handleRepeatSettingsChange = (repeatSettings) => {
+    const newTodo = { ...todo, ...repeatSettings };
+    
+    // 如果选择了重复类型（非'none'）但没有设置日期，则默认设置为今天
+    if (repeatSettings.repeat_type && repeatSettings.repeat_type !== 'none' && !newTodo.due_date) {
+      const todayDate = TimeZoneUtils.getTodayDateString();
+      newTodo.due_date = todayDate;
+      
+      console.log('[CreateTodoModal] 设置重复时自动填入今天日期:', todayDate);
+    }
+    
+    onChange(newTodo);
+  };
+
   const handleSubmit = () => {
     if (!todo.content.trim()) return;
     onSubmit();
@@ -668,15 +814,27 @@ const CreateTodoModal = ({ todo, onChange, onSubmit, onCancel }) => {
           sx={{ mb: 2 }}
         />
         
-        <TextField
-          label="截止日期"
-          type="date"
-          fullWidth
-          variant="outlined"
-          value={todo.due_date}
-          onChange={(e) => onChange({ ...todo, due_date: e.target.value })}
-          InputLabelProps={{ shrink: true }}
+        <RepeatSettings
+          value={{
+            repeat_type: todo.repeat_type,
+            repeat_interval: todo.repeat_interval,
+            repeat_days: todo.repeat_days
+          }}
+          onChange={handleRepeatSettingsChange}
         />
+        
+        <DateTimePicker
+          dateValue={todo.due_date ? todo.due_date.split('T')[0] : ''}
+          timeValue={todo.due_time || ''}
+          onDateChange={(date) => handleDateTimeChange('due_date', date)}
+          onTimeChange={(time) => handleDateTimeChange('due_time', time)}
+          dateLabel="截止日期"
+          timeLabel="截止时间"
+          disableDate={todo.repeat_type && todo.repeat_type !== 'none'}
+          sx={{ mb: 2 }}
+        />
+        
+
       </DialogContent>
       <DialogActions>
         <Button onClick={onCancel}>取消</Button>

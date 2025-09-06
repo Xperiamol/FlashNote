@@ -325,6 +325,9 @@ contextBridge.exposeInMainWorld('electronAPI', {
     getAll: () => ipcRenderer.invoke('shortcut:get-all')
   },
   
+  // 通用 invoke 方法
+  invoke: (channel, ...args) => ipcRenderer.invoke(channel, ...args),
+  
   // 暴露 ipcRenderer 用于事件监听
   ipcRenderer: {
     on: (channel, callback) => {

@@ -1,5 +1,7 @@
 const TodoDAO = require('../dao/TodoDAO');
 const TagService = require('./TagService');
+const RepeatUtils = require('../utils/repeatUtils');
+const TimeZoneUtils = require('../utils/timeZoneUtils');
 const { ipcMain } = require('electron');
 const EventEmitter = require('events');
 
@@ -8,7 +10,28 @@ class TodoService extends EventEmitter {
     super();
     this.todoDAO = new TodoDAO();
     this.tagService = new TagService();
+    this.notificationService = null; // 将在主进程中设置
     this.setupIpcHandlers();
+  }
+
+  /**
+   * 设置通知服务
+   * @param {NotificationService} notificationService - 通知服务实例
+   */
+  setNotificationService(notificationService) {
+    this.notificationService = notificationService;
+    
+    // 监听通知服务的检查事件
+    if (this.notificationService) {
+      this.notificationService.on('check-due-todos', () => {
+        this.checkAndNotifyDueTodos();
+      });
+      
+      this.notificationService.on('notification-clicked', (todo) => {
+        // 通知被点击时的处理
+        this.emit('notification-clicked', todo);
+      });
+    }
   }
 
   /**
@@ -241,6 +264,39 @@ class TodoService extends EventEmitter {
         return { success: false, error: error.message };
       }
     });
+
+    // 导出待办事项
+    ipcMain.handle('todo:export', async (event, options) => {
+      try {
+        const data = this.exportTodos(options);
+        return { success: true, data };
+      } catch (error) {
+        console.error('导出待办事项失败:', error);
+        return { success: false, error: error.message };
+      }
+    });
+
+    // 获取重复事项
+    ipcMain.handle('todo:getRecurring', async (event) => {
+      try {
+        const todos = this.getRecurringTodos();
+        return { success: true, data: todos };
+      } catch (error) {
+        console.error('获取重复事项失败:', error);
+        return { success: false, error: error.message };
+      }
+    });
+
+    // 处理到期的重复事项
+    ipcMain.handle('todo:processRecurring', async (event) => {
+      try {
+        const result = this.processRecurringTodos();
+        return { success: true, data: result };
+      } catch (error) {
+        console.error('处理重复事项失败:', error);
+        return { success: false, error: error.message };
+      }
+    });
   }
 
   /**
@@ -265,7 +321,10 @@ class TodoService extends EventEmitter {
       tags: formattedTags,
       is_important: todoData.is_important ? 1 : 0,
       is_urgent: todoData.is_urgent ? 1 : 0,
-      due_date: todoData.due_date || null
+      due_date: todoData.due_date || null,
+      repeat_type: todoData.repeat_type || 'none',
+      repeat_interval: todoData.repeat_interval || 1,
+      repeat_days: todoData.repeat_days || ''
     });
 
     // 更新标签使用次数
@@ -372,7 +431,14 @@ class TodoService extends EventEmitter {
     }
 
     const newStatus = todo.is_completed ? 0 : 1;
-    return this.todoDAO.update(id, { is_completed: newStatus });
+    const updatedTodo = this.todoDAO.update(id, { is_completed: newStatus });
+
+    // 如果任务被标记为完成且有重复设置，创建下次重复任务
+    if (newStatus === 1 && todo.repeat_type && todo.repeat_type !== 'none') {
+      this.handleRecurringTodo(todo);
+    }
+
+    return updatedTodo;
   }
 
   /**
@@ -525,6 +591,148 @@ class TodoService extends EventEmitter {
         }))
       }
     };
+  }
+
+  /**
+   * 处理重复任务
+   */
+  handleRecurringTodo(todo) {
+    if (!todo.repeat_type || todo.repeat_type === 'none') {
+      return null;
+    }
+
+    const nextDueDate = RepeatUtils.calculateNextDueDate(todo.due_date, todo.repeat_type, todo.repeat_interval, todo.repeat_days);
+    
+    if (nextDueDate) {
+      const newTodo = {
+        content: todo.content,
+        tags: todo.tags,
+        is_important: todo.is_important,
+        is_urgent: todo.is_urgent,
+        due_date: nextDueDate,
+        repeat_type: todo.repeat_type,
+        repeat_interval: todo.repeat_interval,
+        repeat_days: todo.repeat_days
+      };
+      
+      return this.createTodo(newTodo);
+    }
+    
+    return null;
+  }
+
+  /**
+   * 获取重复事项
+   */
+  getRecurringTodos() {
+    return this.todoDAO.findRecurringTodos();
+  }
+
+  /**
+   * 处理到期的重复事项
+   */
+  processRecurringTodos() {
+    const recurringTodos = this.getRecurringTodos();
+    let processedCount = 0;
+    const newTodos = [];
+
+    recurringTodos.forEach(todo => {
+      if (todo.is_completed && todo.repeat_type && todo.repeat_type !== 'none') {
+        const newTodo = this.handleRecurringTodo(todo);
+        if (newTodo) {
+          newTodos.push(newTodo);
+          processedCount++;
+        }
+      }
+    });
+
+    return {
+      processedCount,
+      newTodos
+    };
+  }
+
+  /**
+   * 检查并通知到期的待办事项
+   */
+  checkAndNotifyDueTodos() {
+    try {
+      const dueTodos = this.getDueTodosForNotification();
+      
+      if (this.notificationService && dueTodos.length > 0) {
+        this.notificationService.handleDueTodos(dueTodos);
+      }
+    } catch (error) {
+      console.error('检查到期待办事项时出错:', error);
+    }
+  }
+
+  /**
+   * 获取需要通知的到期待办事项
+   * @returns {Array} 到期的待办事项列表
+   */
+  getDueTodosForNotification() {
+    const now = new Date();
+    const dueTodos = [];
+
+    // 获取今日到期的待办事项
+    const todayDue = this.getTodosDueToday();
+    dueTodos.push(...todayDue);
+
+    // 获取逾期的待办事项
+    const overdue = this.getOverdueTodos();
+    dueTodos.push(...overdue);
+
+    // 获取即将到期的待办事项（未来1小时内）
+    const soonDue = this.getTodosDueSoon(60); // 60分钟内
+    dueTodos.push(...soonDue);
+
+    // 去重（避免同一个待办事项出现在多个列表中）
+    const uniqueTodos = dueTodos.filter((todo, index, self) => 
+      index === self.findIndex(t => t.id === todo.id)
+    );
+
+    return uniqueTodos;
+  }
+
+  /**
+   * 获取即将到期的待办事项
+   * @param {number} minutesAhead - 提前多少分钟
+   * @returns {Array} 即将到期的待办事项列表
+   */
+  getTodosDueSoon(minutesAhead = 60) {
+    try {
+      const db = this.todoDAO.getDB();
+      const nowUTC = TimeZoneUtils.nowUTC();
+      const soonTimeUTC = TimeZoneUtils.addMinutesUTC(minutesAhead);
+      
+      console.log(`[TodoService] 查询即将到期的待办事项 (${minutesAhead}分钟内):`);
+      console.log(`  - 当前时间 (UTC): ${nowUTC}`);
+      console.log(`  - 截止时间 (UTC): ${soonTimeUTC}`);
+      
+      const stmt = db.prepare(`
+         SELECT * FROM todos 
+         WHERE is_completed = 0 
+           AND due_date > ?
+           AND due_date <= ?
+         ORDER BY due_date ASC
+       `);
+      
+      const results = stmt.all(nowUTC, soonTimeUTC);
+      console.log(`  - 找到 ${results.length} 个即将到期的待办事项`);
+      
+      return results;
+    } catch (error) {
+      console.error('获取即将到期的待办事项时出错:', error);
+      return [];
+    }
+  }
+
+  /**
+   * 手动触发通知检查（用于测试）
+   */
+  triggerNotificationCheck() {
+    this.checkAndNotifyDueTodos();
   }
 }
 

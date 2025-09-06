@@ -12,6 +12,7 @@ const TagService = require('./services/TagService')
 const WindowManager = require('./services/WindowManager')
 const DataImportService = require('./services/DataImportService')
 const ShortcutService = require('./services/ShortcutService')
+const NotificationService = require('./services/NotificationService')
 
 // 保持对窗口对象的全局引用，如果不这样做，当JavaScript对象被垃圾回收时，窗口将自动关闭
 let mainWindow
@@ -80,11 +81,25 @@ function createWindow() {
 // 创建系统托盘
 function createTray() {
   try {
-    // 创建托盘图标 - 使用logo.png作为托盘图标
-    const iconPath = path.join(__dirname, '../logo.png')
+    // 创建托盘图标 - 根据是否打包使用不同路径
+    let iconPath
+    let svgIconPath
+    
+    if (isDev) {
+      // 开发环境路径
+      iconPath = path.join(__dirname, '../logo.png')
+      svgIconPath = path.join(__dirname, '../assets/tray-icon.svg')
+    } else {
+      // 打包后路径 - 图标文件会被复制到resources目录
+      iconPath = path.join(process.resourcesPath, 'logo.png')
+      svgIconPath = path.join(process.resourcesPath, 'assets/tray-icon.svg')
+    }
+    
     let trayIcon
     
-    console.log('尝试创建托盘图标，图标路径:', iconPath)
+    console.log('尝试创建托盘图标，开发环境:', isDev)
+    console.log('PNG图标路径:', iconPath)
+    console.log('SVG图标路径:', svgIconPath)
     
     // 检查图标文件是否存在
     if (fs.existsSync(iconPath)) {
@@ -95,7 +110,6 @@ function createTray() {
       if (trayIcon.isEmpty()) {
         console.log('logo.png创建的图标为空，尝试使用SVG图标')
         // 如果PNG图标创建失败，尝试使用SVG图标
-        const svgIconPath = path.join(__dirname, '../assets/tray-icon.svg')
         if (fs.existsSync(svgIconPath)) {
           trayIcon = nativeImage.createFromPath(svgIconPath)
         }
@@ -109,7 +123,6 @@ function createTray() {
     } else {
       console.log('logo.png文件不存在，尝试使用SVG图标')
       // 如果主图标不存在，尝试使用SVG图标
-      const svgIconPath = path.join(__dirname, '../assets/tray-icon.svg')
       if (fs.existsSync(svgIconPath)) {
         trayIcon = nativeImage.createFromPath(svgIconPath)
         trayIcon = trayIcon.resize({ width: 16, height: 16 })
@@ -263,6 +276,27 @@ async function initializeServices() {
     services.todoService = new TodoService()
     services.tagService = new TagService()
     services.dataImportService = new DataImportService(services.noteService, services.settingsService)
+    
+    // 初始化通知服务
+    services.notificationService = new NotificationService()
+    
+    // 将通知服务连接到TodoService
+    services.todoService.setNotificationService(services.notificationService)
+    
+    // 监听通知点击事件，打开主窗口并聚焦到待办事项
+    services.notificationService.on('notification-clicked', (todo) => {
+      if (mainWindow) {
+        if (mainWindow.isMinimized()) mainWindow.restore()
+        if (!mainWindow.isVisible()) mainWindow.show()
+        mainWindow.focus()
+        
+        // 发送事件到渲染进程，让前端跳转到对应的待办事项
+        mainWindow.webContents.send('todo:focus', todo.id)
+      }
+    })
+    
+    // 启动通知服务
+    services.notificationService.start()
     
     // 初始化窗口管理器
     windowManager = new WindowManager()
@@ -907,6 +941,8 @@ ipcMain.handle('system:show-notification', async (event, options) => {
   notification.show()
   return { success: true }
 })
+
+
 
 // 打开数据文件夹
 ipcMain.handle('system:open-data-folder', async (event) => {

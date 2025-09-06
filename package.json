@@ -1,6 +1,6 @@
 {
   "name": "flashnote",
-  "version": "2.0.1",
+  "version": "2.0.2",
   "description": "闪念速记 V2.0 - 现代化本地笔记应用",
   "main": "electron/main.js",
   "homepage": "./",
@@ -59,6 +59,16 @@
       "electron/**/*",
       "assets/**/*",
       "node_modules/**/*"
+    ],
+    "extraResources": [
+      {
+        "from": "logo.png",
+        "to": "logo.png"
+      },
+      {
+        "from": "assets/",
+        "to": "assets/"
+      }
     ],
     "win": {
       "icon": "logo.png",

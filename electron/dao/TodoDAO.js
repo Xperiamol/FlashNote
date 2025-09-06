@@ -1,4 +1,5 @@
 const { getInstance } = require('./DatabaseManager');
+const TimeZoneUtils = require('../utils/timeZoneUtils');
 
 class TodoDAO {
   constructor() {
@@ -22,15 +23,28 @@ class TodoDAO {
       tags = '',
       is_important = 0, 
       is_urgent = 0, 
-      due_date = null 
+      due_date = null,
+      repeat_type = 'none',
+      repeat_days = '',
+      repeat_interval = 1,
+      next_due_date = null,
+      is_recurring = 0,
+      parent_todo_id = null
     } = todoData;
     
     const stmt = db.prepare(`
-      INSERT INTO todos (content, tags, is_important, is_urgent, due_date, created_at, updated_at)
-      VALUES (?, ?, ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+      INSERT INTO todos (
+        content, tags, is_important, is_urgent, due_date,
+        repeat_type, repeat_days, repeat_interval, next_due_date, is_recurring, parent_todo_id,
+        created_at, updated_at
+      )
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
     `);
     
-    const result = stmt.run(content, tags, is_important, is_urgent, due_date);
+    const result = stmt.run(
+      content, tags, is_important, is_urgent, due_date,
+      repeat_type, repeat_days, repeat_interval, next_due_date, is_recurring, parent_todo_id
+    );
     return this.findById(result.lastInsertRowid);
   }
 
@@ -54,7 +68,13 @@ class TodoDAO {
       is_completed, 
       is_important, 
       is_urgent, 
-      due_date 
+      due_date,
+      repeat_type,
+      repeat_days,
+      repeat_interval,
+      next_due_date,
+      is_recurring,
+      parent_todo_id
     } = todoData;
     
     let updateFields = [];
@@ -95,6 +115,36 @@ class TodoDAO {
     if (due_date !== undefined) {
       updateFields.push('due_date = ?');
       params.push(due_date);
+    }
+    
+    if (repeat_type !== undefined) {
+      updateFields.push('repeat_type = ?');
+      params.push(repeat_type);
+    }
+    
+    if (repeat_days !== undefined) {
+      updateFields.push('repeat_days = ?');
+      params.push(repeat_days);
+    }
+    
+    if (repeat_interval !== undefined) {
+      updateFields.push('repeat_interval = ?');
+      params.push(repeat_interval);
+    }
+    
+    if (next_due_date !== undefined) {
+      updateFields.push('next_due_date = ?');
+      params.push(next_due_date);
+    }
+    
+    if (is_recurring !== undefined) {
+      updateFields.push('is_recurring = ?');
+      params.push(is_recurring);
+    }
+    
+    if (parent_todo_id !== undefined) {
+      updateFields.push('parent_todo_id = ?');
+      params.push(parent_todo_id);
     }
     
     updateFields.push('updated_at = CURRENT_TIMESTAMP');
@@ -202,16 +252,17 @@ class TodoDAO {
    */
   findDueToday() {
     const db = this.getDB();
-    const today = new Date().toISOString().split('T')[0];
+    const todayStart = TimeZoneUtils.todayStartUTC();
+    const todayEnd = TimeZoneUtils.todayEndUTC();
     
     const stmt = db.prepare(`
       SELECT * FROM todos 
       WHERE is_completed = 0 
-        AND date(due_date) = date(?)
+        AND due_date >= ? AND due_date <= ?
       ORDER BY due_date ASC
     `);
     
-    return stmt.all(today);
+    return stmt.all(todayStart, todayEnd);
   }
 
   /**
@@ -219,7 +270,7 @@ class TodoDAO {
    */
   findOverdue() {
     const db = this.getDB();
-    const now = new Date().toISOString();
+    const nowUTC = TimeZoneUtils.nowUTC();
     
     const stmt = db.prepare(`
       SELECT * FROM todos 
@@ -228,7 +279,7 @@ class TodoDAO {
       ORDER BY due_date ASC
     `);
     
-    return stmt.all(now);
+    return stmt.all(nowUTC);
   }
 
   /**
@@ -236,20 +287,21 @@ class TodoDAO {
    */
   getStats() {
     const db = this.getDB();
+    const nowUTC = TimeZoneUtils.nowUTC();
     
     const totalStmt = db.prepare('SELECT COUNT(*) as count FROM todos');
-    const completedStmt = db.prepare('SELECT COUNT(*) as count FROM todos WHERE is_completed = 1');
-    const pendingStmt = db.prepare('SELECT COUNT(*) as count FROM todos WHERE is_completed = 0');
+    const completedStmt = db.prepare('SELECT COUNT(*) as count FROM todos WHERE completed = 1');
+    const pendingStmt = db.prepare('SELECT COUNT(*) as count FROM todos WHERE completed = 0');
     const overdueStmt = db.prepare(`
       SELECT COUNT(*) as count FROM todos 
-      WHERE is_completed = 0 AND due_date < datetime('now')
+      WHERE completed = 0 AND due_date < ?
     `);
     
     return {
       total: totalStmt.get().count,
       completed: completedStmt.get().count,
       pending: pendingStmt.get().count,
-      overdue: overdueStmt.get().count
+      overdue: overdueStmt.get(nowUTC).count
     };
   }
 
@@ -432,6 +484,79 @@ class TodoDAO {
     return Object.entries(tagCounts)
       .map(([name, usage_count]) => ({ name, usage_count }))
       .sort((a, b) => b.usage_count - a.usage_count);
+  }
+
+  /**
+   * 查找所有重复事项
+   */
+  findRecurringTodos() {
+    const db = this.getDB();
+    const stmt = db.prepare(`
+      SELECT * FROM todos 
+      WHERE is_recurring = 1 AND is_completed = 0
+      ORDER BY next_due_date ASC
+    `);
+    return stmt.all();
+  }
+
+  /**
+   * 查找需要生成下次重复的待办事项
+   */
+  findTodosNeedingNextRecurrence() {
+    const db = this.getDB();
+    const nowUTC = TimeZoneUtils.nowUTC();
+    const stmt = db.prepare(`
+      SELECT * FROM todos 
+      WHERE recurrence_pattern IS NOT NULL 
+        AND is_completed = 1 
+        AND next_due_date IS NOT NULL 
+        AND next_due_date <= ?
+    `);
+    return stmt.all(nowUTC);
+  }
+
+  /**
+   * 创建重复事项的下一个实例
+   */
+  createNextRecurrence(originalTodo, nextDueDate) {
+    const db = this.getDB();
+    const stmt = db.prepare(`
+      INSERT INTO todos (
+        content, tags, is_important, is_urgent, due_date,
+        repeat_type, repeat_days, repeat_interval, next_due_date, is_recurring, parent_todo_id,
+        created_at, updated_at
+      )
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+    `);
+    
+    const result = stmt.run(
+      originalTodo.content,
+      originalTodo.tags,
+      originalTodo.is_important,
+      originalTodo.is_urgent,
+      nextDueDate,
+      originalTodo.repeat_type,
+      originalTodo.repeat_days,
+      originalTodo.repeat_interval,
+      null, // next_due_date will be calculated later
+      originalTodo.is_recurring,
+      originalTodo.parent_todo_id || originalTodo.id
+    );
+    
+    return this.findById(result.lastInsertRowid);
+  }
+
+  /**
+   * 查找某个重复事项的所有实例
+   */
+  findRecurrenceInstances(parentTodoId) {
+    const db = this.getDB();
+    const stmt = db.prepare(`
+      SELECT * FROM todos 
+      WHERE parent_todo_id = ? OR id = ?
+      ORDER BY due_date ASC
+    `);
+    return stmt.all(parentTodoId, parentTodoId);
   }
 }
 
