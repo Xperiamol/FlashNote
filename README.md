@@ -36,7 +36,7 @@
 
 #### 方式一：下载安装包（推荐）
 1. 前往 [Releases](https://github.com/Xperiamol/FlashNote/releases) 页面
-2. 下载最新版本的 `FlashNote 2.0 Setup 2.0.0.exe`
+2. 下载最新版本的 `FlashNote 2.0 Setup 2.x.x.exe`
 3. 运行安装程序，按照提示完成安装
 4. 安装完成后，应用会自动启动
 
