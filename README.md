@@ -130,16 +130,12 @@ FlashNote/
 5. 创建 Pull Request
 
 ### 问题反馈
-- 发现Bug？请创建 [Issue](https://github.com/Xperiamol/FlashNote/issues)
-- 有新想法？欢迎在 [Discussions](https://github.com/Xperiamol/FlashNote/discussions) 中讨论
-
-## 📄 许可证
-
-本项目采用 MIT 许可证 - 查看 [LICENSE](LICENSE) 文件了解详情。
+- 发现Bug？请创建 Issue
+- 有新想法？欢迎在 Discussions中讨论
 
 ## 🙏 致谢
 
-感谢所有使用过这个项目的demo用户！我们致力于创造一个用最小交互完成记录的、有摩擦的笔记应用。
+感谢所有使用过这个项目demo的用户！我们致力于创造一个用最小交互完成记录的、有摩擦的笔记应用。
 
 ---
 
