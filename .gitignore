@@ -8,6 +8,7 @@ yarn-error.log*
 dist/
 dist-electron/
 build/
+build-output/
 
 # Environment variables
 .env
