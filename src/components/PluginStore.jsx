@@ -127,11 +127,11 @@ const PluginCard = ({
 					)}
 					<Box sx={{ flexGrow: 1 }}>
 						<Typography variant="h6" component="div" sx={{ lineHeight: 1.2 }}>
-							{plugin.name}
+							{plugin.manifest?.name || plugin.name || '未知插件'}
 						</Typography>
 						<Stack direction="row" spacing={1} alignItems="center" sx={{ mt: 0.5 }}>
 							<Typography variant="body2" color="text.secondary">
-								v{plugin.version}
+								v{plugin.manifest?.version || plugin.version || '未知'}
 							</Typography>
 							{plugin.author?.name && (
 								<Chip
@@ -286,10 +286,10 @@ const PluginDetailDrawer = ({
 					)}
 					<Box>
 						<Typography variant="h5" sx={{ lineHeight: 1.2 }}>
-							{plugin.name}
+							{plugin.manifest?.name || plugin.name || '未知插件'}
 						</Typography>
 						<Stack direction="row" spacing={1} alignItems="center" sx={{ mt: 0.5 }}>
-							<Chip size="small" label={`版本 ${plugin.version}`} />
+							<Chip size="small" label={`版本 ${plugin.manifest?.version || plugin.version || '未知'}`} />
 							{plugin.manifest?.minAppVersion && (
 								<Chip size="small" variant="outlined" label={`最低版本 ${plugin.manifest.minAppVersion}`} />
 							)}
@@ -298,7 +298,7 @@ const PluginDetailDrawer = ({
 				</Stack>
 
 				<Typography variant="body1" color="text.secondary">
-					{plugin.description || plugin.shortDescription || '暂无详细描述'}
+					{plugin.manifest?.description || plugin.description || plugin.shortDescription || '暂无详细描述'}
 				</Typography>
 
 				<Stack direction="row" spacing={1} sx={{ flexWrap: 'wrap', gap: 1 }}>
