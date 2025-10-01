@@ -110,6 +110,18 @@ class TodoService extends EventEmitter {
       }
     });
 
+    // 累加专注时长
+    ipcMain.handle('todo:addFocusTime', async (event, id, durationSeconds) => {
+      try {
+        const todo = this.addFocusTime(id, durationSeconds);
+        this.emit('todo-updated', todo);
+        return { success: true, data: todo };
+      } catch (error) {
+        console.error('更新待办事项专注时长失败:', error);
+        return { success: false, error: error.message };
+      }
+    });
+
     // 获取统计信息
     ipcMain.handle('todo:getStats', async (event) => {
       try {
@@ -128,6 +140,17 @@ class TodoService extends EventEmitter {
         return { success: true, data: todos };
       } catch (error) {
         console.error('获取今日到期待办事项失败:', error);
+        return { success: false, error: error.message };
+      }
+    });
+
+    // 获取指定日期的待办事项
+    ipcMain.handle('todo:getByDate', async (event, dateString) => {
+      try {
+        const todos = this.getTodosByDate(dateString);
+        return { success: true, data: todos };
+      } catch (error) {
+        console.error('获取指定日期待办事项失败:', error);
         return { success: false, error: error.message };
       }
     });
@@ -442,6 +465,22 @@ class TodoService extends EventEmitter {
   }
 
   /**
+   * 为待办事项累加专注时长
+   */
+  addFocusTime(id, durationSeconds) {
+    if (!Number.isFinite(durationSeconds) || durationSeconds <= 0) {
+      throw new Error('专注时长必须为正数');
+    }
+
+    const existingTodo = this.todoDAO.findById(id);
+    if (!existingTodo) {
+      throw new Error('待办事项不存在');
+    }
+
+    return this.todoDAO.addFocusTime(id, durationSeconds);
+  }
+
+  /**
    * 获取统计信息
    */
   getTodoStats() {
@@ -460,6 +499,13 @@ class TodoService extends EventEmitter {
    */
   getTodoTagStats() {
     return this.todoDAO.getTodoTagStats();
+  }
+
+  /**
+   * 获取指定日期的待办事项
+   */
+  getTodosByDate(dateString) {
+    return this.todoDAO.findByDate(dateString);
   }
 
   /**

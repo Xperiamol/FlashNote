@@ -24,6 +24,7 @@ class TodoDAO {
       is_important = 0, 
       is_urgent = 0, 
       due_date = null,
+      focus_time_seconds = 0,
       repeat_type = 'none',
       repeat_days = '',
       repeat_interval = 1,
@@ -35,14 +36,16 @@ class TodoDAO {
     const stmt = db.prepare(`
       INSERT INTO todos (
         content, tags, is_important, is_urgent, due_date,
+        focus_time_seconds,
         repeat_type, repeat_days, repeat_interval, next_due_date, is_recurring, parent_todo_id,
         created_at, updated_at
       )
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
     `);
     
     const result = stmt.run(
       content, tags, is_important, is_urgent, due_date,
+      focus_time_seconds,
       repeat_type, repeat_days, repeat_interval, next_due_date, is_recurring, parent_todo_id
     );
     return this.findById(result.lastInsertRowid);
@@ -74,7 +77,8 @@ class TodoDAO {
       repeat_interval,
       next_due_date,
       is_recurring,
-      parent_todo_id
+      parent_todo_id,
+      focus_time_seconds
     } = todoData;
     
     let updateFields = [];
@@ -146,6 +150,11 @@ class TodoDAO {
       updateFields.push('parent_todo_id = ?');
       params.push(parent_todo_id);
     }
+
+    if (focus_time_seconds !== undefined) {
+      updateFields.push('focus_time_seconds = ?');
+      params.push(focus_time_seconds);
+    }
     
     updateFields.push('updated_at = CURRENT_TIMESTAMP');
     params.push(id);
@@ -158,6 +167,26 @@ class TodoDAO {
     
     const result = stmt.run(...params);
     return result.changes > 0 ? this.findById(id) : null;
+  }
+
+  /**
+   * 为待办事项累加专注时长（秒）
+   */
+  addFocusTime(id, durationSeconds) {
+    if (!Number.isFinite(durationSeconds) || durationSeconds <= 0) {
+      return this.findById(id);
+    }
+
+    const db = this.getDB();
+    const stmt = db.prepare(`
+      UPDATE todos
+      SET focus_time_seconds = COALESCE(focus_time_seconds, 0) + ?,
+          updated_at = CURRENT_TIMESTAMP
+      WHERE id = ?
+    `);
+
+    stmt.run(Math.round(durationSeconds), id);
+    return this.findById(id);
   }
 
   /**
@@ -245,6 +274,24 @@ class TodoDAO {
     });
     
     return quadrants;
+  }
+
+  /**
+   * 获取指定日期的待办事项
+   */
+  findByDate(dateString) {
+    const db = this.getDB();
+    const dateStart = `${dateString} 00:00:00`;
+    const dateEnd = `${dateString} 23:59:59`;
+    
+    const stmt = db.prepare(`
+      SELECT * FROM todos 
+      WHERE is_completed = 0 
+        AND due_date >= ? AND due_date <= ?
+      ORDER BY due_date ASC
+    `);
+    
+    return stmt.all(dateStart, dateEnd);
   }
 
   /**

@@ -1,7 +1,7 @@
 {
   "name": "flashnote",
-  "version": "2.0.2",
-  "description": "闪念速记 V2.0 - 现代化本地笔记应用",
+  "version": "2.1.0",
+  "description": "闪念速记 V2.1 - 现代化本地笔记应用",
   "main": "electron/main.js",
   "homepage": "./",
   "scripts": {
@@ -27,6 +27,7 @@
     "@mui/icons-material": "^7.3.1",
     "@mui/material": "^7.3.1",
     "@vitejs/plugin-react": "^4.7.0",
+    "axios": "^1.12.2",
     "better-sqlite3": "^12.2.0",
     "date-fns": "^4.1.0",
     "lucide-react": "^0.542.0",
@@ -37,6 +38,7 @@
     "rehype-raw": "^7.0.0",
     "remark-gfm": "^4.0.1",
     "vite": "^6.3.5",
+    "yup": "^1.7.1",
     "zustand": "^5.0.8"
   },
   "devDependencies": {

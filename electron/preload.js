@@ -103,6 +103,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
     getAll: (options) => ipcRenderer.invoke('todo:getAll', options),
     getByQuadrant: (includeCompleted) => ipcRenderer.invoke('todo:getByQuadrant', includeCompleted),
     getDueToday: () => ipcRenderer.invoke('todo:getDueToday'),
+    getByDate: (dateString) => ipcRenderer.invoke('todo:getByDate', dateString),
     getOverdue: () => ipcRenderer.invoke('todo:getOverdue'),
     
     // 更新待办事项
@@ -323,6 +324,69 @@ contextBridge.exposeInMainWorld('electronAPI', {
     
     // 获取所有快捷键配置
     getAll: () => ipcRenderer.invoke('shortcut:get-all')
+  },
+
+  // 图片相关API
+  images: {
+    // 保存图片（从Buffer）
+    saveFromBuffer: (buffer, fileName) => ipcRenderer.invoke('image:save-from-buffer', buffer, fileName),
+    
+    // 保存图片（从文件路径）
+    saveFromPath: (sourcePath, fileName) => ipcRenderer.invoke('image:save-from-path', sourcePath, fileName),
+    
+    // 选择图片文件
+    selectFile: () => ipcRenderer.invoke('image:select-file'),
+    
+    // 获取图片完整路径
+    getPath: (relativePath) => ipcRenderer.invoke('image:get-path', relativePath),
+    
+    // 获取图片base64数据
+    getBase64: (relativePath) => ipcRenderer.invoke('image:get-base64', relativePath),
+    
+    // 删除图片
+    delete: (relativePath) => ipcRenderer.invoke('image:delete', relativePath)
+  },
+
+  // 版本管理API
+  versions: {
+    // 创建手动版本
+    createManual: (description) => ipcRenderer.invoke('version:create-manual', description),
+    
+    // 获取版本列表
+    getList: () => ipcRenderer.invoke('version:get-list'),
+    
+    // 恢复到指定版本
+    restore: (fileName) => ipcRenderer.invoke('version:restore', fileName),
+    
+    // 删除版本
+    delete: (fileName) => ipcRenderer.invoke('version:delete', fileName),
+    
+    // 获取版本详情
+    getDetails: (fileName) => ipcRenderer.invoke('version:get-details', fileName)
+  },
+
+  // 插件商店与插件运行时 API
+  pluginStore: {
+    listAvailable: () => ipcRenderer.invoke('plugin-store:list-available'),
+    listInstalled: () => ipcRenderer.invoke('plugin-store:list-installed'),
+    getDetails: (pluginId) => ipcRenderer.invoke('plugin-store:get-details', pluginId),
+    install: (pluginId) => ipcRenderer.invoke('plugin-store:install', pluginId),
+    uninstall: (pluginId) => ipcRenderer.invoke('plugin-store:uninstall', pluginId),
+    enable: (pluginId) => ipcRenderer.invoke('plugin-store:enable', pluginId),
+    disable: (pluginId) => ipcRenderer.invoke('plugin-store:disable', pluginId),
+    executeCommand: (pluginId, commandId, payload) => ipcRenderer.invoke('plugin-store:execute-command', pluginId, commandId, payload),
+    onEvent: (callback) => {
+      const channel = 'plugin-store:event'
+      const handler = (event, data) => callback?.(data)
+      ipcRenderer.on(channel, handler)
+      return () => ipcRenderer.removeListener(channel, handler)
+    },
+    onUiRequest: (callback) => {
+      const channel = 'plugin:ui-open-note'
+      const handler = (event, data) => callback?.(data)
+      ipcRenderer.on(channel, handler)
+      return () => ipcRenderer.removeListener(channel, handler)
+    }
   },
   
   // 通用 invoke 方法

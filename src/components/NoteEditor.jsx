@@ -34,6 +34,7 @@ import shortcutManager from '../utils/ShortcutManager'
 import TagInput from './TagInput'
 import MarkdownPreview from './MarkdownPreview'
 import MarkdownToolbar from './MarkdownToolbar'
+import { imageAPI } from '../api/imageAPI'
 
 const NoteEditor = () => {
   // 检测是否在独立窗口模式下运行
@@ -65,6 +66,7 @@ const NoteEditor = () => {
   const [showSaveSuccess, setShowSaveSuccess] = useState(false)
   const [hasUnsavedChanges, setHasUnsavedChanges] = useState(false)
   const [viewMode, setViewMode] = useState('edit') // 'edit', 'preview', 'split'
+  const [isDragging, setIsDragging] = useState(false)
   const autoSaveTimerRef = useRef(null)
   const contentRef = useRef(null)
   const titleRef = useRef(null)
@@ -305,6 +307,98 @@ const NoteEditor = () => {
     }
   }
 
+  // 处理图片粘贴
+  const handlePaste = async (e) => {
+    const items = e.clipboardData?.items
+    if (!items) return
+
+    for (let i = 0; i < items.length; i++) {
+      const item = items[i]
+      if (item.type.indexOf('image') !== -1) {
+        e.preventDefault()
+        try {
+          const blob = item.getAsFile()
+          if (blob) {
+            const arrayBuffer = await blob.arrayBuffer()
+            const buffer = new Uint8Array(arrayBuffer)
+            const fileName = `clipboard_${Date.now()}.png`
+            const imagePath = await imageAPI.saveFromBuffer(buffer, fileName)
+            
+            // 插入图片到光标位置
+            const textarea = contentRef.current?.querySelector('textarea')
+            if (textarea) {
+              const start = textarea.selectionStart
+              const end = textarea.selectionEnd
+              const imageMarkdown = `![${fileName}](${imagePath})`
+              const newContent = content.substring(0, start) + imageMarkdown + content.substring(end)
+              setContent(newContent)
+              setHasUnsavedChanges(true)
+              
+              // 设置光标位置到图片markdown之后
+              setTimeout(() => {
+                textarea.selectionStart = textarea.selectionEnd = start + imageMarkdown.length
+                textarea.focus()
+              }, 0)
+            }
+          }
+        } catch (error) {
+          console.error('粘贴图片失败:', error)
+        }
+        break
+      }
+    }
+  }
+
+  // 处理拖拽进入
+  const handleDragEnter = (e) => {
+    e.preventDefault()
+    e.stopPropagation()
+    setIsDragging(true)
+  }
+
+  // 处理拖拽离开
+  const handleDragLeave = (e) => {
+    e.preventDefault()
+    e.stopPropagation()
+    // 只有当离开编辑器容器时才设置为false
+    if (!e.currentTarget.contains(e.relatedTarget)) {
+      setIsDragging(false)
+    }
+  }
+
+  // 处理拖拽悬停
+  const handleDragOver = (e) => {
+    e.preventDefault()
+    e.stopPropagation()
+  }
+
+  // 处理文件拖拽放置
+  const handleDrop = async (e) => {
+    e.preventDefault()
+    e.stopPropagation()
+    setIsDragging(false)
+
+    const files = Array.from(e.dataTransfer.files)
+    const imageFiles = files.filter(file => file.type.startsWith('image/'))
+
+    if (imageFiles.length === 0) return
+
+    try {
+      for (const file of imageFiles) {
+        const arrayBuffer = await file.arrayBuffer()
+        const buffer = new Uint8Array(arrayBuffer)
+        const imagePath = await imageAPI.saveFromBuffer(buffer, file.name)
+        
+        // 插入图片到内容末尾
+        const imageMarkdown = `![${file.name}](${imagePath})\n`
+        setContent(prev => prev + imageMarkdown)
+        setHasUnsavedChanges(true)
+      }
+    } catch (error) {
+      console.error('拖拽图片失败:', error)
+    }
+  }
+
   if (!selectedNoteId) {
     return (
       <Box
@@ -417,16 +511,47 @@ const NoteEditor = () => {
       <Box sx={{ flex: 1, display: 'flex', flexDirection: viewMode === 'split' ? 'row' : 'column', overflow: 'hidden', minHeight: 0, height: 'calc(100% - 80px)' }}>
         {/* 编辑面板 */}
         {(viewMode === 'edit' || viewMode === 'split') && (
-          <Box sx={{ 
-            flex: viewMode === 'split' ? 1 : 'auto',
-            p: 2, 
-            overflow: 'auto',
-            borderRight: viewMode === 'split' ? 1 : 0,
-            borderColor: 'divider',
-            minHeight: 0,
-            display: 'flex',
-            flexDirection: 'column'
-          }}>
+          <Box 
+            sx={{ 
+              flex: viewMode === 'split' ? 1 : 'auto',
+              p: 2, 
+              overflow: 'auto',
+              borderRight: viewMode === 'split' ? 1 : 0,
+              borderColor: 'divider',
+              minHeight: 0,
+              display: 'flex',
+              flexDirection: 'column',
+              position: 'relative',
+              // 拖拽样式
+              ...(isDragging && {
+                backgroundColor: 'action.hover',
+                '&::after': {
+                  content: '"拖拽图片到这里"',
+                  position: 'absolute',
+                  top: 0,
+                  left: 0,
+                  right: 0,
+                  bottom: 0,
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  backgroundColor: 'rgba(25, 118, 210, 0.1)',
+                  color: 'primary.main',
+                  fontSize: '1.2rem',
+                  fontWeight: 'bold',
+                  zIndex: 1000,
+                  border: '2px dashed',
+                  borderColor: 'primary.main',
+                  borderRadius: 1
+                }
+              })
+            }}
+            onDragEnter={handleDragEnter}
+            onDragLeave={handleDragLeave}
+            onDragOver={handleDragOver}
+            onDrop={handleDrop}
+            onPaste={handlePaste}
+          >
             {/* 标题输入 */}
             <TextField
               ref={titleRef}

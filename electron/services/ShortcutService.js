@@ -1,10 +1,16 @@
 const { globalShortcut, BrowserWindow } = require('electron');
 const { DEFAULT_SHORTCUTS } = require('../utils/shortcutUtils');
 
+const PLUGIN_SHORTCUT_SETTING_KEY = 'pluginShortcuts';
+
 class ShortcutService {
   constructor() {
     this.registeredShortcuts = new Map();
     this.mainWindow = null;
+    this.pluginManager = null;
+    this.pluginCommandShortcuts = new Map(); // key -> { shortcutId, accelerator }
+    this.pluginShortcutSettings = new Map(); // key -> binding metadata
+    this.settingsService = null;
   }
 
   /**
@@ -13,6 +19,83 @@ class ShortcutService {
    */
   setMainWindow(window) {
     this.mainWindow = window;
+  }
+
+  /**
+   * 注入插件管理器，用于执行插件命令
+   * @param {import('./PluginManager')} pluginManager
+   */
+  setPluginManager(pluginManager) {
+    this.pluginManager = pluginManager;
+  }
+
+  async ensureSettingsService() {
+    if (this.settingsService) {
+      return this.settingsService;
+    }
+
+    const SettingsService = require('./SettingsService');
+    this.settingsService = new SettingsService();
+    return this.settingsService;
+  }
+
+  async loadPluginShortcutSettings() {
+    try {
+      const service = await this.ensureSettingsService();
+      const result = await service.getSetting(PLUGIN_SHORTCUT_SETTING_KEY);
+      const payload = result.success && result.data && typeof result.data === 'object' ? result.data : {};
+
+      this.pluginShortcutSettings.clear();
+      Object.entries(payload).forEach(([key, value]) => {
+        if (value && typeof value === 'object') {
+          this.pluginShortcutSettings.set(key, {
+            pluginId: value.pluginId,
+            commandId: value.commandId,
+            pluginName: value.pluginName,
+            title: value.title,
+            description: value.description,
+            defaultKey: value.defaultKey || '',
+            currentKey: value.currentKey || '',
+            enabled: value.enabled !== false
+          });
+        }
+      });
+
+      return payload;
+    } catch (error) {
+      console.error('加载插件快捷键配置失败:', error);
+      return {};
+    }
+  }
+
+  async savePluginShortcutSettings(settings) {
+    try {
+      const service = await this.ensureSettingsService();
+      await service.setSetting(PLUGIN_SHORTCUT_SETTING_KEY, settings || {});
+
+      this.pluginShortcutSettings.clear();
+      Object.entries(settings || {}).forEach(([key, value]) => {
+        if (value && typeof value === 'object') {
+          this.pluginShortcutSettings.set(key, {
+            pluginId: value.pluginId,
+            commandId: value.commandId,
+            pluginName: value.pluginName,
+            title: value.title,
+            description: value.description,
+            defaultKey: value.defaultKey || '',
+            currentKey: value.currentKey || '',
+            enabled: value.enabled !== false
+          });
+        }
+      });
+    } catch (error) {
+      console.error('保存插件快捷键配置失败:', error);
+    }
+  }
+
+  getPluginCommandBinding(pluginId, commandId) {
+    const key = `${pluginId}:${commandId}`;
+    return this.pluginShortcutSettings.get(key) || null;
   }
 
   /**
@@ -76,11 +159,129 @@ class ShortcutService {
         console.warn('注册失败的快捷键:', stats.errors);
       }
 
+      // 重新注册插件命令快捷键
+      try {
+        for (const [key, entry] of this.pluginCommandShortcuts.entries()) {
+          if (!entry || !entry.accelerator) continue;
+          const shortcutId = entry.shortcutId;
+          const [pluginId, commandId] = key.split(':');
+          if (!pluginId || !commandId) continue;
+
+          await this.registerShortcut(shortcutId, entry.accelerator, {
+            type: 'plugin-command',
+            pluginId,
+            commandId
+          });
+        }
+      } catch (error) {
+        console.error('重新注册插件快捷键失败:', error);
+      }
+
       return stats;
     } catch (error) {
       console.error('注册快捷键过程中发生严重错误:', error);
       stats.errors.push(`严重错误: ${error.message}`);
       return stats;
+    }
+  }
+
+  async registerPluginCommand(pluginId, command) {
+    if (!pluginId || !command || !command.id) {
+      return null;
+    }
+
+    const key = `${pluginId}:${command.id}`;
+    const shortcutId = `plugin:${key}`;
+
+    const settings = await this.loadPluginShortcutSettings();
+    const existing = settings[key] || {};
+    const shortcutMeta = command.shortcut;
+
+    const declaredDefault = typeof shortcutMeta === 'string'
+      ? shortcutMeta
+      : (shortcutMeta && typeof shortcutMeta === 'object' ? shortcutMeta.default || shortcutMeta.key || '' : '');
+
+    const resolvedDefault = existing.defaultKey || declaredDefault || '';
+    const resolvedCurrent = existing.currentKey !== undefined
+      ? existing.currentKey
+      : typeof shortcutMeta === 'string'
+        ? shortcutMeta
+        : shortcutMeta && typeof shortcutMeta === 'object'
+          ? shortcutMeta.current || shortcutMeta.default || ''
+          : declaredDefault;
+
+  const enabled = existing.enabled !== undefined ? existing.enabled : true;
+
+  const pluginName = command.pluginName || existing.pluginName || '';
+
+    settings[key] = {
+      pluginId,
+      commandId: command.id,
+      pluginName,
+      title: command.title || command.id,
+      description: command.description || '',
+      defaultKey: resolvedDefault,
+      currentKey: resolvedCurrent || '',
+      enabled
+    };
+
+    await this.savePluginShortcutSettings(settings);
+
+    const binding = this.pluginShortcutSettings.get(key) || null;
+
+    if (binding && binding.enabled && binding.currentKey) {
+      const action = { type: 'plugin-command', pluginId, commandId: command.id };
+      await this.registerShortcut(shortcutId, binding.currentKey, action);
+      this.pluginCommandShortcuts.set(key, {
+        shortcutId,
+        accelerator: binding.currentKey
+      });
+    } else {
+      this.pluginCommandShortcuts.delete(key);
+    }
+
+    return binding;
+  }
+
+  async unregisterPluginCommand(pluginId, commandId, options = {}) {
+    const key = `${pluginId}:${commandId}`;
+    const shortcutId = `plugin:${key}`;
+
+    this.unregisterShortcut(shortcutId);
+    this.pluginCommandShortcuts.delete(key);
+
+    if (options.removeSetting) {
+      const settings = await this.loadPluginShortcutSettings();
+      if (settings[key]) {
+        delete settings[key];
+        await this.savePluginShortcutSettings(settings);
+      }
+    }
+  }
+
+  async disablePluginCommands(pluginId) {
+    for (const [key, entry] of this.pluginCommandShortcuts.entries()) {
+      if (key.startsWith(`${pluginId}:`)) {
+        this.unregisterShortcut(entry.shortcutId);
+        this.pluginCommandShortcuts.delete(key);
+      }
+    }
+  }
+
+  async removePluginCommands(pluginId) {
+    await this.disablePluginCommands(pluginId);
+    const settings = await this.loadPluginShortcutSettings();
+    let changed = false;
+
+    Object.keys(settings).forEach((key) => {
+      if (settings[key]?.pluginId === pluginId) {
+        delete settings[key];
+        changed = true;
+      }
+    });
+
+    if (changed) {
+      await this.savePluginShortcutSettings(settings);
     }
   }
 
@@ -193,6 +394,20 @@ class ShortcutService {
    */
   handleShortcutAction(action, shortcutId) {
     try {
+      if (action && typeof action === 'object') {
+        if (action.type === 'plugin-command') {
+          if (!this.pluginManager || typeof this.pluginManager.executeCommand !== 'function') {
+            console.warn('插件管理器未准备好，无法执行插件命令快捷键');
+            return;
+          }
+
+          this.pluginManager.executeCommand(action.pluginId, action.commandId).catch((error) => {
+            console.error(`执行插件命令快捷键失败: ${action.pluginId}:${action.commandId}`, error);
+          });
+          return;
+        }
+      }
+
       switch (action) {
         case 'new-note':
           this.handleNewNote();

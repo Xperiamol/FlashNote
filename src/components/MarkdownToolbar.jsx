@@ -17,9 +17,9 @@ import {
   FormatListNumbered as NumberListIcon,
   FormatQuote as QuoteIcon,
   TableChart as TableIcon,
-  Image as ImageIcon,
   Title as HeaderIcon
 } from '@mui/icons-material'
+import ImageUploadButton from './ImageUploadButton'
 
 const MarkdownToolbar = ({ onInsert, disabled = false }) => {
   const insertText = (before, after = '', placeholder = '') => {
@@ -86,11 +86,6 @@ const MarkdownToolbar = ({ onInsert, disabled = false }) => {
           action: () => insertText('[', '](url)', '链接文本')
         },
         {
-          icon: <ImageIcon />,
-          tooltip: '图片',
-          action: () => insertText('![', '](image-url)', '图片描述')
-        },
-        {
           icon: <TableIcon />,
           tooltip: '表格',
           action: () => insertText(
@@ -147,6 +142,14 @@ const MarkdownToolbar = ({ onInsert, disabled = false }) => {
           )}
         </React.Fragment>
       ))}
+      
+      <Divider orientation="vertical" flexItem />
+      
+      {/* 图片上传按钮 */}
+      <ImageUploadButton
+        onImageInsert={onInsert}
+        disabled={disabled}
+      />
       
       <Divider orientation="vertical" flexItem />
       

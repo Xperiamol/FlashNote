@@ -13,6 +13,9 @@ const WindowManager = require('./services/WindowManager')
 const DataImportService = require('./services/DataImportService')
 const ShortcutService = require('./services/ShortcutService')
 const NotificationService = require('./services/NotificationService')
+const { CloudSyncManager } = require('./services/CloudSyncManager')
+const ImageService = require('./services/ImageService')
+const PluginManager = require('./services/PluginManager')
 
 // 保持对窗口对象的全局引用，如果不这样做，当JavaScript对象被垃圾回收时，窗口将自动关闭
 let mainWindow
@@ -20,6 +23,7 @@ let services = {}
 let windowManager
 let shortcutService
 let tray = null
+let pluginManager
 
 function createWindow() {
   // 创建浏览器窗口
@@ -276,9 +280,14 @@ async function initializeServices() {
     services.todoService = new TodoService()
     services.tagService = new TagService()
     services.dataImportService = new DataImportService(services.noteService, services.settingsService)
+    services.imageService = new ImageService()
     
     // 初始化通知服务
     services.notificationService = new NotificationService()
+    
+    // 初始化云同步管理器
+    services.cloudSyncManager = new CloudSyncManager()
+    await services.cloudSyncManager.initialize()
     
     // 将通知服务连接到TodoService
     services.todoService.setNotificationService(services.notificationService)
@@ -301,8 +310,9 @@ async function initializeServices() {
     // 初始化窗口管理器
     windowManager = new WindowManager()
     
-    // 初始化快捷键服务
-    shortcutService = new ShortcutService()
+  // 初始化快捷键服务
+  shortcutService = new ShortcutService()
+  services.shortcutService = shortcutService
 
     // 转发 NoteService 事件到所有渲染进程
     const broadcastToAll = (channel, data) => {
@@ -328,6 +338,33 @@ async function initializeServices() {
         broadcastToAll('note:deleted', payload)
       })
     }
+
+    pluginManager = new PluginManager({
+      app,
+      services,
+      shortcutService,
+      windowAccessor: () => BrowserWindow.getAllWindows(),
+      logger: console,
+      isPackaged: app.isPackaged
+    })
+
+    services.pluginManager = pluginManager
+
+    if (shortcutService && typeof shortcutService.setPluginManager === 'function') {
+      shortcutService.setPluginManager(pluginManager)
+    }
+
+    await pluginManager.initialize()
+
+    pluginManager.on('store-event', (event) => {
+      broadcastToAll('plugin-store:event', event)
+    })
+
+    pluginManager.on('store-event', (event) => {
+      if (event?.type === 'ready') {
+        console.log(`插件已就绪: ${event.plugin?.manifest?.name || event.pluginId}`)
+      }
+    })
 
     // 检查是否为首次启动，如果没有笔记则创建示例笔记
     try {
@@ -542,6 +579,99 @@ ipcMain.handle('app-version', () => {
 
 ipcMain.handle('hello-world', () => {
   return 'Hello from Electron Main Process!'
+})
+
+// 插件商店相关
+const ensurePluginManager = () => {
+  if (!pluginManager) {
+    throw new Error('插件管理器尚未初始化')
+  }
+  return pluginManager
+}
+
+ipcMain.handle('plugin-store:list-available', async () => {
+  try {
+    const manager = ensurePluginManager()
+    return await manager.listAvailablePlugins()
+  } catch (error) {
+    console.error('获取插件列表失败:', error)
+    return []
+  }
+})
+
+ipcMain.handle('plugin-store:list-installed', async () => {
+  try {
+    const manager = ensurePluginManager()
+    return await manager.listInstalledPlugins()
+  } catch (error) {
+    console.error('获取已安装插件列表失败:', error)
+    return []
+  }
+})
+
+ipcMain.handle('plugin-store:get-details', async (event, pluginId) => {
+  try {
+    const manager = ensurePluginManager()
+    return await manager.getPluginDetails(pluginId)
+  } catch (error) {
+    console.error(`获取插件详情失败: ${pluginId}`, error)
+    return null
+  }
+})
+
+ipcMain.handle('plugin-store:install', async (event, pluginId) => {
+  try {
+    const manager = ensurePluginManager()
+    const data = await manager.installPlugin(pluginId)
+    return { success: true, data }
+  } catch (error) {
+    console.error(`安装插件失败: ${pluginId}`, error)
+    return { success: false, error: error.message }
+  }
+})
+
+ipcMain.handle('plugin-store:uninstall', async (event, pluginId) => {
+  try {
+    const manager = ensurePluginManager()
+    await manager.uninstallPlugin(pluginId)
+    return { success: true }
+  } catch (error) {
+    console.error(`卸载插件失败: ${pluginId}`, error)
+    return { success: false, error: error.message }
+  }
+})
+
+ipcMain.handle('plugin-store:enable', async (event, pluginId) => {
+  try {
+    const manager = ensurePluginManager()
+    const data = await manager.enablePlugin(pluginId)
+    return { success: true, data }
+  } catch (error) {
+    console.error(`启用插件失败: ${pluginId}`, error)
+    return { success: false, error: error.message }
+  }
+})
+
+ipcMain.handle('plugin-store:disable', async (event, pluginId) => {
+  try {
+    const manager = ensurePluginManager()
+    const data = await manager.disablePlugin(pluginId)
+    return { success: true, data }
+  } catch (error) {
+    console.error(`禁用插件失败: ${pluginId}`, error)
+    return { success: false, error: error.message }
+  }
+})
+
+ipcMain.handle('plugin-store:execute-command', async (event, pluginId, commandId, payload) => {
+  try {
+    const manager = ensurePluginManager()
+    const data = await manager.executeCommand(pluginId, commandId, payload)
+    return { success: true, data }
+  } catch (error) {
+    console.error(`执行插件命令失败: ${pluginId} -> ${commandId}`, error)
+    return { success: false, error: error.message }
+  }
 })
 
 // 数据库调试相关（用于排查持久化问题）
@@ -768,6 +898,182 @@ ipcMain.handle('data:get-stats', async (event) => {
 
 ipcMain.handle('data:select-file', async (event) => {
   return await services.dataImportService.selectFile()
+})
+
+// 云同步相关IPC处理
+ipcMain.handle('sync:get-available-services', async (event) => {
+  try {
+    return services.cloudSyncManager.getAvailableServices()
+  } catch (error) {
+    console.error('获取可用同步服务失败:', error)
+    return []
+  }
+})
+
+ipcMain.handle('sync:get-status', async (event) => {
+  try {
+    return services.cloudSyncManager.getStatus()
+  } catch (error) {
+    console.error('获取同步状态失败:', error)
+    return { hasActiveService: false, activeService: null, status: null }
+  }
+})
+
+ipcMain.handle('sync:test-connection', async (event, serviceName, config) => {
+  try {
+    return await services.cloudSyncManager.testConnection(serviceName, config)
+  } catch (error) {
+    console.error('测试同步连接失败:', error)
+    return { success: false, message: error.message }
+  }
+})
+
+ipcMain.handle('sync:switch-service', async (event, serviceName, config) => {
+  try {
+    return await services.cloudSyncManager.switchToService(serviceName, config)
+  } catch (error) {
+    console.error('切换同步服务失败:', error)
+    return { success: false, message: error.message }
+  }
+})
+
+ipcMain.handle('sync:disable', async (event) => {
+  try {
+    await services.cloudSyncManager.disableCurrentService()
+    return { success: true, message: '云同步已禁用' }
+  } catch (error) {
+    console.error('禁用云同步失败:', error)
+    return { success: false, message: error.message }
+  }
+})
+
+ipcMain.handle('sync:manual-sync', async (event) => {
+  try {
+    return await services.cloudSyncManager.sync()
+  } catch (error) {
+    console.error('手动同步失败:', error)
+    return { success: false, message: error.message }
+  }
+})
+
+ipcMain.handle('sync:force-stop', async (event) => {
+  try {
+    await services.cloudSyncManager.forceStopSync()
+    return { success: true, message: '同步已强制停止' }
+  } catch (error) {
+    console.error('强制停止同步失败:', error)
+    return { success: false, message: error.message }
+  }
+})
+
+ipcMain.handle('sync:get-conflicts', async (event) => {
+  try {
+    return services.cloudSyncManager.getConflicts()
+  } catch (error) {
+    console.error('获取冲突列表失败:', error)
+    return []
+  }
+})
+
+ipcMain.handle('sync:resolve-conflict', async (event, conflictId, resolution) => {
+  try {
+    await services.cloudSyncManager.resolveConflict(conflictId, resolution)
+    return { success: true, message: '冲突已解决' }
+  } catch (error) {
+    console.error('解决冲突失败:', error)
+    return { success: false, message: error.message }
+  }
+})
+
+ipcMain.handle('sync:export-data', async (event, filePath) => {
+  try {
+    await services.cloudSyncManager.exportData(filePath)
+    return { success: true, message: '数据导出成功' }
+  } catch (error) {
+    console.error('导出数据失败:', error)
+    return { success: false, message: error.message }
+  }
+})
+
+ipcMain.handle('sync:import-data', async (event, filePath) => {
+  try {
+    await services.cloudSyncManager.importData(filePath)
+    return { success: true, message: '数据导入成功' }
+  } catch (error) {
+    console.error('导入数据失败:', error)
+    return { success: false, message: error.message }
+  }
+})
+
+// 版本管理IPC处理器
+ipcMain.handle('version:create-manual', async (event, description) => {
+  try {
+    const activeService = services.cloudSyncManager.getActiveService()
+    if (!activeService) {
+      return { success: false, message: '没有启用的同步服务' }
+    }
+    const result = await activeService.createManualVersion(description)
+    return { success: true, data: result }
+  } catch (error) {
+    console.error('创建手动版本失败:', error)
+    return { success: false, message: error.message }
+  }
+})
+
+ipcMain.handle('version:get-list', async (event) => {
+  try {
+    const activeService = services.cloudSyncManager.getActiveService()
+    if (!activeService) {
+      return { success: false, message: '没有启用的同步服务' }
+    }
+    const versions = await activeService.getVersionList()
+    return { success: true, data: versions }
+  } catch (error) {
+    console.error('获取版本列表失败:', error)
+    return { success: false, message: error.message }
+  }
+})
+
+ipcMain.handle('version:restore', async (event, fileName) => {
+  try {
+    const activeService = services.cloudSyncManager.getActiveService()
+    if (!activeService) {
+      return { success: false, message: '没有启用的同步服务' }
+    }
+    await activeService.restoreToVersion(fileName)
+    return { success: true, message: '版本恢复成功' }
+  } catch (error) {
+    console.error('版本恢复失败:', error)
+    return { success: false, message: error.message }
+  }
+})
+
+ipcMain.handle('version:delete', async (event, fileName) => {
+  try {
+    const activeService = services.cloudSyncManager.getActiveService()
+    if (!activeService) {
+      return { success: false, message: '没有启用的同步服务' }
+    }
+    await activeService.deleteVersion(fileName)
+    return { success: true, message: '版本删除成功' }
+  } catch (error) {
+    console.error('删除版本失败:', error)
+    return { success: false, message: error.message }
+  }
+})
+
+ipcMain.handle('version:get-details', async (event, fileName) => {
+  try {
+    const activeService = services.cloudSyncManager.getActiveService()
+    if (!activeService) {
+      return { success: false, message: '没有启用的同步服务' }
+    }
+    const details = await activeService.getVersionDetails(fileName)
+    return { success: true, data: details }
+  } catch (error) {
+    console.error('获取版本详情失败:', error)
+    return { success: false, message: error.message }
+  }
 })
 
 // 窗口管理IPC处理
@@ -1126,6 +1432,87 @@ ipcMain.handle('shortcut:get-all', async (event) => {
     return { success: true, data: shortcuts }
   } catch (error) {
     console.error('获取快捷键配置失败:', error)
+    return { success: false, error: error.message }
+  }
+})
+
+// 图片相关 IPC 处理器
+ipcMain.handle('image:save-from-buffer', async (event, buffer, fileName) => {
+  try {
+    const imagePath = await services.imageService.saveImage(Buffer.from(buffer), fileName)
+    return { success: true, data: imagePath }
+  } catch (error) {
+    console.error('保存图片失败:', error)
+    return { success: false, error: error.message }
+  }
+})
+
+ipcMain.handle('image:save-from-path', async (event, sourcePath, fileName) => {
+  try {
+    const imagePath = await services.imageService.saveImageFromPath(sourcePath, fileName)
+    return { success: true, data: imagePath }
+  } catch (error) {
+    console.error('从路径保存图片失败:', error)
+    return { success: false, error: error.message }
+  }
+})
+
+ipcMain.handle('image:select-file', async () => {
+  try {
+    const result = await dialog.showOpenDialog({
+      title: '选择图片',
+      properties: ['openFile'],
+      filters: [
+        { name: '图片文件', extensions: ['jpg', 'jpeg', 'png', 'gif', 'bmp', 'webp', 'svg'] },
+        { name: '所有文件', extensions: ['*'] }
+      ]
+    })
+    
+    if (result.canceled || !result.filePaths.length) {
+      return { success: false, error: '用户取消选择' }
+    }
+    
+    const filePath = result.filePaths[0]
+    const fileName = path.basename(filePath)
+    
+    if (!services.imageService.isSupportedImageType(fileName)) {
+      return { success: false, error: '不支持的图片格式' }
+    }
+    
+    const imagePath = await services.imageService.saveImageFromPath(filePath, fileName)
+    return { success: true, data: { imagePath, fileName } }
+  } catch (error) {
+    console.error('选择图片失败:', error)
+    return { success: false, error: error.message }
+  }
+})
+
+ipcMain.handle('image:get-path', async (event, relativePath) => {
+  try {
+    const fullPath = services.imageService.getImagePath(relativePath)
+    return { success: true, data: fullPath }
+  } catch (error) {
+    console.error('获取图片路径失败:', error)
+    return { success: false, error: error.message }
+  }
+})
+
+ipcMain.handle('image:get-base64', async (event, relativePath) => {
+  try {
+    const base64Data = await services.imageService.getBase64(relativePath)
+    return { success: true, data: base64Data }
+  } catch (error) {
+    console.error('获取图片base64失败:', error)
+    return { success: false, error: error.message }
+  }
+})
+
+ipcMain.handle('image:delete', async (event, relativePath) => {
+  try {
+    const result = await services.imageService.deleteImage(relativePath)
+    return { success: true, data: result }
+  } catch (error) {
+    console.error('删除图片失败:', error)
     return { success: false, error: error.message }
   }
 })

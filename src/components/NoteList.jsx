@@ -17,6 +17,7 @@ import {
   Paper,
   Skeleton,
   Fade,
+  Collapse,
   CircularProgress,
   Checkbox
 } from '@mui/material'
@@ -33,13 +34,20 @@ import {
 } from '@mui/icons-material'
 import { useStore } from '../store/useStore'
 import { formatDistanceToNow } from 'date-fns'
-import { zhCN } from 'date-fns/locale/zh-CN'
+import { zhCN as dateFnsZhCN } from 'date-fns/locale/zh-CN'
 import { useMultiSelect } from '../hooks/useMultiSelect'
 import { useSearch } from '../hooks/useSearch'
 import { useSearchManager } from '../hooks/useSearchManager'
 import { useMultiSelectManager } from '../hooks/useMultiSelectManager'
+import { useFiltersVisibility } from '../hooks/useFiltersVisibility'
 import { searchNotesAPI } from '../api/searchAPI'
 import TagFilter from './TagFilter'
+import FilterToggleButton from './FilterToggleButton'
+import zhCN from '../locales/zh-CN'
+
+const {
+  filters: { placeholder }
+} = zhCN;
 import MultiSelectToolbar from './MultiSelectToolbar'
 import { createDragHandler } from '../utils/DragManager'
 import { useDragAnimation } from './DragAnimationProvider'
@@ -67,6 +75,9 @@ const NoteList = ({ showDeleted = false, onMultiSelectChange, onMultiSelectRefCh
   const [selectedTagFilters, setSelectedTagFilters] = useState([])
   const [permanentDeleteConfirm, setPermanentDeleteConfirm] = useState(false)
   const [batchPermanentDeleteConfirm, setBatchPermanentDeleteConfirm] = useState(false)
+  
+  // 筛选器可见性状态
+  const { filtersVisible, toggleFiltersVisibility } = useFiltersVisibility('note_filters_visible')
 
   // 使用动画拖拽处理器
   const { createAnimatedDragHandler } = useDragAnimation()
@@ -274,7 +285,7 @@ const NoteList = ({ showDeleted = false, onMultiSelectChange, onMultiSelectRefCh
       const utcDate = new Date(dateString + 'Z') // 添加Z表示UTC时间
       return formatDistanceToNow(utcDate, {
         addSuffix: true,
-        locale: zhCN
+        locale: dateFnsZhCN
       })
     } catch {
       return '未知时间'
@@ -341,7 +352,7 @@ const NoteList = ({ showDeleted = false, onMultiSelectChange, onMultiSelectRefCh
         <TextField
           fullWidth
           size="small"
-          placeholder={showDeleted ? "搜索回收站..." : "搜索笔记..."}
+          placeholder={showDeleted ? placeholder.searchNotesDeleted : placeholder.searchNotes}
           value={localSearchQuery}
           onChange={(e) => setLocalSearchQuery(e.target.value)}
           InputProps={{
@@ -350,23 +361,45 @@ const NoteList = ({ showDeleted = false, onMultiSelectChange, onMultiSelectRefCh
                 <SearchIcon color="action" />
               </InputAdornment>
             ),
-            endAdornment: localSearchQuery && (
-              <InputAdornment position="end">
-                <IconButton size="small" onClick={handleClearSearch}>
-                  <ClearIcon />
-                </IconButton>
-              </InputAdornment>
+            endAdornment: (
+              <>
+                {localSearchQuery && (
+                  <InputAdornment position="end">
+                    <IconButton size="small" onClick={handleClearSearch}>
+                      <ClearIcon />
+                    </IconButton>
+                  </InputAdornment>
+                )}
+                <FilterToggleButton
+                  filtersVisible={filtersVisible}
+                  onToggle={toggleFiltersVisibility}
+                />
+              </>
             )
           }}
         />
         
         {/* 标签筛选 */}
-        <TagFilter
-          selectedTags={selectedTagFilters}
-          onTagsChange={setSelectedTagFilters}
-          showDeleted={showDeleted}
-          sx={{ mt: 1 }}
-        />
+        <Collapse 
+          in={filtersVisible} 
+          timeout={200}
+          easing={{
+            enter: 'cubic-bezier(0.25, 0.46, 0.45, 0.94)',
+            exit: 'cubic-bezier(0.55, 0.06, 0.68, 0.19)'
+          }}
+          sx={{
+            '& .MuiCollapse-wrapper': {
+              transition: 'transform 0.2s cubic-bezier(0.25, 0.46, 0.45, 0.94)'
+            }
+          }}
+        >
+          <TagFilter
+            selectedTags={selectedTagFilters}
+            onTagsChange={setSelectedTagFilters}
+            showDeleted={showDeleted}
+            sx={{ mt: 1 }}
+          />
+        </Collapse>
       </Box>
 
       {/* 多选工具栏 */}

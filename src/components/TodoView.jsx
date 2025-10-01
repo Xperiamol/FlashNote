@@ -6,9 +6,7 @@ import {
   IconButton,
   Paper,
   Chip,
-  TextField,
   Checkbox,
-  FormControlLabel,
   Dialog,
   DialogTitle,
   DialogContent,
@@ -30,8 +28,6 @@ import {
   Add as AddIcon,
   CheckCircle as CheckCircleIcon,
   RadioButtonUnchecked as RadioButtonUncheckedIcon,
-  Edit as EditIcon,
-  Delete as DeleteIcon,
   Schedule as ScheduleIcon,
   Warning as WarningIcon,
   Flag as FlagIcon,
@@ -40,67 +36,78 @@ import {
 } from '@mui/icons-material';
 import { format, isToday, isPast, parseISO } from 'date-fns';
 import { zhCN } from 'date-fns/locale';
-import TagInput from './TagInput';
-import DateTimePicker from './DateTimePicker';
-import RepeatSettings from './RepeatSettings';
+import TodoFormFields from './TodoFormFields';
+import TodoItem from './TodoItem';
+import FocusModeView from './FocusModeView';
 import TimeZoneUtils from '../utils/timeZoneUtils';
+import {
+  fetchTodos,
+  fetchTodosByQuadrant,
+  toggleTodoComplete,
+  deleteTodo as deleteTodoAPI,
+  createTodo as createTodoAPI,
+  getTodoTagSuggestions,
+  addTodoFocusTime
+} from '../api/todoAPI';
+import appLocale from '../locales/zh-CN';
+import { todoSchema, extractValidationErrors } from '../validators/todoValidation';
 
-const TodoView = ({ viewMode, showCompleted, onViewModeChange, onShowCompletedChange, showCreateForm, onCreateFormClose, onRefresh, selectedTodo, onTodoSelect }) => {
+const {
+  todo: { dialog: todoDialog }
+} = appLocale;
+
+const TodoView = ({ viewMode, showCompleted, onViewModeChange, onShowCompletedChange, onRefresh, onTodoSelect }) => {
   const theme = useTheme();
+  const effectiveViewMode = viewMode === 'list' ? 'focus' : viewMode;
   const [todos, setTodos] = useState([]);
   const [loading, setLoading] = useState(true);
   const [sortBy, setSortBy] = useState('quadrant');
   const [filterBy, setFilterBy] = useState('all'); // 'all', 'pending', 'completed', 'overdue', 'today'
-  const [editingTodo, setEditingTodo] = useState(null);
   const [stats, setStats] = useState({ total: 0, completed: 0, pending: 0, overdue: 0 });
-
-  const [newTodo, setNewTodo] = useState({
-    content: '',
-    is_important: false,
-    is_urgent: false,
-    due_date: '',
-    due_time: '',
-    repeat_type: 'none',
-    repeat_interval: 1,
-    repeat_days: ''
-  });
-
-  // 监听selectedTodo变化，自动打开编辑对话框
-  useEffect(() => {
-    if (selectedTodo) {
-      setEditingTodo(selectedTodo);
-    }
-  }, [selectedTodo]);
+  
+  // 双击完成相关状态
+  const [pendingComplete, setPendingComplete] = useState(new Set());
+  const [celebratingTodos, setCelebratingTodos] = useState(new Set());
 
   // 加载待办事项
+  const computeStatsFromList = (list = []) => {
+    const total = list.length;
+    const completed = list.filter(todo => todo.is_completed || todo.completed).length;
+    const pending = total - completed;
+    const overdue = list.filter(todo => {
+      const isCompleted = todo.is_completed || todo.completed;
+      return todo.due_date && !isCompleted && TimeZoneUtils.isOverdue(todo.due_date);
+    }).length;
+    return { total, completed, pending, overdue };
+  };
+
   const loadTodos = useCallback(async () => {
     try {
       setLoading(true);
-      let result;
+      let statsSource = [];
+      let nextTodos;
       if (sortBy === 'quadrant') {
-        result = await window.electronAPI.todos.getByQuadrant(showCompleted);
+        const data = await fetchTodosByQuadrant(showCompleted);
+        nextTodos = data || {
+          urgent_important: [],
+          not_urgent_important: [],
+          urgent_not_important: [],
+          not_urgent_not_important: []
+        };
+        statsSource = Object.values(nextTodos).flat();
       } else {
-        result = await window.electronAPI.todos.getAll({ sortBy, showCompleted });
+        const data = await fetchTodos({ sortBy, showCompleted });
+        if (data && Array.isArray(data.todos)) {
+          nextTodos = data.todos;
+          statsSource = data.todos;
+        } else {
+          nextTodos = data || [];
+          statsSource = Array.isArray(nextTodos) ? nextTodos : [];
+        }
       }
       
-      if (result.success) {
-        if (sortBy === 'quadrant') {
-          // 四象限数据直接使用
-          setTodos(result.data);
-        } else {
-          // 列表数据使用todos数组
-          setTodos(result.data.todos || result.data);
-        }
-        setStats(result.data.stats || { total: 0, completed: 0, pending: 0, overdue: 0 });
-      } else {
-        console.error('加载待办事项失败:', result.error);
-        if (sortBy === 'quadrant') {
-          setTodos({ urgent_important: [], not_urgent_important: [], urgent_not_important: [], not_urgent_not_important: [] });
-        } else {
-          setTodos([]);
-        }
-        setStats({ total: 0, completed: 0, pending: 0, overdue: 0 });
-      }
+      setTodos(nextTodos);
+      setStats(computeStatsFromList(statsSource));
     } catch (error) {
       console.error('加载待办事项失败:', error);
       setTodos([]);
@@ -114,226 +121,145 @@ const TodoView = ({ viewMode, showCompleted, onViewModeChange, onShowCompletedCh
     loadTodos();
   }, [loadTodos]);
 
-  // 切换待办事项完成状态
-  const handleToggleTodo = async (id, completed) => {
-    try {
-      const result = await window.electronAPI.todos.toggleComplete(id);
-      if (result.success) {
+  // 切换待办事项完成状态 - 支持双击完成
+  const handleToggleTodo = async (todo) => {
+    // 如果已经完成，直接切换状态
+    if (todo.is_completed) {
+      try {
+        await toggleTodoComplete(todo.id);
         loadTodos();
         if (onRefresh) {
           onRefresh();
         }
-      } else {
-        console.error('更新待办事项失败:', result.error);
+      } catch (error) {
+        console.error('更新待办事项失败:', error);
+      }
+      return;
+    }
+    
+    // 未完成的任务需要双击
+    if (pendingComplete.has(todo.id)) {
+      // 第二次点击，执行完成操作
+      try {
+        // 先显示庆祝动画
+        setCelebratingTodos(prev => new Set([...prev, todo.id]));
+        
+        // 延迟执行完成操作，让动画播放
+        setTimeout(async () => {
+          try {
+            await toggleTodoComplete(todo.id);
+            loadTodos();
+            if (onRefresh) {
+              onRefresh();
+            }
+          } catch (err) {
+            console.error('更新待办事项失败:', err);
+          }
+          
+          // 清除庆祝状态
+          setTimeout(() => {
+            setCelebratingTodos(prev => {
+              const newSet = new Set(prev);
+              newSet.delete(todo.id);
+              return newSet;
+            });
+          }, 1000);
+        }, 300);
+        
+        // 清除待完成状态
+        setPendingComplete(prev => {
+          const newSet = new Set(prev);
+          newSet.delete(todo.id);
+          return newSet;
+        });
+      } catch (error) {
+        console.error('更新待办事项失败:', error);
+      }
+    } else {
+      // 第一次点击，标记为待完成
+      setPendingComplete(prev => new Set([...prev, todo.id]));
+      
+      // 3秒后自动清除待完成状态
+      setTimeout(() => {
+        setPendingComplete(prev => {
+          const newSet = new Set(prev);
+          newSet.delete(todo.id);
+          return newSet;
+        });
+      }, 3000);
+    }
+  };
+
+  const completeTodoInstantly = async (todo) => {
+    if (!todo) return;
+    try {
+      await toggleTodoComplete(todo.id);
+      await loadTodos();
+      if (onRefresh) {
+        onRefresh();
       }
     } catch (error) {
       console.error('更新待办事项失败:', error);
+      throw error;
     }
   };
+
+  const handleFocusTimeLogged = useCallback((updatedTodo) => {
+    if (!updatedTodo || !updatedTodo.id) return;
+
+    setTodos((prev) => {
+      if (!prev) return prev;
+
+      if (Array.isArray(prev)) {
+        return prev.map((todo) => (todo.id === updatedTodo.id ? { ...todo, ...updatedTodo } : todo));
+      }
+
+      if (prev && typeof prev === 'object') {
+        const next = {};
+        Object.keys(prev).forEach((key) => {
+          next[key] = prev[key].map((todo) => (todo.id === updatedTodo.id ? { ...todo, ...updatedTodo } : todo));
+        });
+        return next;
+      }
+
+      return prev;
+    });
+  }, []);
 
   // 删除待办事项
   const handleDeleteTodo = async (id) => {
     try {
-      const result = await window.electronAPI.todos.delete(id);
-      if (result.success) {
+      const success = await deleteTodoAPI(id);
+      if (success) {
         loadTodos();
-      } else {
-        console.error('删除待办事项失败:', result.error);
+        if (onRefresh) {
+          onRefresh();
+        }
       }
     } catch (error) {
       console.error('删除待办事项失败:', error);
     }
   };
 
-  // 创建新待办事项
-  const handleCreateTodo = async () => {
-    if (!newTodo.content.trim()) return;
-    
-    try {
-      // 使用TimeZoneUtils转换日期时间为UTC
-      const dueDateUTC = TimeZoneUtils.toUTC(newTodo.due_date, newTodo.due_time);
-      
-      console.log('[TodoView] 创建待办事项:');
-      console.log('  - 本地日期:', newTodo.due_date);
-      console.log('  - 本地时间:', newTodo.due_time);
-      console.log('  - UTC时间:', dueDateUTC);
-      
-      const result = await window.electronAPI.todos.create({
-        content: newTodo.content,
-        is_important: newTodo.is_important,
-        is_urgent: newTodo.is_urgent,
-        due_date: dueDateUTC,
-        repeat_type: newTodo.repeat_type,
-        repeat_interval: newTodo.repeat_interval,
-        repeat_days: newTodo.repeat_days
-      });
-      if (result.success) {
-        setNewTodo({ content: '', is_important: false, is_urgent: false, due_date: '', due_time: '', repeat_type: 'none', repeat_interval: 1, repeat_days: '' });
-        if (onCreateFormClose) {
-          onCreateFormClose();
-        }
-        loadTodos();
-        if (onRefresh) {
-          onRefresh();
-        }
-      } else {
-        console.error('创建待办事项失败:', result.error);
-      }
-    } catch (error) {
-      console.error('创建待办事项失败:', error);
-    }
-  };
-
-  // 更新待办事项
-  const handleUpdateTodo = async (id, updates) => {
-    try {
-      // 如果更新包含日期时间，需要转换为UTC
-      if (updates.due_date !== undefined || updates.due_time !== undefined) {
-        const currentTodo = editingTodo;
-        const { date: currentDate, time: currentTime } = TimeZoneUtils.fromUTC(currentTodo.due_date);
-        
-        const finalDate = updates.due_date !== undefined ? updates.due_date : currentDate;
-        const finalTime = updates.due_time !== undefined ? updates.due_time : currentTime;
-        
-        const dueDateUTC = TimeZoneUtils.toUTC(finalDate, finalTime);
-        
-        console.log('[TodoView] 更新待办事项:');
-        console.log('  - 本地日期:', finalDate);
-        console.log('  - 本地时间:', finalTime);
-        console.log('  - UTC时间:', dueDateUTC);
-        
-        updates = { ...updates, due_date: dueDateUTC };
-        delete updates.due_time; // 移除due_time，因为已经合并到due_date中
-      }
-      
-      const result = await window.electronAPI.todos.update(id, updates);
-      if (result.success) {
-        setEditingTodo(null);
-        if (onTodoSelect) {
-          onTodoSelect(null); // 清除选中状态
-        }
-        loadTodos();
-        if (onRefresh) {
-          onRefresh();
-        }
-      } else {
-        console.error('更新待办事项失败:', result.error);
-      }
-    } catch (error) {
-      console.error('更新待办事项失败:', error);
-    }
-  };
-
   // 渲染单个待办事项
   const renderTodoItem = (todo) => {
-    const isOverdue = todo.due_date && TimeZoneUtils.isOverdue(todo.due_date) && !todo.is_completed;
-    const isDueToday = todo.due_date && TimeZoneUtils.isToday(todo.due_date);
-    
     return (
-      <Paper
+      <TodoItem
         key={todo.id}
-        elevation={1}
-        sx={{
-          p: 2,
-          mb: 1,
-          borderRadius: 2,
-          backgroundColor: todo.is_completed ? 'grey.50' : 'background.paper',
-          opacity: todo.is_completed ? 0.7 : 1,
-          border: isOverdue ? '1px solid' : 'none',
-          borderColor: isOverdue ? 'error.main' : 'transparent',
-          transition: 'all 0.2s ease',
-          '&:hover': {
-            elevation: 2,
-            transform: 'translateY(-1px)'
-          }
+        todo={{
+          ...todo,
+          completed: todo.is_completed,
+          quadrant: todo.is_important && todo.is_urgent ? 1 :
+                    todo.is_important ? 2 :
+                    todo.is_urgent ? 3 : 4
         }}
-      >
-        <Box sx={{ display: 'flex', alignItems: 'flex-start', gap: 1 }}>
-          <Checkbox
-            checked={todo.is_completed}
-            onChange={(e) => handleToggleTodo(todo.id, e.target.checked)}
-            icon={<RadioButtonUncheckedIcon />}
-            checkedIcon={<CheckCircleIcon />}
-            sx={{ mt: -0.5 }}
-          />
-          <Box sx={{ flex: 1, minWidth: 0 }}>
-            <Typography
-              variant="body1"
-              sx={{
-                textDecoration: todo.is_completed ? 'line-through' : 'none',
-                color: todo.is_completed ? 'text.secondary' : 'text.primary',
-                wordBreak: 'break-word',
-                mb: 0.5
-              }}
-            >
-              {todo.content}
-            </Typography>
-            
-            <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, flexWrap: 'wrap' }}>
-              {todo.is_important && (
-                <Chip
-                  size="small"
-                  label="重要"
-                  color="warning"
-                  variant="outlined"
-                  sx={{ fontSize: '0.7rem', height: 20 }}
-                />
-              )}
-              {todo.is_urgent && (
-                <Chip
-                  size="small"
-                  label="紧急"
-                  color="error"
-                  variant="outlined"
-                  sx={{ fontSize: '0.7rem', height: 20 }}
-                />
-              )}
-              {todo.due_date && (
-                <Chip
-                  size="small"
-                  icon={<ScheduleIcon sx={{ fontSize: '0.8rem !important' }} />}
-                  label={TimeZoneUtils.formatForDisplay(todo.due_date, { 
-                    shortFormat: true, 
-                    showTime: TimeZoneUtils.hasTime(todo.due_date) 
-                  })}
-                  color={isOverdue ? 'error' : isDueToday ? 'warning' : 'default'}
-                  variant={isOverdue || isDueToday ? 'filled' : 'outlined'}
-                  sx={{ fontSize: '0.7rem', height: 20 }}
-                />
-              )}
-              {todo.tags && todo.tags.split(',').filter(tag => tag.trim()).map((tag, index) => (
-                <Chip
-                  key={index}
-                  size="small"
-                  label={tag.trim()}
-                  color="primary"
-                  variant="outlined"
-                  sx={{ fontSize: '0.7rem', height: 20 }}
-                />
-              ))}
-            </Box>
-          </Box>
-          
-          {!todo.is_completed && (
-            <Box sx={{ display: 'flex', gap: 0.5 }}>
-              <IconButton
-                size="small"
-                onClick={() => setEditingTodo(todo)}
-                sx={{ opacity: 0.7, '&:hover': { opacity: 1 } }}
-              >
-                <EditIcon fontSize="small" />
-              </IconButton>
-              <IconButton
-                size="small"
-                onClick={() => handleDeleteTodo(todo.id)}
-                sx={{ opacity: 0.7, '&:hover': { opacity: 1, color: 'error.main' } }}
-              >
-                <DeleteIcon fontSize="small" />
-              </IconButton>
-            </Box>
-          )}
-        </Box>
-      </Paper>
+        onToggleComplete={() => handleToggleTodo(todo)}
+        variant="quadrant"
+        showSecondaryInfo={true}
+        compact={false}
+        pendingComplete={pendingComplete}
+        celebratingTodos={celebratingTodos}
+      />
     );
   };
 
@@ -488,37 +414,31 @@ const TodoView = ({ viewMode, showCompleted, onViewModeChange, onShowCompletedCh
     );
   };
 
-  // 渲染列表视图
-  const renderListView = () => {
-    const filteredTodos = Array.isArray(todos) ? todos.filter(todo => {
-      if (filterBy === 'pending') return !todo.is_completed;
-      if (filterBy === 'completed') return todo.is_completed;
-      if (filterBy === 'overdue') return todo.due_date && isPast(parseISO(todo.due_date)) && !todo.is_completed;
+  // 渲染专注视图
+  const renderFocusView = () => {
+    const flattenTodos = Array.isArray(todos)
+      ? todos
+      : todos && typeof todos === 'object'
+        ? Object.values(todos).flat()
+        : [];
+
+    const filteredTodos = flattenTodos.filter((todo) => {
+      const completed = todo.completed !== undefined ? Boolean(todo.completed) : Boolean(todo.is_completed);
+      if (filterBy === 'pending') return !completed;
+      if (filterBy === 'completed') return completed;
+      if (filterBy === 'overdue') return todo.due_date && isPast(parseISO(todo.due_date)) && !completed;
       if (filterBy === 'today') return todo.due_date && isToday(parseISO(todo.due_date));
       return true;
-    }) : [];
+    });
 
     return (
-      <Box sx={{ maxWidth: '800px', mx: 'auto' }}>
-        {filteredTodos.length === 0 ? (
-          <Box
-            sx={{
-              textAlign: 'center',
-              py: 8,
-              color: 'text.secondary'
-            }}
-          >
-            <Typography variant="h6" sx={{ mb: 1 }}>
-              暂无待办事项
-            </Typography>
-            <Typography variant="body2">
-              点击上方按钮创建新的待办事项
-            </Typography>
-          </Box>
-        ) : (
-          filteredTodos.map(renderTodoItem)
-        )}
-      </Box>
+      <FocusModeView
+        todos={filteredTodos}
+        loading={loading}
+        onToggleComplete={completeTodoInstantly}
+        onLogFocusTime={addTodoFocusTime}
+        onTodoUpdated={handleFocusTimeLogged}
+      />
     );
   };
 
@@ -534,314 +454,10 @@ const TodoView = ({ viewMode, showCompleted, onViewModeChange, onShowCompletedCh
     <Box sx={{ height: '100%', display: 'flex', flexDirection: 'column', backgroundColor: theme.palette.mode === 'dark' ? '#121212' : 'grey.50' }}>
       {/* 主内容区域 */}
       <Box sx={{ flex: 1, p: 3, overflow: 'auto' }}>
-        {viewMode === 'quadrant' ? renderQuadrantView() : renderListView()}
+  {effectiveViewMode === 'quadrant' ? renderQuadrantView() : renderFocusView()}
       </Box>
-
-      {/* 新建待办事项弹窗 */}
-      {showCreateForm && (
-        <CreateTodoModal
-          todo={newTodo}
-          onChange={setNewTodo}
-          onSubmit={handleCreateTodo}
-          onCancel={() => {
-            if (onCreateFormClose) {
-              onCreateFormClose();
-            }
-            setNewTodo({ content: '', is_important: false, is_urgent: false, due_date: '', due_time: '', repeat_type: 'none', repeat_interval: 1, repeat_days: '' });
-          }}
-        />
-      )}
-
-      {/* 编辑待办事项弹窗 */}
-      {editingTodo && (
-        <EditTodoForm
-          todo={editingTodo}
-          onSave={handleUpdateTodo}
-          onCancel={() => {
-            setEditingTodo(null);
-            if (onTodoSelect) {
-              onTodoSelect(null);
-            }
-          }}
-        />
-      )}
     </Box>
   );
 };
-
-// 编辑待办事项表单组件
-const EditTodoForm = ({ todo, onSave, onCancel }) => {
-  // 使用TimeZoneUtils正确转换UTC时间为本地时间
-  const { date: localDate, time: localTime } = TimeZoneUtils.fromUTC(todo.due_date);
-  
-  console.log('[EditTodoForm] 初始化编辑表单:');
-  console.log('  - 原始UTC时间:', todo.due_date);
-  console.log('  - 转换后本地日期:', localDate);
-  console.log('  - 转换后本地时间:', localTime);
-  
-  const [formData, setFormData] = useState({
-    content: todo.content,
-    tags: todo.tags || '',
-    is_important: todo.is_important,
-    is_urgent: todo.is_urgent,
-    due_date: localDate,
-    due_time: localTime,
-    repeat_type: todo.repeat_type || 'none',
-    repeat_interval: todo.repeat_interval || 1,
-    repeat_days: todo.repeat_days || ''
-  });
-
-
-
-  const getCombinedDateTime = () => {
-    if (!formData.due_date) return '';
-    if (formData.due_time) {
-      return `${formData.due_date}T${formData.due_time}:00`;
-    }
-    return `${formData.due_date}T00:00:00`;
-  };
-
-  // 处理日期时间变化
-  const handleDateTimeChange = (field, value) => {
-    if (field === 'due_date' && !value) {
-      // 如果清除日期，同时清除时间
-      setFormData({ ...formData, due_date: '', due_time: '' });
-    } else {
-      setFormData({ ...formData, [field]: value });
-    }
-  };
-
-  // 处理重复设置变化
-  const handleRepeatSettingsChange = (repeatSettings) => {
-    const newFormData = { ...formData, ...repeatSettings };
-    
-    // 如果选择了重复类型（非'none'）但没有设置日期，则默认设置为今天
-    if (repeatSettings.repeat_type && repeatSettings.repeat_type !== 'none' && !newFormData.due_date) {
-      const todayDate = TimeZoneUtils.getTodayDateString();
-      newFormData.due_date = todayDate;
-      
-      console.log('[EditTodoForm] 设置重复时自动填入今天日期:', todayDate);
-    }
-    
-    setFormData(newFormData);
-  };
-
-  const handleSubmit = () => {
-    if (!formData.content.trim()) return;
-    
-    console.log('[EditTodoForm] 提交编辑表单:');
-    console.log('  - 表单日期:', formData.due_date);
-    console.log('  - 表单时间:', formData.due_time);
-    
-    const submitData = {
-      content: formData.content,
-      tags: formData.tags,
-      is_important: formData.is_important,
-      is_urgent: formData.is_urgent,
-      due_date: formData.due_date,
-      due_time: formData.due_time,
-      repeat_type: formData.repeat_type,
-      repeat_interval: formData.repeat_interval,
-      repeat_days: formData.repeat_days
-    };
-    
-    onSave(todo.id, submitData);
-  };
-
-  return (
-    <Dialog open={true} onClose={onCancel} maxWidth="sm" fullWidth>
-      <DialogTitle>编辑待办事项</DialogTitle>
-      <DialogContent>
-        <TextField
-          autoFocus
-          margin="dense"
-          label="待办内容"
-          fullWidth
-          variant="outlined"
-          value={formData.content}
-          onChange={(e) => setFormData({ ...formData, content: e.target.value })}
-          sx={{ mb: 2 }}
-        />
-        
-        <Box sx={{ display: 'flex', gap: 2, mb: 2 }}>
-          <FormControlLabel
-            control={
-              <Checkbox
-                checked={formData.is_important}
-                onChange={(e) => setFormData({ ...formData, is_important: e.target.checked })}
-              />
-            }
-            label="重要"
-          />
-          <FormControlLabel
-            control={
-              <Checkbox
-                checked={formData.is_urgent}
-                onChange={(e) => setFormData({ ...formData, is_urgent: e.target.checked })}
-              />
-            }
-            label="紧急"
-          />
-        </Box>
-        
-        <TagInput
-          value={formData.tags}
-          onChange={(tags) => setFormData({ ...formData, tags })}
-          getSuggestions={async (query) => {
-            try {
-              const result = await window.electronAPI.todos.getTagSuggestions(query);
-              return result.success ? result.data : [];
-            } catch (error) {
-              console.error('获取标签建议失败:', error);
-              return [];
-            }
-          }}
-          sx={{ mb: 2 }}
-        />
-        
-        <RepeatSettings
-          value={{
-            repeat_type: formData.repeat_type,
-            repeat_interval: formData.repeat_interval,
-            repeat_days: formData.repeat_days
-          }}
-          onChange={handleRepeatSettingsChange}
-        />
-        
-        <DateTimePicker
-          dateValue={formData.due_date}
-          timeValue={formData.due_time}
-          onDateChange={(date) => handleDateTimeChange('due_date', date)}
-          onTimeChange={(time) => handleDateTimeChange('due_time', time)}
-          dateLabel="截止日期"
-          timeLabel="截止时间"
-          disableDate={formData.repeat_type && formData.repeat_type !== 'none'}
-          sx={{ mb: 2 }}
-        />
-      </DialogContent>
-      <DialogActions>
-        <Button onClick={onCancel}>取消</Button>
-        <Button onClick={handleSubmit} variant="contained">保存</Button>
-      </DialogActions>
-    </Dialog>
-  );
-};
-
 // 创建待办事项弹窗组件
-const CreateTodoModal = ({ todo, onChange, onSubmit, onCancel }) => {
-  // 处理日期时间变化
-  const handleDateTimeChange = (field, value) => {
-    console.log(`[CreateTodoModal] 日期时间变化: ${field} = ${value}`);
-    
-    const newTodo = { ...todo, [field]: value };
-    
-    // 如果清除日期，同时清除时间字段
-    if (field === 'due_date' && !value) {
-      newTodo.due_time = '';
-    }
-    
-    onChange(newTodo);
-  };
-
-  // 处理重复设置变化
-  const handleRepeatSettingsChange = (repeatSettings) => {
-    const newTodo = { ...todo, ...repeatSettings };
-    
-    // 如果选择了重复类型（非'none'）但没有设置日期，则默认设置为今天
-    if (repeatSettings.repeat_type && repeatSettings.repeat_type !== 'none' && !newTodo.due_date) {
-      const todayDate = TimeZoneUtils.getTodayDateString();
-      newTodo.due_date = todayDate;
-      
-      console.log('[CreateTodoModal] 设置重复时自动填入今天日期:', todayDate);
-    }
-    
-    onChange(newTodo);
-  };
-
-  const handleSubmit = () => {
-    if (!todo.content.trim()) return;
-    onSubmit();
-  };
-
-  return (
-    <Dialog open={true} onClose={onCancel} maxWidth="sm" fullWidth>
-      <DialogTitle>新建待办事项</DialogTitle>
-      <DialogContent>
-        <TextField
-          autoFocus
-          margin="dense"
-          label="待办内容"
-          fullWidth
-          variant="outlined"
-          value={todo.content}
-          onChange={(e) => onChange({ ...todo, content: e.target.value })}
-          sx={{ mb: 2 }}
-        />
-        
-        <Box sx={{ display: 'flex', gap: 2, mb: 2 }}>
-          <FormControlLabel
-            control={
-              <Checkbox
-                checked={todo.is_important}
-                onChange={(e) => onChange({ ...todo, is_important: e.target.checked })}
-              />
-            }
-            label="重要"
-          />
-          <FormControlLabel
-            control={
-              <Checkbox
-                checked={todo.is_urgent}
-                onChange={(e) => onChange({ ...todo, is_urgent: e.target.checked })}
-              />
-            }
-            label="紧急"
-          />
-        </Box>
-        
-        <TagInput
-          value={todo.tags || ''}
-          onChange={(tags) => onChange({ ...todo, tags })}
-          getSuggestions={async (query) => {
-            try {
-              const result = await window.electronAPI.todos.getTagSuggestions(query);
-              return result.success ? result.data : [];
-            } catch (error) {
-              console.error('获取标签建议失败:', error);
-              return [];
-            }
-          }}
-          sx={{ mb: 2 }}
-        />
-        
-        <RepeatSettings
-          value={{
-            repeat_type: todo.repeat_type,
-            repeat_interval: todo.repeat_interval,
-            repeat_days: todo.repeat_days
-          }}
-          onChange={handleRepeatSettingsChange}
-        />
-        
-        <DateTimePicker
-          dateValue={todo.due_date ? todo.due_date.split('T')[0] : ''}
-          timeValue={todo.due_time || ''}
-          onDateChange={(date) => handleDateTimeChange('due_date', date)}
-          onTimeChange={(time) => handleDateTimeChange('due_time', time)}
-          dateLabel="截止日期"
-          timeLabel="截止时间"
-          disableDate={todo.repeat_type && todo.repeat_type !== 'none'}
-          sx={{ mb: 2 }}
-        />
-        
-
-      </DialogContent>
-      <DialogActions>
-        <Button onClick={onCancel}>取消</Button>
-        <Button onClick={handleSubmit} variant="contained">创建</Button>
-      </DialogActions>
-    </Dialog>
-  );
-};
-
 export default TodoView;

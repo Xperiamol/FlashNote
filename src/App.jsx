@@ -22,13 +22,22 @@ import Sidebar from './components/Sidebar'
 import TodoView from './components/TodoView'
 import CalendarView from './components/CalendarView'
 import Settings from './components/Settings'
+import PluginStore from './components/PluginStore'
 import SecondarySidebar from './components/SecondarySidebar'
 import MultiSelectToolbar from './components/MultiSelectToolbar'
 import TagSelectionDialog from './components/TagSelectionDialog'
 import DragAnimationProvider from './components/DragAnimationProvider'
+import TodoEditDialog from './components/TodoEditDialog'
+import CreateTodoModal from './components/CreateTodoModal'
+import { createTodo as createTodoAPI } from './api/todoAPI'
+import TimeZoneUtils from './utils/timeZoneUtils'
+import { subscribePluginEvents, subscribePluginUiRequests } from './api/pluginAPI'
 
 function App() {
-  const { theme, primaryColor, loadNotes, currentView, initializeSettings, setCurrentView, createNote, batchDeleteNotes, batchDeleteTodos, batchCompleteTodos, batchRestoreNotes, batchPermanentDeleteNotes, getAllTags, batchSetTags } = useStore()
+  const { theme, primaryColor, loadNotes, currentView, initializeSettings, setCurrentView, createNote, batchDeleteNotes, batchDeleteTodos, batchCompleteTodos, batchRestoreNotes, batchPermanentDeleteNotes, getAllTags, batchSetTags, setSelectedNoteId } = useStore()
+  const refreshPluginCommands = useStore((state) => state.refreshPluginCommands)
+  const addPluginCommand = useStore((state) => state.addPluginCommand)
+  const removePluginCommand = useStore((state) => state.removePluginCommand)
   const [sidebarOpen, setSidebarOpen] = useState(true)
   const [secondarySidebarOpen, setSecondarySidebarOpen] = useState(true)
   const [showDeleted, setShowDeleted] = useState(false)
@@ -39,6 +48,27 @@ function App() {
   const [selectedTodo, setSelectedTodo] = useState(null)
   const [showTodoCreateForm, setShowTodoCreateForm] = useState(false)
   const [todoSortBy, setTodoSortBy] = useState('priority')
+  const [initialTodoData, setInitialTodoData] = useState(null) // 用于预设初始todo数据
+  
+  // 初始todo状态定义
+  const initialTodoState = {
+    content: '',
+    is_important: false,
+    is_urgent: false,
+    due_date: '',
+    due_time: '',
+    repeat_type: 'none',
+    repeat_interval: 1,
+    repeat_days: '',
+    tags: ''
+  };
+
+  const [newTodo, setNewTodo] = useState(initialTodoState);
+  
+  // 日历视图相关状态
+  const [calendarCurrentDate, setCalendarCurrentDate] = useState(new Date())
+  const [selectedDate, setSelectedDate] = useState(null)
+  const [calendarShowCompleted, setCalendarShowCompleted] = useState(false)
   
   // 多选状态管理
   const [multiSelectState, setMultiSelectState] = useState({
@@ -54,6 +84,12 @@ function App() {
   
   // 待办事项刷新触发器
   const [todoRefreshTrigger, setTodoRefreshTrigger] = useState(0)
+  const [calendarRefreshTrigger, setCalendarRefreshTrigger] = useState(0)
+  const handleTodoDialogClose = () => setSelectedTodo(null)
+  const handleTodoUpdated = () => {
+    setTodoRefreshTrigger(prev => prev + 1)
+    setCalendarRefreshTrigger(prev => prev + 1)
+  }
   
   // 永久删除确认状态
   const [permanentDeleteConfirm, setPermanentDeleteConfirm] = useState(false)
@@ -72,6 +108,96 @@ function App() {
       currentMultiSelectRef.exitMultiSelectMode();
     }
   }, [currentView]);
+
+  // 处理初始todo数据变化
+  useEffect(() => {
+    if (initialTodoData) {
+      setNewTodo({ ...initialTodoState, ...initialTodoData });
+    } else {
+      setNewTodo(initialTodoState);
+    }
+  }, [initialTodoData]);
+
+  useEffect(() => {
+    refreshPluginCommands()
+  }, [refreshPluginCommands])
+
+  useEffect(() => {
+    const unsubscribe = subscribePluginEvents((event) => {
+      if (!event) return
+
+      if (event.type === 'command-registered' && event.command && event.pluginId) {
+        const surfaces = Array.isArray(event.command.surfaces)
+          ? event.command.surfaces
+              .map((surface) => (typeof surface === 'string' ? surface.trim() : ''))
+              .filter(Boolean)
+          : []
+
+        addPluginCommand({
+          pluginId: event.pluginId,
+          pluginName: event.plugin?.manifest?.name || event.plugin?.id || event.pluginId,
+          commandId: event.command.id,
+          title: event.command.title || event.command.id,
+          description: event.command.description || '',
+          icon: event.command.icon || null,
+          shortcut: event.command.shortcut || null,
+          shortcutBinding: event.command.shortcutBinding || null,
+          surfaces,
+          raw: event.command
+        })
+        return
+      }
+
+      if (event.type === 'command-unregistered' && event.commandId && event.pluginId) {
+        removePluginCommand(event.pluginId, event.commandId)
+        return
+      }
+
+      if (['installed', 'uninstalled', 'enabled', 'disabled', 'ready', 'error', 'stopped'].includes(event.type)) {
+        refreshPluginCommands()
+      }
+    })
+
+    return () => {
+      unsubscribe && unsubscribe()
+    }
+  }, [addPluginCommand, removePluginCommand, refreshPluginCommands])
+
+  // 创建新待办事项
+  const handleCreateTodo = async () => {
+    try {
+      // 使用TimeZoneUtils转换日期时间为UTC
+      const dueDateUTC = TimeZoneUtils.toUTC(newTodo.due_date, newTodo.due_time);
+      
+      console.log('[App] 创建待办事项:');
+      console.log('  - 本地日期:', newTodo.due_date);
+      console.log('  - 本地时间:', newTodo.due_time);
+      console.log('  - UTC时间:', dueDateUTC);
+      
+      await createTodoAPI({
+        content: newTodo.content,
+        is_important: newTodo.is_important,
+        is_urgent: newTodo.is_urgent,
+        due_date: dueDateUTC,
+        tags: newTodo.tags,
+        repeat_type: newTodo.repeat_type,
+        repeat_interval: newTodo.repeat_interval,
+        repeat_days: newTodo.repeat_days
+      });
+      
+      setNewTodo(initialTodoState);
+      setShowTodoCreateForm(false);
+      setInitialTodoData(null);
+      
+      // 刷新相关数据
+      setTodoRefreshTrigger(prev => prev + 1);
+      setCalendarRefreshTrigger(prev => prev + 1);
+      
+      console.log('[App] 待办事项创建成功');
+    } catch (error) {
+      console.error('创建待办事项失败:', error);
+    }
+  };
 
   // 处理批量设置标签
   const handleBatchSetTags = async () => {
@@ -166,9 +292,31 @@ function App() {
         window.electronAPI.ipcRenderer.removeAllListeners('quick-input')
       }
     }
-  }, []) // 移除 loadNotes 依赖，避免无限循环
+  }, [createNote])
 
-  // 在移动端自动隐藏侧边栏
+    useEffect(() => {
+      const unsubscribe = subscribePluginUiRequests((payload) => {
+        if (!payload?.noteId) return
+        setCurrentView('notes')
+        setSelectedNoteId(payload.noteId)
+      })
+
+      return () => {
+        unsubscribe && unsubscribe()
+      }
+    }, [setCurrentView, setSelectedNoteId])
+
+  // 处理todo创建，支持预设初始数据
+  const handleOpenCreateTodo = (initialData = null) => {
+    setInitialTodoData(initialData)
+    setShowTodoCreateForm(true)
+  }
+
+  // 处理todo创建表单关闭
+  const handleTodoCreateFormClose = () => {
+    setShowTodoCreateForm(false)
+    setInitialTodoData(null)
+  }  // 在移动端自动隐藏侧边栏
   useEffect(() => {
     if (isMobile) {
       setSidebarOpen(false)
@@ -214,9 +362,15 @@ function App() {
               onTodoViewModeChange={setTodoViewMode}
               todoShowCompleted={todoShowCompleted}
               onTodoShowCompletedChange={setTodoShowCompleted}
-              onCreateTodo={() => setShowTodoCreateForm(true)}
+              onCreateTodo={handleOpenCreateTodo}
               todoSortBy={todoSortBy}
               onTodoSortByChange={setTodoSortBy}
+              calendarCurrentDate={calendarCurrentDate}
+              onCalendarDateChange={setCalendarCurrentDate}
+              calendarShowCompleted={calendarShowCompleted}
+              onCalendarShowCompletedChange={setCalendarShowCompleted}
+              onSelectedDateChange={setSelectedDate}
+              selectedDate={selectedDate}
             />
             </AppBar>
 
@@ -430,10 +584,13 @@ function App() {
                 todoSortBy={todoSortBy}
                 onTodoSortByChange={setTodoSortBy}
                 showDeleted={showDeleted}
+                selectedDate={selectedDate}
+                calendarRefreshTrigger={calendarRefreshTrigger}
+                onTodoUpdated={handleTodoUpdated}
               />
               
               {/* 主内容区域 */}
-              <Box sx={{ flex: 1, overflow: 'hidden' }}>
+              <Box sx={{ flex: 1, overflow: 'hidden', minWidth: 600 }}>
                 {currentView === 'notes' && <NoteEditor />}
                 {currentView === 'todo' && (
               <TodoView 
@@ -441,14 +598,11 @@ function App() {
                 showCompleted={todoShowCompleted}
                 onViewModeChange={setTodoViewMode}
                 onShowCompletedChange={setTodoShowCompleted}
-                showCreateForm={showTodoCreateForm}
-                onCreateFormClose={() => setShowTodoCreateForm(false)}
                 onRefresh={() => setTodoRefreshTrigger(prev => prev + 1)}
-                selectedTodo={selectedTodo}
                 onTodoSelect={setSelectedTodo}
               />
             )}
-                {currentView === 'calendar' && <CalendarView />}
+                {currentView === 'calendar' && <CalendarView currentDate={calendarCurrentDate} onDateChange={setCalendarCurrentDate} onTodoSelect={setSelectedTodo} selectedDate={selectedDate} onSelectedDateChange={setSelectedDate} refreshToken={calendarRefreshTrigger} showCompleted={calendarShowCompleted} onShowCompletedChange={setCalendarShowCompleted} onTodoUpdated={handleTodoUpdated} />}
                 {currentView === 'settings' && <Settings />}
                 {currentView === 'files' && (
                   <Box sx={{ p: 3 }}>
@@ -457,9 +611,8 @@ function App() {
                   </Box>
                 )}
                 {currentView === 'plugins' && (
-                  <Box sx={{ p: 3 }}>
-                    <Typography variant="h4">插件商店</Typography>
-                    <Typography variant="body1" sx={{ mt: 2 }}>插件商店功能开发中...</Typography>
+                  <Box sx={{ p: 3, height: '100%', boxSizing: 'border-box' }}>
+                    <PluginStore />
                   </Box>
                 )}
                 {currentView === 'vocabulary' && (
@@ -480,6 +633,23 @@ function App() {
         </Box>
       </Box>
       
+      <TodoEditDialog
+        todo={selectedTodo}
+        open={Boolean(selectedTodo)}
+        onClose={handleTodoDialogClose}
+        onUpdated={handleTodoUpdated}
+      />
+
+      {/* 创建Todo对话框 */}
+      {showTodoCreateForm && (
+        <CreateTodoModal
+          todo={newTodo}
+          onChange={setNewTodo}
+          onSubmit={handleCreateTodo}
+          onCancel={handleTodoCreateFormClose}
+        />
+      )}
+
       {/* 标签选择对话框 */}
       <TagSelectionDialog
         open={tagSelectionDialogOpen}

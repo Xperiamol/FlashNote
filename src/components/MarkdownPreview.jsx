@@ -1,10 +1,89 @@
-import React from 'react'
+import React, { useState, useEffect } from 'react'
 import { Box, Typography } from '@mui/material'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import rehypeHighlight from 'rehype-highlight'
 import rehypeRaw from 'rehype-raw'
+import { imageAPI } from '../api/imageAPI'
 import 'highlight.js/styles/github.css'
+
+// 自定义图片组件
+const CustomImage = ({ src, alt, ...props }) => {
+  const [imageSrc, setImageSrc] = useState(src)
+  const [loading, setLoading] = useState(true)
+  const [error, setError] = useState(false)
+
+  useEffect(() => {
+    const loadImage = async () => {
+      if (src && src.startsWith('images/')) {
+        try {
+          // 获取本地图片的base64数据
+          const base64Data = await imageAPI.getBase64(src)
+          setImageSrc(base64Data)
+        } catch (err) {
+          console.error('加载图片失败:', err)
+          setError(true)
+        }
+      } else {
+        setImageSrc(src)
+      }
+      setLoading(false)
+    }
+
+    loadImage()
+  }, [src])
+
+  if (loading) {
+    return (
+      <Box
+        sx={{
+          display: 'inline-block',
+          p: 1,
+          border: '1px dashed',
+          borderColor: 'divider',
+          borderRadius: 1,
+          color: 'text.secondary'
+        }}
+      >
+        加载中...
+      </Box>
+    )
+  }
+
+  if (error) {
+    return (
+      <Box
+        sx={{
+          display: 'inline-block',
+          p: 1,
+          border: '1px solid',
+          borderColor: 'error.main',
+          borderRadius: 1,
+          color: 'error.main',
+          backgroundColor: 'error.light',
+          opacity: 0.1
+        }}
+      >
+        图片加载失败: {alt || src}
+      </Box>
+    )
+  }
+
+  return (
+    <img
+      src={imageSrc}
+      alt={alt}
+      {...props}
+      style={{
+        maxWidth: '100%',
+        height: 'auto',
+        borderRadius: '4px',
+        ...props.style
+      }}
+      onError={() => setError(true)}
+    />
+  )
+}
 
 const MarkdownPreview = ({ content, sx }) => {
   if (!content || content.trim() === '') {
@@ -175,7 +254,8 @@ const MarkdownPreview = ({ content, sx }) => {
             <Typography variant="body1" paragraph>
               {children}
             </Typography>
-          )
+          ),
+          img: CustomImage
         }}
       >
         {content}

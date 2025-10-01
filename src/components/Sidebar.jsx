@@ -72,6 +72,8 @@ const Sidebar = ({ open = true, onClose }) => {
     <Box
       sx={{
         width: '60px',
+        minWidth: '60px',
+        maxWidth: '60px',
         height: '100%',
         backgroundColor: theme.palette.mode === 'dark' ? '#1e1e1e' : '#f0f0f0',
         borderRight: `1px solid ${theme.palette.divider}`,
@@ -87,7 +89,8 @@ const Sidebar = ({ open = true, onClose }) => {
           : 'linear-gradient(180deg, #f0f0f0 0%, #e8e8e8 100%)',
         boxShadow: '2px 0 8px rgba(0,0,0,0.1)',
         overflow: 'visible',
-        minHeight: 0
+        minHeight: 0,
+        flexShrink: 0
       }}
     >
       {/* 头像区域 */}

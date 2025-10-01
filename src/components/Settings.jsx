@@ -37,10 +37,12 @@ import {
   Delete,
   Restore,
   Warning as WarningIcon,
-  Info as InfoIcon
+  Info as InfoIcon,
+  Cloud as CloudIcon
 } from '@mui/icons-material';
 import { useStore } from '../store/useStore';
 import ShortcutInput from './ShortcutInput';
+import CloudSyncSettings from './CloudSyncSettings';
 import { 
   DEFAULT_SHORTCUTS, 
   SHORTCUT_CATEGORIES, 
@@ -328,6 +330,7 @@ const Settings = () => {
           <Tab label="通用设置" icon={<SettingsIcon />} />
           <Tab label="外观设置" icon={<PaletteIcon />} />
           <Tab label="快捷键设置" icon={<KeyboardIcon />} />
+          <Tab label="云同步" icon={<CloudIcon />} />
           <Tab label="数据管理" icon={<ImportIcon />} />
           <Tab label="关于" icon={<InfoIcon />} />
         </Tabs>
@@ -552,8 +555,13 @@ const Settings = () => {
           })}
         </TabPanel>
 
-        {/* 数据管理 */}
+        {/* 云同步设置 */}
         <TabPanel value={tabValue} index={3}>
+          <CloudSyncSettings />
+        </TabPanel>
+
+        {/* 数据管理 */}
+        <TabPanel value={tabValue} index={4}>
           <List>
             <ListItem>
               <ListItemText
@@ -597,7 +605,7 @@ const Settings = () => {
         </TabPanel>
 
         {/* 关于 */}
-        <TabPanel value={tabValue} index={4}>
+        <TabPanel value={tabValue} index={5}>
           <Box sx={{ textAlign: 'center', py: 4 }}>
             <Typography variant="h4" gutterBottom>
               FlashNote 2.0

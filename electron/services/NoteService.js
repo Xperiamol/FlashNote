@@ -252,6 +252,68 @@ class NoteService extends EventEmitter {
   }
 
   /**
+   * 获取一条随机笔记
+   * @param {object} options
+   * @param {boolean} [options.includeDeleted=false] 是否包含已删除笔记
+   * @param {number} [options.pageSize=50] 每次批量读取的数量
+   */
+  async getRandomNote(options = {}) {
+    const {
+      includeDeleted = false,
+      pageSize: rawPageSize = 50
+    } = options
+
+    const pageSize = Math.min(200, Math.max(1, Number(rawPageSize) || 50))
+
+    try {
+      const initialBatch = this.noteDAO.findAll({
+        page: 1,
+        limit: pageSize,
+        includeDeleted,
+        pinnedFirst: false,
+        sortBy: 'updated_at',
+        sortOrder: 'DESC'
+      })
+
+      const total = initialBatch?.pagination?.total || 0
+      if (!total) {
+        return {
+          success: true,
+          data: null
+        }
+      }
+
+      const randomIndex = Math.floor(Math.random() * total)
+      const targetPage = Math.floor(randomIndex / pageSize) + 1
+      const offsetIndex = randomIndex % pageSize
+
+      const batch = targetPage === 1
+        ? initialBatch
+        : this.noteDAO.findAll({
+            page: targetPage,
+            limit: pageSize,
+            includeDeleted,
+            pinnedFirst: false,
+            sortBy: 'updated_at',
+            sortOrder: 'DESC'
+          })
+
+      const note = Array.isArray(batch?.notes) ? batch.notes[offsetIndex] || batch.notes[0] || null : null
+
+      return {
+        success: true,
+        data: note
+      }
+    } catch (error) {
+      console.error('获取随机笔记失败:', error)
+      return {
+        success: false,
+        error: error.message
+      }
+    }
+  }
+
+  /**
    * 获取置顶笔记
    */
   async getPinnedNotes() {

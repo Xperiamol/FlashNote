@@ -17,6 +17,7 @@ import {
   Paper,
   Skeleton,
   Fade,
+  Collapse,
   CircularProgress,
   FormControl,
   InputLabel,
@@ -42,13 +43,20 @@ import {
   ViewModule as ViewModuleIcon
 } from '@mui/icons-material';
 import { format, isToday, isPast, parseISO } from 'date-fns';
-import { zhCN } from 'date-fns/locale';
+import { zhCN as dateFnsZhCN } from 'date-fns/locale';
 import { useMultiSelect } from '../hooks/useMultiSelect';
 import { useSearch } from '../hooks/useSearch';
 import { useSearchManager } from '../hooks/useSearchManager';
 import { useMultiSelectManager } from '../hooks/useMultiSelectManager';
+import { useFiltersVisibility } from '../hooks/useFiltersVisibility';
 import { searchTodosAPI } from '../api/searchAPI';
 import FilterContainer from './FilterContainer';
+import FilterToggleButton from './FilterToggleButton';
+import zhCN from '../locales/zh-CN';
+
+const {
+  filters: { placeholder }
+} = zhCN;
 import { 
   getPriorityFromQuadrant, 
   getPriorityIcon, 
@@ -58,8 +66,15 @@ import {
 } from '../utils/priorityUtils';
 import { createDragHandler } from '../utils/DragManager'
 import { useDragAnimation } from './DragAnimationProvider';
+import {
+  fetchTodosByPriority,
+  fetchTodosByDueDate,
+  fetchTodosByCreatedAt,
+  toggleTodoComplete,
+  deleteTodo as deleteTodoAPI
+} from '../api/todoAPI';
 
-const TodoList = ({ onTodoSelect, onViewModeChange, onShowCompletedChange, viewMode, showCompleted, onMultiSelectChange, onMultiSelectRefChange, refreshTrigger, sortBy, onSortByChange }) => {
+const TodoList = ({ onTodoSelect, onViewModeChange, onShowCompletedChange, viewMode, showCompleted, onMultiSelectChange, onMultiSelectRefChange, refreshTrigger, sortBy, onSortByChange, externalTodos, isExternalData = false, onTodoUpdated }) => {
   const [todos, setTodos] = useState([]);
   const [isLoading, setIsLoading] = useState(false);
   const [anchorEl, setAnchorEl] = useState(null);
@@ -73,6 +88,9 @@ const TodoList = ({ onTodoSelect, onViewModeChange, onShowCompletedChange, viewM
   // 双击完成相关状态
   const [pendingComplete, setPendingComplete] = useState(new Set());
   const [celebratingTodos, setCelebratingTodos] = useState(new Set());
+  
+  // 筛选器可见性状态
+  const { filtersVisible, toggleFiltersVisibility } = useFiltersVisibility('todo_filters_visible');
 
   // 使用通用搜索hook
   const { search: searchTodos, isSearching } = useSearch({
@@ -122,18 +140,50 @@ const TodoList = ({ onTodoSelect, onViewModeChange, onShowCompletedChange, viewM
 
   // 定义loadTodos函数，确保在使用前初始化
   const loadTodos = async () => {
+    // 如果使用外部数据，直接处理外部数据
+    if (isExternalData && externalTodos) {
+      setIsLoading(true);
+      try {
+        let filteredTodos = [...externalTodos];
+        
+        // 映射数据字段（如果需要）
+        filteredTodos = filteredTodos.map(todo => ({
+          ...todo,
+          completed: Boolean(todo.is_completed || todo.completed),
+          title: todo.content || todo.title,
+          priority: todo.priority || getPriorityFromQuadrant(todo.is_important, todo.is_urgent),
+          focus_time_seconds: (() => {
+            const focusSeconds = Number(todo.focus_time_seconds ?? todo.focusSeconds ?? 0);
+            return Number.isFinite(focusSeconds) ? focusSeconds : 0;
+          })()
+        }));
+        
+        // 根据完成状态筛选
+        if (!showCompleted) {
+          filteredTodos = filteredTodos.filter(todo => !todo.completed);
+        }
+        
+        // 应用所有筛选和排序
+        setTodos(applyFiltersAndSort(filteredTodos));
+      } catch (error) {
+        console.error('处理外部待办事项数据失败:', error);
+        setTodos([]);
+      } finally {
+        setIsLoading(false);
+      }
+      return;
+    }
+
+    // 原有的数据加载逻辑
     setIsLoading(true);
     try {
       let result;
       if (sortBy === 'priority') {
-        const response = await window.electronAPI.todos.getByPriority();
-        result = response.success ? response.data : [];
+        result = await fetchTodosByPriority();
       } else if (sortBy === 'dueDate') {
-        const response = await window.electronAPI.todos.getByDueDate();
-        result = response.success ? response.data : [];
+        result = await fetchTodosByDueDate();
       } else {
-        const response = await window.electronAPI.todos.getByCreatedAt();
-        result = response.success ? response.data : [];
+        result = await fetchTodosByCreatedAt();
       }
       
       let filteredTodos = result || [];
@@ -143,7 +193,11 @@ const TodoList = ({ onTodoSelect, onViewModeChange, onShowCompletedChange, viewM
         ...todo,
         completed: Boolean(todo.is_completed),
         title: todo.content,
-        priority: getPriorityFromQuadrant(todo.is_important, todo.is_urgent)
+        priority: getPriorityFromQuadrant(todo.is_important, todo.is_urgent),
+        focus_time_seconds: (() => {
+          const focusSeconds = Number(todo.focus_time_seconds ?? todo.focusSeconds ?? 0);
+          return Number.isFinite(focusSeconds) ? focusSeconds : 0;
+        })()
       }));
       
       // 根据完成状态筛选
@@ -164,7 +218,7 @@ const TodoList = ({ onTodoSelect, onViewModeChange, onShowCompletedChange, viewM
   // 在loadTodos定义后添加相关的hooks和effects
   useEffect(() => {
     loadTodos();
-  }, [filterBy, sortBy, showCompleted, selectedTags, selectedPriorities]);
+  }, [filterBy, sortBy, showCompleted, selectedTags, selectedPriorities, externalTodos, isExternalData]);
 
   // 创建稳定的回调函数，避免无限循环
   const stableSearchFunction = useCallback((query) => {
@@ -256,8 +310,12 @@ const TodoList = ({ onTodoSelect, onViewModeChange, onShowCompletedChange, viewM
     // 如果已经完成，直接切换状态
     if (todo.completed) {
       try {
-        await window.electronAPI.todos.toggleComplete(todo.id);
+        await toggleTodoComplete(todo.id);
         loadTodos();
+        // 如果有更新回调，触发它
+        if (onTodoUpdated) {
+          onTodoUpdated();
+        }
       } catch (error) {
         console.error('更新待办事项失败:', error);
       }
@@ -273,8 +331,16 @@ const TodoList = ({ onTodoSelect, onViewModeChange, onShowCompletedChange, viewM
         
         // 延迟执行完成操作，让动画播放
         setTimeout(async () => {
-          await window.electronAPI.todos.toggleComplete(todo.id);
-          loadTodos();
+          try {
+            await toggleTodoComplete(todo.id);
+            loadTodos();
+            // 如果有更新回调，触发它
+            if (onTodoUpdated) {
+              onTodoUpdated();
+            }
+          } catch (err) {
+            console.error('更新待办事项失败:', err);
+          }
           
           // 清除庆祝状态
           setTimeout(() => {
@@ -313,9 +379,13 @@ const TodoList = ({ onTodoSelect, onViewModeChange, onShowCompletedChange, viewM
   const handleDelete = async () => {
     if (selectedTodo) {
       try {
-        await window.electronAPI.todos.delete(selectedTodo.id);
+        await deleteTodoAPI(selectedTodo.id);
         loadTodos();
         handleMenuClose();
+        // 如果有更新回调，触发它
+        if (onTodoUpdated) {
+          onTodoUpdated();
+        }
       } catch (error) {
         console.error('删除待办事项失败:', error);
       }
@@ -342,7 +412,7 @@ const TodoList = ({ onTodoSelect, onViewModeChange, onShowCompletedChange, viewM
       if (isToday(date)) {
         return '今天';
       }
-      return format(date, 'MM月dd日', { locale: zhCN });
+      return format(date, 'MM月dd日', { locale: dateFnsZhCN });
     } catch (error) {
       return '';
     }
@@ -386,7 +456,7 @@ const TodoList = ({ onTodoSelect, onViewModeChange, onShowCompletedChange, viewM
       </Typography>
       {!localSearchQuery && (
         <Typography variant="body2" sx={{ mt: 1, opacity: 0.7 }}>
-          点击新建按钮创建第一个待办
+          感受宁静
         </Typography>
       )}
     </Box>
@@ -404,7 +474,7 @@ const TodoList = ({ onTodoSelect, onViewModeChange, onShowCompletedChange, viewM
         <TextField
           fullWidth
           size="small"
-          placeholder="搜索待办事项..."
+          placeholder={placeholder.searchTodos}
           value={localSearchQuery}
           onChange={(e) => setLocalSearchQuery(e.target.value)}
           InputProps={{
@@ -413,31 +483,53 @@ const TodoList = ({ onTodoSelect, onViewModeChange, onShowCompletedChange, viewM
                 <SearchIcon sx={{ color: 'text.secondary' }} />
               </InputAdornment>
             ),
-            endAdornment: localSearchQuery && (
-              <InputAdornment position="end">
-                <IconButton
-                  size="small"
-                  onClick={handleClearSearch}
-                  sx={{ color: 'text.secondary' }}
-                >
-                  <ClearIcon />
-                </IconButton>
-              </InputAdornment>
+            endAdornment: (
+              <>
+                {localSearchQuery && (
+                  <InputAdornment position="end">
+                    <IconButton
+                      size="small"
+                      onClick={handleClearSearch}
+                      sx={{ color: 'text.secondary' }}
+                    >
+                      <ClearIcon />
+                    </IconButton>
+                  </InputAdornment>
+                )}
+                <FilterToggleButton
+                  filtersVisible={filtersVisible}
+                  onToggle={toggleFiltersVisibility}
+                />
+              </>
             )
           }}
         />
         
         {/* 筛选容器 */}
-        <FilterContainer
-          selectedTags={selectedTags}
-          onTagsChange={setSelectedTags}
-          selectedPriorities={selectedPriorities}
-          onPrioritiesChange={setSelectedPriorities}
-          showTagFilter={true}
-          showPriorityFilter={true}
-          isTodoFilter={true}
-          sx={{ mt: 1 }}
-        />
+        <Collapse 
+          in={filtersVisible} 
+          timeout={200}
+          easing={{
+            enter: 'cubic-bezier(0.25, 0.46, 0.45, 0.94)',
+            exit: 'cubic-bezier(0.55, 0.06, 0.68, 0.19)'
+          }}
+          sx={{
+            '& .MuiCollapse-wrapper': {
+              transition: 'transform 0.2s cubic-bezier(0.25, 0.46, 0.45, 0.94)'
+            }
+          }}
+        >
+          <FilterContainer
+            selectedTags={selectedTags}
+            onTagsChange={setSelectedTags}
+            selectedPriorities={selectedPriorities}
+            onPrioritiesChange={setSelectedPriorities}
+            showTagFilter={true}
+            showPriorityFilter={true}
+            isTodoFilter={true}
+            sx={{ mt: 1 }}
+          />
+        </Collapse>
       </Box>
 
       {/* 待办事项列表 */}

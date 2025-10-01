@@ -1,0 +1,14 @@
+{
+	"name": "@flashnote-plugin/random-note",
+	"version": "1.0.0",
+	"description": "随机打开一篇笔记的 FlashNote 插件示例",
+	"main": "index.js",
+	"license": "MIT",
+	"keywords": [
+		"flashnote",
+		"plugin",
+		"example"
+	],
+	"author": "FlashNote Team",
+	"private": true
+}

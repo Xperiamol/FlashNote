@@ -107,6 +107,7 @@ class DatabaseManager {
         is_important INTEGER DEFAULT 0,
         is_urgent INTEGER DEFAULT 0,
         due_date DATETIME NULL,
+        focus_time_seconds INTEGER DEFAULT 0,
         created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
         updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
         completed_at DATETIME NULL
@@ -232,6 +233,11 @@ class DatabaseManager {
           console.log(`添加${column.name}字段到todos表...`);
           this.db.exec(column.sql);
         }
+      }
+
+      if (!columnNames.includes('focus_time_seconds')) {
+        console.log('添加focus_time_seconds字段到todos表...');
+        this.db.exec("ALTER TABLE todos ADD COLUMN focus_time_seconds INTEGER DEFAULT 0");
       }
       
       // 添加重复事项相关索引
