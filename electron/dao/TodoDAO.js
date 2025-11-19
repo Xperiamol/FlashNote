@@ -1,9 +1,11 @@
 const { getInstance } = require('./DatabaseManager');
 const TimeZoneUtils = require('../utils/timeZoneUtils');
+const ChangeLogDAO = require('./ChangeLogDAO');
 
 class TodoDAO {
   constructor() {
     this.dbManager = getInstance();
+    this.changeLog = new ChangeLogDAO();
   }
 
   /**
@@ -14,16 +16,38 @@ class TodoDAO {
   }
 
   /**
+   * 判断日期字符串是否包含时间信息
+   * @param {string} dateStr - 日期字符串
+   * @returns {number} 1=有时间, 0=无时间/全天
+   * @private
+   */
+  _hasTimeInfo(dateStr) {
+    if (!dateStr) return 0;
+    
+    // 格式示例：
+    // "2025-11-12" → 0 (全天)
+    // "2025-11-12T10:00:00.000Z" → 1 (有时间)
+    // "2025-11-12 18:00:00" → 1 (有时间)
+    
+    // 检查是否包含时间部分（T 或空格后跟时分秒）
+    const hasTimePattern = /T\d{2}:\d{2}|\s\d{2}:\d{2}/;
+    return hasTimePattern.test(dateStr) ? 1 : 0;
+  }
+
+  /**
    * 创建新待办事项
    */
   create(todoData) {
     const db = this.getDB();
     const { 
       content, 
+      description = '',
       tags = '',
       is_important = 0, 
       is_urgent = 0, 
       due_date = null,
+      end_date = null,
+      item_type = 'todo',
       focus_time_seconds = 0,
       repeat_type = 'none',
       repeat_days = '',
@@ -33,28 +57,50 @@ class TodoDAO {
       parent_todo_id = null
     } = todoData;
     
+    // 自动判断 has_time
+    const has_time = todoData.has_time !== undefined 
+      ? todoData.has_time 
+      : this._hasTimeInfo(due_date);
+    
     const stmt = db.prepare(`
       INSERT INTO todos (
-        content, tags, is_important, is_urgent, due_date,
+        content, description, tags, is_important, is_urgent, due_date, end_date, 
+        item_type, has_time,
         focus_time_seconds,
         repeat_type, repeat_days, repeat_interval, next_due_date, is_recurring, parent_todo_id,
         created_at, updated_at
       )
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
     `);
     
     const result = stmt.run(
-      content, tags, is_important, is_urgent, due_date,
+      content, description, tags, is_important, is_urgent, due_date, end_date,
+      item_type, has_time,
       focus_time_seconds,
       repeat_type, repeat_days, repeat_interval, next_due_date, is_recurring, parent_todo_id
     );
-    return this.findById(result.lastInsertRowid);
+    
+    const todo = this.findById(result.lastInsertRowid);
+    
+    // 记录变更日志
+    this.changeLog.logChange('todo', todo.id, 'create', todo);
+    
+    return todo;
   }
 
   /**
    * 根据ID查找待办事项
    */
   findById(id) {
+    const db = this.getDB();
+    const stmt = db.prepare('SELECT * FROM todos WHERE id = ? AND is_deleted = 0');
+    return stmt.get(id);
+  }
+
+  /**
+   * 根据ID查找待办事项(包括已删除)
+   */
+  findByIdIncludeDeleted(id) {
     const db = this.getDB();
     const stmt = db.prepare('SELECT * FROM todos WHERE id = ?');
     return stmt.get(id);
@@ -66,7 +112,8 @@ class TodoDAO {
   update(id, todoData) {
     const db = this.getDB();
     const { 
-      content, 
+      content,
+      description,
       tags,
       is_completed, 
       is_important, 
@@ -87,6 +134,11 @@ class TodoDAO {
     if (content !== undefined) {
       updateFields.push('content = ?');
       params.push(content);
+    }
+
+    if (description !== undefined) {
+      updateFields.push('description = ?');
+      params.push(description);
     }
     
     if (tags !== undefined) {
@@ -119,6 +171,28 @@ class TodoDAO {
     if (due_date !== undefined) {
       updateFields.push('due_date = ?');
       params.push(due_date);
+      
+      // 自动更新 has_time（如果 todoData 没有明确指定）
+      if (todoData.has_time === undefined) {
+        updateFields.push('has_time = ?');
+        params.push(this._hasTimeInfo(due_date));
+      }
+    }
+    
+    // 明确指定的 has_time 和其他字段
+    if (todoData.has_time !== undefined) {
+      updateFields.push('has_time = ?');
+      params.push(todoData.has_time);
+    }
+    
+    if (todoData.end_date !== undefined) {
+      updateFields.push('end_date = ?');
+      params.push(todoData.end_date);
+    }
+    
+    if (todoData.item_type !== undefined) {
+      updateFields.push('item_type = ?');
+      params.push(todoData.item_type);
     }
     
     if (repeat_type !== undefined) {
@@ -166,7 +240,15 @@ class TodoDAO {
     `);
     
     const result = stmt.run(...params);
-    return result.changes > 0 ? this.findById(id) : null;
+    
+    if (result.changes > 0) {
+      const updatedTodo = this.findById(id);
+      // 记录变更日志
+      this.changeLog.logChange('todo', id, 'update', todoData);
+      return updatedTodo;
+    }
+    
+    return null;
   }
 
   /**
@@ -190,9 +272,56 @@ class TodoDAO {
   }
 
   /**
-   * 删除待办事项
+   * 软删除待办事项
    */
   delete(id) {
+    return this.softDelete(id);
+  }
+
+  /**
+   * 软删除待办事项
+   */
+  softDelete(id) {
+    const db = this.getDB();
+    const stmt = db.prepare(`
+      UPDATE todos 
+      SET is_deleted = 1, deleted_at = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP
+      WHERE id = ?
+    `);
+    const result = stmt.run(id).changes > 0;
+    
+    if (result) {
+      // 记录变更日志
+      this.changeLog.logChange('todo', id, 'delete');
+    }
+    
+    return result;
+  }
+
+  /**
+   * 恢复已删除的待办事项
+   */
+  restore(id) {
+    const db = this.getDB();
+    const stmt = db.prepare(`
+      UPDATE todos 
+      SET is_deleted = 0, deleted_at = NULL, updated_at = CURRENT_TIMESTAMP
+      WHERE id = ?
+    `);
+    const result = stmt.run(id).changes > 0;
+    
+    if (result) {
+      // 记录变更日志
+      this.changeLog.logChange('todo', id, 'restore');
+    }
+    
+    return result;
+  }
+
+  /**
+   * 永久删除待办事项
+   */
+  hardDelete(id) {
     const db = this.getDB();
     const stmt = db.prepare('DELETE FROM todos WHERE id = ?');
     return stmt.run(id).changes > 0;
@@ -205,12 +334,17 @@ class TodoDAO {
     const db = this.getDB();
     const {
       includeCompleted = true,
+      includeDeleted = false,
       sortBy = 'quadrant', // 'quadrant', 'due_date', 'created_at'
       sortOrder = 'ASC'
     } = options;
     
     let whereConditions = [];
     let params = [];
+    
+    if (!includeDeleted) {
+      whereConditions.push('is_deleted = 0');
+    }
     
     if (!includeCompleted) {
       whereConditions.push('is_completed = 0');
@@ -286,7 +420,8 @@ class TodoDAO {
     
     const stmt = db.prepare(`
       SELECT * FROM todos 
-      WHERE is_completed = 0 
+      WHERE is_deleted = 0 
+        AND is_completed = 0 
         AND due_date >= ? AND due_date <= ?
       ORDER BY due_date ASC
     `);
@@ -304,7 +439,8 @@ class TodoDAO {
     
     const stmt = db.prepare(`
       SELECT * FROM todos 
-      WHERE is_completed = 0 
+      WHERE is_deleted = 0 
+        AND is_completed = 0 
         AND due_date >= ? AND due_date <= ?
       ORDER BY due_date ASC
     `);
@@ -321,7 +457,8 @@ class TodoDAO {
     
     const stmt = db.prepare(`
       SELECT * FROM todos 
-      WHERE is_completed = 0 
+      WHERE is_deleted = 0 
+        AND is_completed = 0 
         AND due_date < ?
       ORDER BY due_date ASC
     `);
@@ -335,20 +472,31 @@ class TodoDAO {
   getStats() {
     const db = this.getDB();
     const nowUTC = TimeZoneUtils.nowUTC();
+    const todayStart = new Date(nowUTC);
+    todayStart.setHours(0, 0, 0, 0);
+    const todayEnd = new Date(nowUTC);
+    todayEnd.setHours(23, 59, 59, 999);
     
-    const totalStmt = db.prepare('SELECT COUNT(*) as count FROM todos');
-    const completedStmt = db.prepare('SELECT COUNT(*) as count FROM todos WHERE completed = 1');
-    const pendingStmt = db.prepare('SELECT COUNT(*) as count FROM todos WHERE completed = 0');
+    const totalStmt = db.prepare('SELECT COUNT(*) as count FROM todos WHERE is_deleted = 0');
+    const completedStmt = db.prepare('SELECT COUNT(*) as count FROM todos WHERE is_deleted = 0 AND is_completed = 1');
+    const pendingStmt = db.prepare('SELECT COUNT(*) as count FROM todos WHERE is_deleted = 0 AND is_completed = 0');
     const overdueStmt = db.prepare(`
       SELECT COUNT(*) as count FROM todos 
-      WHERE completed = 0 AND due_date < ?
+      WHERE is_deleted = 0 AND is_completed = 0 AND due_date < ?
     `);
+    const dueTodayStmt = db.prepare(`
+      SELECT COUNT(*) as count FROM todos 
+      WHERE is_deleted = 0 AND is_completed = 0 AND due_date >= ? AND due_date <= ?
+    `);
+    const deletedStmt = db.prepare('SELECT COUNT(*) as count FROM todos WHERE is_deleted = 1');
     
     return {
       total: totalStmt.get().count,
       completed: completedStmt.get().count,
       pending: pendingStmt.get().count,
-      overdue: overdueStmt.get(nowUTC).count
+      overdue: overdueStmt.get(nowUTC).count,
+      dueToday: dueTodayStmt.get(todayStart.toISOString(), todayEnd.toISOString()).count,
+      deleted: deletedStmt.get().count
     };
   }
 
@@ -358,10 +506,10 @@ class TodoDAO {
   getPriorityStats() {
     const db = this.getDB();
     
-    const urgentStmt = db.prepare('SELECT COUNT(*) as count FROM todos WHERE is_important = 1 AND is_urgent = 1 AND is_completed = 0');
-    const importantStmt = db.prepare('SELECT COUNT(*) as count FROM todos WHERE is_important = 1 AND is_urgent = 0 AND is_completed = 0');
-    const normalStmt = db.prepare('SELECT COUNT(*) as count FROM todos WHERE is_important = 0 AND is_urgent = 1 AND is_completed = 0');
-    const lowStmt = db.prepare('SELECT COUNT(*) as count FROM todos WHERE is_important = 0 AND is_urgent = 0 AND is_completed = 0');
+    const urgentStmt = db.prepare('SELECT COUNT(*) as count FROM todos WHERE is_deleted = 0 AND is_important = 1 AND is_urgent = 1 AND is_completed = 0');
+    const importantStmt = db.prepare('SELECT COUNT(*) as count FROM todos WHERE is_deleted = 0 AND is_important = 1 AND is_urgent = 0 AND is_completed = 0');
+    const normalStmt = db.prepare('SELECT COUNT(*) as count FROM todos WHERE is_deleted = 0 AND is_important = 0 AND is_urgent = 1 AND is_completed = 0');
+    const lowStmt = db.prepare('SELECT COUNT(*) as count FROM todos WHERE is_deleted = 0 AND is_important = 0 AND is_urgent = 0 AND is_completed = 0');
     
     return {
       urgent: urgentStmt.get().count,
@@ -386,9 +534,37 @@ class TodoDAO {
   }
 
   /**
-   * 批量删除待办事项
+   * 批量软删除待办事项
    */
   batchDelete(ids) {
+    const db = this.getDB();
+    const placeholders = ids.map(() => '?').join(',');
+    const stmt = db.prepare(`
+      UPDATE todos 
+      SET is_deleted = 1, deleted_at = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP 
+      WHERE id IN (${placeholders})
+    `);
+    return stmt.run(...ids).changes;
+  }
+
+  /**
+   * 批量恢复待办事项
+   */
+  batchRestore(ids) {
+    const db = this.getDB();
+    const placeholders = ids.map(() => '?').join(',');
+    const stmt = db.prepare(`
+      UPDATE todos 
+      SET is_deleted = 0, deleted_at = NULL, updated_at = CURRENT_TIMESTAMP 
+      WHERE id IN (${placeholders})
+    `);
+    return stmt.run(...ids).changes;
+  }
+
+  /**
+   * 批量永久删除待办事项
+   */
+  batchHardDelete(ids) {
     const db = this.getDB();
     const placeholders = ids.map(() => '?').join(',');
     const stmt = db.prepare(`DELETE FROM todos WHERE id IN (${placeholders})`);
@@ -401,7 +577,11 @@ class TodoDAO {
   batchComplete(ids) {
     const db = this.getDB();
     const placeholders = ids.map(() => '?').join(',');
-    const stmt = db.prepare(`UPDATE todos SET is_completed = 1, updated_at = CURRENT_TIMESTAMP WHERE id IN (${placeholders})`);
+    const stmt = db.prepare(`
+      UPDATE todos 
+      SET is_completed = 1, completed_at = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP 
+      WHERE is_deleted = 0 AND id IN (${placeholders})
+    `);
     return stmt.run(...ids).changes;
   }
 
@@ -425,7 +605,7 @@ class TodoDAO {
           ELSE 'low'
         END as title
       FROM todos 
-      WHERE content LIKE ? 
+      WHERE is_deleted = 0 AND content LIKE ? 
       ORDER BY created_at DESC
     `);
     return stmt.all(`%${query}%`);
@@ -446,6 +626,7 @@ class TodoDAO {
         END as priority,
         content as title
       FROM todos 
+      WHERE is_deleted = 0
       ORDER BY 
         CASE 
           WHEN is_important = 1 AND is_urgent = 1 THEN 1
@@ -473,6 +654,7 @@ class TodoDAO {
         END as priority,
         content as title
       FROM todos 
+      WHERE is_deleted = 0
       ORDER BY 
         CASE WHEN due_date IS NULL THEN 1 ELSE 0 END,
         due_date ASC,
@@ -496,6 +678,7 @@ class TodoDAO {
         END as priority,
         content as title
       FROM todos 
+      WHERE is_deleted = 0
       ORDER BY created_at DESC
     `);
     return stmt.all();
@@ -508,7 +691,7 @@ class TodoDAO {
     const db = this.getDB();
     const stmt = db.prepare(`
       SELECT tags FROM todos 
-      WHERE tags IS NOT NULL AND tags != ''
+      WHERE is_deleted = 0 AND tags IS NOT NULL AND tags != ''
     `);
     
     const todos = stmt.all();
@@ -540,7 +723,7 @@ class TodoDAO {
     const db = this.getDB();
     const stmt = db.prepare(`
       SELECT * FROM todos 
-      WHERE is_recurring = 1 AND is_completed = 0
+      WHERE is_deleted = 0 AND is_recurring = 1 AND is_completed = 0
       ORDER BY next_due_date ASC
     `);
     return stmt.all();
@@ -600,10 +783,42 @@ class TodoDAO {
     const db = this.getDB();
     const stmt = db.prepare(`
       SELECT * FROM todos 
-      WHERE parent_todo_id = ? OR id = ?
+      WHERE (parent_todo_id = ? OR id = ?) AND is_deleted = 0
       ORDER BY due_date ASC
     `);
     return stmt.all(parentTodoId, parentTodoId);
+  }
+
+  /**
+   * 获取已删除的待办事项
+   */
+  findDeleted(options = {}) {
+    const { page = 1, limit = 50 } = options;
+    const offset = (page - 1) * limit;
+    
+    const db = this.getDB();
+    const stmt = db.prepare(`
+      SELECT * FROM todos 
+      WHERE is_deleted = 1
+      ORDER BY deleted_at DESC
+      LIMIT ? OFFSET ?
+    `);
+    
+    const todos = stmt.all(limit, offset);
+    
+    // 获取总数
+    const countStmt = db.prepare('SELECT COUNT(*) as total FROM todos WHERE is_deleted = 1');
+    const { total } = countStmt.get();
+    
+    return {
+      todos,
+      pagination: {
+        page,
+        limit,
+        total,
+        totalPages: Math.ceil(total / limit)
+      }
+    };
   }
 }
 

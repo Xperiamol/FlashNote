@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useMemo, useState } from 'react'
+﻿import React, { useCallback, useEffect, useMemo, useState } from 'react'
 import {
 	Box,
 	Typography,
@@ -30,17 +30,21 @@ import {
 	PowerSettingsNewRounded,
 	RocketLaunchRounded,
 	CheckCircleOutline,
-	ErrorOutline
+	ErrorOutline,
+	FolderOpenRounded
 } from '@mui/icons-material'
 
 import {
 	fetchAvailablePlugins,
 	fetchInstalledPlugins,
+	fetchLocalPlugins,
 	installPlugin,
 	uninstallPlugin,
 	enablePlugin,
 	disablePlugin,
 	executePluginCommand,
+	openPluginFolder,
+	openPluginsDirectory,
 	subscribePluginEvents,
 	subscribePluginUiRequests
 } from '../api/pluginAPI'
@@ -137,6 +141,18 @@ const PluginCard = ({
 								<Chip
 									size="small"
 									label={plugin.author.name}
+									variant="outlined"
+									sx={{ borderRadius: 1 }}
+								/>
+							)}
+							{plugin.sourceType && (
+								<Chip
+									size="small"
+									label={plugin.sourceType === 'development' ? 
+										(plugin.sourceLabel === 'examples' ? '示例' : '本地') : 
+										'已安装'
+									}
+									color={plugin.sourceType === 'development' ? 'secondary' : 'default'}
 									variant="outlined"
 									sx={{ borderRadius: 1 }}
 								/>
@@ -249,13 +265,42 @@ const PluginCard = ({
 }
 
 const permissionDescriptions = {
-	'notes:read': '读取你的笔记列表与基础元数据',
+	// 笔记和待办
+	'notes:read': '读取你的笔记列表与基础元数据（标题、标签、时间等）',
+	'notes:read:full': '读取笔记的完整内容，包括正文、收藏状态等所有信息',
 	'notes:write': '创建或更新笔记内容',
+	'todos:read': '读取待办事项列表与基础信息（标题、完成状态、优先级等）',
+	'todos:read:full': '读取待办事项的完整信息，包括描述、截止时间、提醒等',
+	'todos:write': '创建或更新待办事项',
+	// 标签
+	'tags:read': '读取标签列表和标签统计信息',
+	'tags:write': '创建、更新或删除标签',
+	// UI和通知
 	'ui:open-note': '请求宿主应用打开指定笔记',
-	'settings:read': '读取基础设置用于适配展示',
+	'ui:theme': '读取或修改应用主题，注入自定义样式',
 	'notifications:show': '通过宿主通知中心展示提示',
+	// 存储和设置
+	'settings:read': '读取基础设置用于适配展示',
 	'storage:read': '访问插件私有存储中的数据',
-	'storage:write': '写入或删除插件私有存储数据'
+	'storage:write': '写入或删除插件私有存储数据',
+	// 网络和文件系统
+	'network:request': '发起网络请求，访问互联网资源',
+	'filesystem:read': '通过对话框选择并读取文件内容',
+	'filesystem:write': '通过对话框选择位置并写入文件',
+	// 剪贴板
+	'clipboard:read': '读取系统剪贴板中的文本或图片',
+	'clipboard:write': '写入文本或图片到系统剪贴板',
+	// 搜索和附件
+	'search:advanced': '使用高级搜索功能（全文搜索、过滤等）',
+	'attachments:read': '读取笔记的附件列表和附件信息',
+	'attachments:write': '上传或删除笔记附件',
+	// 事件和调度
+	'events:subscribe': '订阅应用事件（笔记创建、待办完成等）',
+	'scheduler:create': '创建和管理定时任务',
+	// 分析和扩展
+	'analytics:read': '读取笔记和待办的统计分析数据',
+	'markdown:extend': '扩展 Markdown 语法，注册自定义渲染器',
+	'ai:inference': '调用 AI 服务进行推理（需用户配置 AI）'
 }
 
 const PluginDetailDrawer = ({
@@ -267,7 +312,8 @@ const PluginDetailDrawer = ({
 	onUninstall,
 	pendingAction,
 	onExecuteCommand,
-	commandPending
+	commandPending,
+	onOpenFolder
 }) => {
 	if (!plugin) return null
 
@@ -328,15 +374,25 @@ const PluginDetailDrawer = ({
 						{plugin.enabled ? '禁用' : '启用'}
 					</Button>
 					{plugin.installed && (
-						<Button
-							color="error"
-							variant="text"
-							startIcon={<DeleteRounded />}
-							disabled={pendingAction === 'uninstall'}
-							onClick={() => onUninstall(plugin.id)}
-						>
-							卸载
-						</Button>
+						<>
+							<Tooltip title="打开插件位置">
+								<IconButton
+									color="primary"
+									onClick={() => onOpenFolder(plugin.id)}
+								>
+									<FolderOpenRounded />
+								</IconButton>
+							</Tooltip>
+							<Button
+								color="error"
+								variant="text"
+								startIcon={<DeleteRounded />}
+								disabled={pendingAction === 'uninstall'}
+								onClick={() => onUninstall(plugin.id)}
+							>
+								卸载
+							</Button>
+						</>
 					)}
 				</Stack>
 
@@ -432,6 +488,18 @@ const PluginStore = () => {
 		setPluginStoreCategories(normalized)
 	}, [setPluginStoreCategories])
 
+	const loadLocalPlugins = useCallback(async () => {
+		setLocalLoading(true)
+		try {
+			const local = await fetchLocalPlugins()
+			setLocalPlugins(Array.isArray(local) ? local : [])
+		} catch (err) {
+			console.error('加载本地插件失败', err)
+		} finally {
+			setLocalLoading(false)
+		}
+	}, [])
+
 	const fetchData = useCallback(async () => {
 		setLoading(true)
 		setError(null)
@@ -456,13 +524,28 @@ const PluginStore = () => {
 		fetchData()
 	}, [fetchData])
 
+	// 当切换到本地开发标签时，加载本地插件
+	useEffect(() => {
+		if (pluginStoreFilters.tab === 'local') {
+			loadLocalPlugins()
+		}
+	}, [pluginStoreFilters.tab, loadLocalPlugins])
+
 	const updateAvailable = useCallback((updater) => {
 		setAvailablePlugins((prev) => {
 			const next = updater(prev)
-			synchronizeCategories(next)
+			// 不要在 setState 回调中调用另一个 setState
+			// 将 synchronizeCategories 移到 useEffect 中处理
 			return next
 		})
-	}, [synchronizeCategories])
+	}, [])
+
+	// 当 availablePlugins 改变时，同步更新分类
+	useEffect(() => {
+		if (availablePlugins.length > 0) {
+			synchronizeCategories(availablePlugins)
+		}
+	}, [availablePlugins, synchronizeCategories])
 
 	useEffect(() => {
 		const unsubscribe = subscribePluginEvents((event) => {
@@ -623,6 +706,30 @@ const PluginStore = () => {
 		}
 	}, [showMessage])
 
+	const handleOpenPluginFolder = useCallback(async (pluginId) => {
+		try {
+			const result = await openPluginFolder(pluginId)
+			if (result?.success === false) {
+				throw new Error(result.error || '打开插件目录失败')
+			}
+		} catch (err) {
+			console.error('打开插件目录失败', err)
+			showMessage('error', err?.message || '打开插件目录失败')
+		}
+	}, [showMessage])
+
+	const handleOpenPluginsDirectory = useCallback(async () => {
+		try {
+			const result = await openPluginsDirectory()
+			if (result?.success === false) {
+				throw new Error(result.error || '打开插件开发目录失败')
+			}
+		} catch (err) {
+			console.error('打开插件开发目录失败', err)
+			showMessage('error', err?.message || '打开插件开发目录失败')
+		}
+	}, [showMessage])
+
 	const filteredAvailable = useMemo(() => {
 		if (pluginStoreFilters.tab !== 'market') return []
 		return filterPlugins(availablePlugins, pluginStoreFilters)
@@ -633,14 +740,73 @@ const PluginStore = () => {
 		return filterPlugins(installedPlugins, pluginStoreFilters)
 	}, [installedPlugins, pluginStoreFilters])
 
+	const [localPlugins, setLocalPlugins] = useState([])
+	const [localLoading, setLocalLoading] = useState(false)
+
+	const filteredLocal = useMemo(() => {
+		if (pluginStoreFilters.tab !== 'local') return []
+		return filterPlugins(localPlugins, pluginStoreFilters)
+	}, [localPlugins, pluginStoreFilters])
+
 	const selectedPlugin = useMemo(() => {
 		if (!pluginStoreSelectedPluginId) return null
-		return (
-			installedPlugins.find((plugin) => plugin.id === pluginStoreSelectedPluginId) ||
-			availablePlugins.find((plugin) => plugin.id === pluginStoreSelectedPluginId) ||
-			null
-		)
-	}, [pluginStoreSelectedPluginId, installedPlugins, availablePlugins])
+		
+		// 从可用列表查找（包含完整的市场信息，如 icon、description 等）
+		const available = availablePlugins.find((plugin) => plugin.id === pluginStoreSelectedPluginId)
+		
+		// 从本地插件列表查找
+		const local = localPlugins.find((plugin) => plugin.id === pluginStoreSelectedPluginId)
+		
+		// 从已安装列表查找（包含运行时状态）
+		const installed = installedPlugins.find((plugin) => plugin.id === pluginStoreSelectedPluginId)
+		
+		// 如果都不存在，返回 null
+		if (!available && !local && !installed) return null
+		
+		// 优先使用本地插件信息（本地开发模式）
+		if (local) {
+			return {
+				...local,
+				// 如果已安装，合并安装状态
+				...(installed && {
+					enabled: installed.enabled,
+					installedVersion: installed.installedVersion,
+					runtimeStatus: installed.runtimeStatus,
+					lastError: installed.lastError
+				})
+			}
+		}
+		
+		// 如果已安装，合并市场信息和安装状态
+		if (installed && available) {
+			return {
+				...available,  // 保留市场信息（icon、description、shortDescription 等）
+				...installed,  // 覆盖运行时状态（enabled、installedVersion、runtimeStatus 等）
+				// 确保关键字段正确
+				icon: available.icon,  // 强制使用市场的图标
+				name: available.name || installed.manifest?.name,
+				description: available.description || installed.manifest?.description,
+				manifest: installed.manifest || available.manifest
+			}
+		}
+		
+		// 只在已安装列表中（不在市场列表，可能是本地插件）
+		if (installed) {
+			return {
+				...installed,
+				name: installed.manifest?.name || installed.id,
+				description: installed.manifest?.description,
+				installed: true
+			}
+		}
+		
+		// 只在市场列表中（未安装）
+		return {
+			...available,
+			installed: false,
+			enabled: false
+		}
+	}, [pluginStoreSelectedPluginId, installedPlugins, availablePlugins, localPlugins])
 
 	const pendingActionFor = (pluginId) => pendingActions[pluginId] || null
 
@@ -654,6 +820,9 @@ const PluginStore = () => {
 
 	const handleRefresh = () => {
 		fetchData()
+		if (pluginStoreFilters.tab === 'local') {
+			loadLocalPlugins()
+		}
 		showMessage('info', '插件列表已刷新')
 	}
 
@@ -664,32 +833,92 @@ const PluginStore = () => {
 	)
 
 	const renderLocalDev = () => (
-		<Box sx={{ py: 6, px: 2 }}>
-			<Typography variant="h6" sx={{ mb: 2 }}>
-				本地开发模式
-			</Typography>
-			<Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
-				将你的插件放置在 <code>plugins/examples</code> 或 <code>plugins/local</code> 目录，然后点击“刷新”加载。
-			</Typography>
-			<List dense>
-				<ListItem>
-					<ListItemText primary="1. 在 plugins/examples 下创建插件目录" />
-				</ListItem>
-				<ListItem>
-					<ListItemText primary="2. 编写 manifest.json 和 index.js" />
-				</ListItem>
-				<ListItem>
-					<ListItemText primary="3. 点击右上角刷新按钮或重新安装插件" />
-				</ListItem>
-			</List>
-			<Button
-				variant="outlined"
-				sx={{ mt: 2 }}
-				onClick={() => handleRefresh()}
-				startIcon={<RefreshRounded />}
-			>
-				刷新本地插件
-			</Button>
+		<Box>
+			<Box sx={{ py: 3, px: 2, mb: 3, bgcolor: 'background.paper', borderRadius: 2 }}>
+				<Typography variant="h6" sx={{ mb: 2 }}>
+					本地开发模式
+				</Typography>
+				<Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
+					系统会自动扫描以下位置的插件：
+				</Typography>
+				<List dense>
+					<ListItem>
+						<ListItemText 
+							primary="开发环境插件" 
+							secondary="plugins/examples 和 plugins/local 目录（用于开发和测试）"
+						/>
+					</ListItem>
+					<ListItem>
+						<ListItemText 
+							primary="用户安装插件" 
+							secondary="用户数据目录的插件文件夹（手动安装的插件）"
+						/>
+					</ListItem>
+					<ListItem>
+						<ListItemText 
+							primary="使用方法" 
+							secondary="创建插件目录，编写 manifest.json 和入口文件，然后点击刷新"
+						/>
+					</ListItem>
+				</List>
+			<Stack direction="row" spacing={2} sx={{ mt: 2 }}>
+				<Button
+					variant="outlined"
+					onClick={() => handleRefresh()}
+					startIcon={<RefreshRounded />}
+				>
+					刷新本地插件
+				</Button>
+				<Button
+					variant="outlined"
+					onClick={() => handleOpenPluginsDirectory()}
+					startIcon={<FolderOpenRounded />}
+				>
+					打开插件目录
+				</Button>
+			</Stack>
+			</Box>
+
+			{/* 本地插件加载状态 */}
+			{localLoading && <LinearProgress sx={{ mb: 2 }} />}
+
+			{/* 显示本地开发插件列表 */}
+			{filteredLocal.length === 0 && !localLoading && (
+				<Box sx={{ py: 8, textAlign: 'center', color: 'text.secondary' }}>
+					<Typography variant="body1">
+						暂无本地开发插件，请创建插件或点击"刷新本地插件"
+					</Typography>
+					<Typography variant="body2" sx={{ mt: 1, color: 'text.disabled' }}>
+						系统会自动扫描开发环境和用户数据目录的插件
+					</Typography>
+				</Box>
+			)}
+
+			{filteredLocal.length > 0 && (
+				<Box
+					sx={{
+						display: 'grid',
+						gridTemplateColumns: 'repeat(auto-fill, minmax(280px, 1fr))',
+						gap: 2
+					}}
+				>
+					{filteredLocal.map((plugin) => (
+						<PluginCard
+							key={plugin.id}
+							plugin={plugin}
+							isInstalled={plugin.installed || installedPlugins.some((item) => item.id === plugin.id)}
+							isEnabled={plugin.enabled}
+							hasUpdate={plugin.hasUpdate}
+							pendingAction={pendingActionFor(plugin.id)}
+							onInstall={handleInstall}
+							onEnableToggle={handleEnableToggle}
+							onUninstall={handleUninstall}
+							onSelect={handleSelectPlugin}
+							compact={false}
+						/>
+					))}
+				</Box>
+			)}
 		</Box>
 	)
 
@@ -771,6 +1000,7 @@ const PluginStore = () => {
 				pendingAction={selectedPlugin ? pendingActionFor(selectedPlugin.id) : null}
 				onExecuteCommand={handleExecuteCommand}
 				commandPending={commandPending}
+				onOpenFolder={handleOpenPluginFolder}
 			/>
 
 			<Snackbar

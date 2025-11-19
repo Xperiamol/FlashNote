@@ -1,0 +1,37 @@
+{
+  "id": "auto-tag-creator",
+  "name": "自动标签创建器",
+  "version": "1.0.0",
+  "description": "根据笔记内容自动创建和管理标签",
+  "entry": "index.js",
+  "permissions": [
+    "notes:read",
+    "notes:read:full",
+    "notes:write",
+    "tags:read",
+    "tags:write",
+    "notifications:show",
+    "ai:inference"
+  ],
+  "commands": [
+    {
+      "id": "auto-tag-creator.ai-suggest",
+      "title": "AI 智能标签建议",
+      "description": "基于笔记内容使用 AI 自动生成相关标签",
+      "icon": "auto_awesome",
+      "surfaces": ["command-palette", "tag-input"]
+    },
+    {
+      "id": "auto-tag-creator.analyze",
+      "title": "分析笔记并创建标签",
+      "surfaces": ["command-palette", "toolbar:notes"]
+    },
+    {
+      "id": "auto-tag-creator.create-predefined",
+      "title": "创建预定义标签集",
+      "surfaces": ["command-palette"]
+    }
+  ],
+  "minAppVersion": "2.1.0",
+  "author": "FlashNote Team"
+}

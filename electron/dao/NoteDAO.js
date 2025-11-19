@@ -1,10 +1,12 @@
 const { getInstance } = require('./DatabaseManager');
 const TagService = require('../services/TagService');
+const ChangeLogDAO = require('./ChangeLogDAO');
 
 class NoteDAO {
   constructor() {
     this.dbManager = getInstance();
     this.tagService = new TagService();
+    this.changeLog = new ChangeLogDAO();
   }
 
   /**
@@ -19,21 +21,32 @@ class NoteDAO {
    */
   create(noteData) {
     const db = this.getDB();
-    const { title = '', content = '', tags = '', category = 'default' } = noteData;
+    const { 
+      title = '', 
+      content = '', 
+      tags = '', 
+      category = 'default',
+      note_type = 'markdown' // 新增：笔记类型
+    } = noteData;
     
     const stmt = db.prepare(`
-      INSERT INTO notes (title, content, tags, category, created_at, updated_at)
-      VALUES (?, ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+      INSERT INTO notes (title, content, tags, category, note_type, created_at, updated_at)
+      VALUES (?, ?, ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
     `);
     
-    const result = stmt.run(title, content, tags, category);
+    const result = stmt.run(title, content, tags, category, note_type);
     
     // 更新标签使用次数
     if (tags) {
       this.tagService.updateTagsUsage(tags);
     }
     
-    return this.findById(result.lastInsertRowid);
+    const note = this.findById(result.lastInsertRowid);
+    
+    // 记录变更日志
+    this.changeLog.logChange('note', note.id, 'create', note);
+    
+    return note;
   }
 
   /**
@@ -50,11 +63,20 @@ class NoteDAO {
   }
 
   /**
+   * 根据ID查找笔记(包括已删除)
+   */
+  findByIdIncludeDeleted(id) {
+    const db = this.getDB();
+    const stmt = db.prepare('SELECT * FROM notes WHERE id = ?');
+    return stmt.get(id);
+  }
+
+  /**
    * 更新笔记
    */
   update(id, noteData) {
     const db = this.getDB();
-    const { title, content, tags, category, is_pinned } = noteData;
+    const { title, content, tags, category, is_pinned, note_type } = noteData;
     
     const updates = [];
     const values = [];
@@ -83,6 +105,11 @@ class NoteDAO {
       updates.push('category = ?');
       values.push(category);
     }
+
+    if (note_type !== undefined) {
+      updates.push('note_type = ?');
+      values.push(note_type);
+    }
     
     if (is_pinned !== undefined) {
       updates.push('is_pinned = ?');
@@ -103,6 +130,10 @@ class NoteDAO {
     `);
     
     stmt.run(...values);
+    
+    // 记录变更日志
+    this.changeLog.logChange('note', id, 'update', noteData);
+    
     return this.findById(id);
   }
 
@@ -117,7 +148,14 @@ class NoteDAO {
       WHERE id = ?
     `);
     
-    return stmt.run(id).changes > 0;
+    const result = stmt.run(id).changes > 0;
+    
+    if (result) {
+      // 记录变更日志
+      this.changeLog.logChange('note', id, 'delete');
+    }
+    
+    return result;
   }
 
   /**
@@ -131,7 +169,14 @@ class NoteDAO {
       WHERE id = ?
     `);
     
-    return stmt.run(id).changes > 0;
+    const result = stmt.run(id).changes > 0;
+    
+    if (result) {
+      // 记录变更日志
+      this.changeLog.logChange('note', id, 'restore');
+    }
+    
+    return result;
   }
 
   /**

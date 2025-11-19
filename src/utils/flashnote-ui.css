@@ -1,0 +1,510 @@
+/**
+ * FlashNote UI - 预构建 CSS 类库
+ * 为插件提供开箱即用的 UI 组件样式
+ * 
+ * 使用方法：
+ * <button class="fn-btn fn-btn-primary">按钮</button>
+ * <div class="fn-card">卡片内容</div>
+ * 
+ * @version 1.0.0
+ * @requires UI Bridge Phase 1 (CSS Variables)
+ */
+
+/* ==================== 基础重置 ==================== */
+.fn-reset {
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+}
+
+/* ==================== 布局组件 ==================== */
+
+/* 容器 */
+.fn-container {
+  width: 100%;
+  max-width: 1200px;
+  margin: 0 auto;
+  padding: var(--fn-spacing-3, 24px);
+}
+
+.fn-container-sm {
+  max-width: 600px;
+}
+
+.fn-container-md {
+  max-width: 900px;
+}
+
+.fn-container-lg {
+  max-width: 1400px;
+}
+
+/* Flex 布局 */
+.fn-flex {
+  display: flex;
+}
+
+.fn-flex-column {
+  display: flex;
+  flex-direction: column;
+}
+
+.fn-flex-center {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.fn-flex-between {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.fn-flex-gap-1 { gap: var(--fn-spacing-1, 8px); }
+.fn-flex-gap-2 { gap: var(--fn-spacing-2, 16px); }
+.fn-flex-gap-3 { gap: var(--fn-spacing-3, 24px); }
+
+/* Grid 布局 */
+.fn-grid {
+  display: grid;
+}
+
+.fn-grid-cols-2 {
+  grid-template-columns: repeat(2, 1fr);
+}
+
+.fn-grid-cols-3 {
+  grid-template-columns: repeat(3, 1fr);
+}
+
+.fn-grid-cols-4 {
+  grid-template-columns: repeat(4, 1fr);
+}
+
+/* ==================== 按钮组件 ==================== */
+
+/* 基础按钮 */
+.fn-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: var(--fn-spacing-1, 8px) var(--fn-spacing-2, 16px);
+  border: none;
+  border-radius: var(--fn-shape-borderRadius, 4px);
+  font-family: var(--fn-font-family, sans-serif);
+  font-size: 14px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.1s ease;
+  text-decoration: none;
+  user-select: none;
+  white-space: nowrap;
+}
+
+.fn-btn:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+  pointer-events: none;
+}
+
+/* 主要按钮 */
+.fn-btn-primary {
+  background: var(--fn-primary-main, #1976d2);
+  color: var(--fn-primary-contrastText, white);
+}
+
+.fn-btn-primary:hover:not(:disabled) {
+  background: var(--fn-primary-dark, #1565c0);
+  box-shadow: var(--fn-shadow-4, 0 4px 8px rgba(0,0,0,0.2));
+}
+
+.fn-btn-primary:active:not(:disabled) {
+  background: var(--fn-primary-dark, #1565c0);
+  transform: translateY(1px);
+}
+
+/* 次要按钮 */
+.fn-btn-secondary {
+  background: var(--fn-secondary-main, #dc004e);
+  color: var(--fn-secondary-contrastText, white);
+}
+
+.fn-btn-secondary:hover:not(:disabled) {
+  background: var(--fn-secondary-dark, #c51162);
+  box-shadow: var(--fn-shadow-4, 0 4px 8px rgba(0,0,0,0.2));
+}
+
+/* 描边按钮 */
+.fn-btn-outlined {
+  background: transparent;
+  color: var(--fn-primary-main, #1976d2);
+  border: 1px solid var(--fn-primary-main, #1976d2);
+}
+
+.fn-btn-outlined:hover:not(:disabled) {
+  background: var(--fn-action-hover, rgba(25, 118, 210, 0.08));
+}
+
+/* 文本按钮 */
+.fn-btn-text {
+  background: transparent;
+  color: var(--fn-primary-main, #1976d2);
+}
+
+.fn-btn-text:hover:not(:disabled) {
+  background: var(--fn-action-hover, rgba(25, 118, 210, 0.08));
+}
+
+/* 按钮尺寸 */
+.fn-btn-sm {
+  padding: 4px 12px;
+  font-size: 13px;
+}
+
+.fn-btn-lg {
+  padding: 12px 24px;
+  font-size: 15px;
+}
+
+/* 全宽按钮 */
+.fn-btn-block {
+  width: 100%;
+}
+
+/* 图标按钮 */
+.fn-btn-icon {
+  padding: var(--fn-spacing-1, 8px);
+  min-width: unset;
+  border-radius: 50%;
+}
+
+/* ==================== 卡片组件 ==================== */
+
+.fn-card {
+  background: var(--fn-background-paper, white);
+  border-radius: var(--fn-shape-borderRadius, 4px);
+  box-shadow: var(--fn-shadow-2, 0 2px 4px rgba(0,0,0,0.1));
+  overflow: hidden;
+}
+
+.fn-card-hover {
+  transition: all 0.1s ease;
+}
+
+.fn-card-hover:hover {
+  box-shadow: var(--fn-shadow-8, 0 8px 16px rgba(0,0,0,0.15));
+  transform: translateY(-2px);
+}
+
+/* 卡片内容区 */
+.fn-card-body {
+  padding: var(--fn-spacing-3, 24px);
+}
+
+.fn-card-body-sm {
+  padding: var(--fn-spacing-2, 16px);
+}
+
+.fn-card-body-lg {
+  padding: var(--fn-spacing-4, 32px);
+}
+
+/* 卡片标题 */
+.fn-card-title {
+  font-size: 18px;
+  font-weight: 600;
+  color: var(--fn-text-primary, rgba(0,0,0,0.87));
+  margin-bottom: var(--fn-spacing-2, 16px);
+}
+
+/* 卡片描述 */
+.fn-card-description {
+  font-size: 14px;
+  color: var(--fn-text-secondary, rgba(0,0,0,0.6));
+  line-height: 1.6;
+}
+
+/* ==================== 输入框组件 ==================== */
+
+.fn-input {
+  width: 100%;
+  padding: var(--fn-spacing-1, 8px) var(--fn-spacing-2, 16px);
+  border: 1px solid var(--fn-divider, rgba(0,0,0,0.12));
+  border-radius: var(--fn-shape-borderRadius, 4px);
+  font-family: var(--fn-font-family, sans-serif);
+  font-size: 14px;
+  color: var(--fn-text-primary, rgba(0,0,0,0.87));
+  background: var(--fn-background-paper, white);
+  transition: all 0.1s ease;
+}
+
+.fn-input:focus {
+  outline: none;
+  border-color: var(--fn-primary-main, #1976d2);
+  box-shadow: 0 0 0 2px var(--fn-primary-light, rgba(25, 118, 210, 0.2));
+}
+
+.fn-input:disabled {
+  background: var(--fn-action-disabledBackground, rgba(0,0,0,0.12));
+  color: var(--fn-text-disabled, rgba(0,0,0,0.38));
+  cursor: not-allowed;
+}
+
+.fn-input-error {
+  border-color: var(--fn-error-main, #f44336);
+}
+
+.fn-input-error:focus {
+  box-shadow: 0 0 0 2px var(--fn-error-light, rgba(244, 67, 54, 0.2));
+}
+
+/* 文本域 */
+.fn-textarea {
+  min-height: 100px;
+  resize: vertical;
+}
+
+/* ==================== 标签组件 ==================== */
+
+.fn-chip {
+  display: inline-flex;
+  align-items: center;
+  padding: 4px 12px;
+  border-radius: 16px;
+  font-size: 13px;
+  font-weight: 500;
+  background: var(--fn-action-hover, rgba(0,0,0,0.08));
+  color: var(--fn-text-primary, rgba(0,0,0,0.87));
+}
+
+.fn-chip-primary {
+  background: var(--fn-primary-light, #e3f2fd);
+  color: var(--fn-primary-dark, #1565c0);
+}
+
+.fn-chip-secondary {
+  background: var(--fn-secondary-light, #fce4ec);
+  color: var(--fn-secondary-dark, #c51162);
+}
+
+.fn-chip-success {
+  background: var(--fn-success-light, #e8f5e9);
+  color: var(--fn-success-dark, #388e3c);
+}
+
+.fn-chip-error {
+  background: var(--fn-error-light, #ffebee);
+  color: var(--fn-error-dark, #d32f2f);
+}
+
+.fn-chip-warning {
+  background: var(--fn-warning-light, #fff3e0);
+  color: var(--fn-warning-dark, #f57c00);
+}
+
+.fn-chip-info {
+  background: var(--fn-info-light, #e3f2fd);
+  color: var(--fn-info-dark, #1976d2);
+}
+
+/* ==================== 徽章组件 ==================== */
+
+.fn-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 20px;
+  height: 20px;
+  padding: 0 6px;
+  border-radius: 10px;
+  font-size: 12px;
+  font-weight: 600;
+  background: var(--fn-error-main, #f44336);
+  color: white;
+}
+
+.fn-badge-dot {
+  width: 8px;
+  height: 8px;
+  min-width: unset;
+  padding: 0;
+  border-radius: 50%;
+}
+
+/* ==================== 分割线 ==================== */
+
+.fn-divider {
+  border: none;
+  border-top: 1px solid var(--fn-divider, rgba(0,0,0,0.12));
+  margin: var(--fn-spacing-2, 16px) 0;
+}
+
+.fn-divider-vertical {
+  display: inline-block;
+  width: 1px;
+  height: 100%;
+  border-left: 1px solid var(--fn-divider, rgba(0,0,0,0.12));
+  margin: 0 var(--fn-spacing-2, 16px);
+}
+
+/* ==================== 警告框组件 ==================== */
+
+.fn-alert {
+  padding: var(--fn-spacing-2, 16px);
+  border-radius: var(--fn-shape-borderRadius, 4px);
+  border-left: 4px solid;
+  margin-bottom: var(--fn-spacing-2, 16px);
+}
+
+.fn-alert-success {
+  background: var(--fn-success-light, #e8f5e9);
+  border-color: var(--fn-success-main, #4caf50);
+  color: var(--fn-success-dark, #388e3c);
+}
+
+.fn-alert-error {
+  background: var(--fn-error-light, #ffebee);
+  border-color: var(--fn-error-main, #f44336);
+  color: var(--fn-error-dark, #d32f2f);
+}
+
+.fn-alert-warning {
+  background: var(--fn-warning-light, #fff3e0);
+  border-color: var(--fn-warning-main, #ff9800);
+  color: var(--fn-warning-dark, #f57c00);
+}
+
+.fn-alert-info {
+  background: var(--fn-info-light, #e3f2fd);
+  border-color: var(--fn-info-main, #2196f3);
+  color: var(--fn-info-dark, #1976d2);
+}
+
+/* ==================== 列表组件 ==================== */
+
+.fn-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.fn-list-item {
+  padding: var(--fn-spacing-2, 16px);
+  border-bottom: 1px solid var(--fn-divider, rgba(0,0,0,0.12));
+  transition: background 0.1s ease;
+}
+
+.fn-list-item:hover {
+  background: var(--fn-action-hover, rgba(0,0,0,0.04));
+}
+
+.fn-list-item:last-child {
+  border-bottom: none;
+}
+
+.fn-list-item-button {
+  cursor: pointer;
+}
+
+/* ==================== 加载动画 ==================== */
+
+.fn-spinner {
+  display: inline-block;
+  width: 40px;
+  height: 40px;
+  border: 4px solid var(--fn-action-hover, rgba(0,0,0,0.1));
+  border-top-color: var(--fn-primary-main, #1976d2);
+  border-radius: 50%;
+  animation: fn-spin 0.8s linear infinite;
+}
+
+.fn-spinner-sm {
+  width: 20px;
+  height: 20px;
+  border-width: 2px;
+}
+
+.fn-spinner-lg {
+  width: 60px;
+  height: 60px;
+  border-width: 6px;
+}
+
+@keyframes fn-spin {
+  from { transform: rotate(0deg); }
+  to { transform: rotate(360deg); }
+}
+
+/* ==================== 工具类 ==================== */
+
+/* 间距 */
+.fn-m-0 { margin: 0; }
+.fn-m-1 { margin: var(--fn-spacing-1, 8px); }
+.fn-m-2 { margin: var(--fn-spacing-2, 16px); }
+.fn-m-3 { margin: var(--fn-spacing-3, 24px); }
+.fn-m-4 { margin: var(--fn-spacing-4, 32px); }
+
+.fn-mt-1 { margin-top: var(--fn-spacing-1, 8px); }
+.fn-mt-2 { margin-top: var(--fn-spacing-2, 16px); }
+.fn-mt-3 { margin-top: var(--fn-spacing-3, 24px); }
+
+.fn-mb-1 { margin-bottom: var(--fn-spacing-1, 8px); }
+.fn-mb-2 { margin-bottom: var(--fn-spacing-2, 16px); }
+.fn-mb-3 { margin-bottom: var(--fn-spacing-3, 24px); }
+
+.fn-p-0 { padding: 0; }
+.fn-p-1 { padding: var(--fn-spacing-1, 8px); }
+.fn-p-2 { padding: var(--fn-spacing-2, 16px); }
+.fn-p-3 { padding: var(--fn-spacing-3, 24px); }
+.fn-p-4 { padding: var(--fn-spacing-4, 32px); }
+
+/* 文字 */
+.fn-text-primary { color: var(--fn-text-primary, rgba(0,0,0,0.87)); }
+.fn-text-secondary { color: var(--fn-text-secondary, rgba(0,0,0,0.6)); }
+.fn-text-disabled { color: var(--fn-text-disabled, rgba(0,0,0,0.38)); }
+
+.fn-text-center { text-align: center; }
+.fn-text-left { text-align: left; }
+.fn-text-right { text-align: right; }
+
+.fn-text-xs { font-size: 12px; }
+.fn-text-sm { font-size: 13px; }
+.fn-text-base { font-size: 14px; }
+.fn-text-lg { font-size: 16px; }
+.fn-text-xl { font-size: 18px; }
+.fn-text-2xl { font-size: 24px; }
+
+.fn-font-bold { font-weight: 700; }
+.fn-font-semibold { font-weight: 600; }
+.fn-font-medium { font-weight: 500; }
+.fn-font-normal { font-weight: 400; }
+
+/* 背景 */
+.fn-bg-default { background: var(--fn-background-default, #fafafa); }
+.fn-bg-paper { background: var(--fn-background-paper, white); }
+
+/* 圆角 */
+.fn-rounded { border-radius: var(--fn-shape-borderRadius, 4px); }
+.fn-rounded-sm { border-radius: 2px; }
+.fn-rounded-lg { border-radius: 8px; }
+.fn-rounded-xl { border-radius: 12px; }
+.fn-rounded-full { border-radius: 9999px; }
+
+/* 阴影 */
+.fn-shadow-1 { box-shadow: var(--fn-shadow-1, 0 1px 2px rgba(0,0,0,0.1)); }
+.fn-shadow-2 { box-shadow: var(--fn-shadow-2, 0 2px 4px rgba(0,0,0,0.1)); }
+.fn-shadow-4 { box-shadow: var(--fn-shadow-4, 0 4px 8px rgba(0,0,0,0.15)); }
+.fn-shadow-8 { box-shadow: var(--fn-shadow-8, 0 8px 16px rgba(0,0,0,0.2)); }
+
+/* 显示/隐藏 */
+.fn-hidden { display: none; }
+.fn-visible { display: block; }
+
+/* 宽度 */
+.fn-w-full { width: 100%; }
+.fn-w-auto { width: auto; }
+
+/* 高度 */
+.fn-h-full { height: 100%; }
+.fn-h-auto { height: auto; }

@@ -1,16 +1,26 @@
 import React, { useEffect, useState } from 'react'
+import ReactDOM from 'react-dom/client'
+import * as MaterialUI from '@mui/material'
+import * as MaterialIcons from '@mui/icons-material'
+import { CacheProvider } from '@emotion/react'
+import createCache from '@emotion/cache'
 import {
   ThemeProvider,
   CssBaseline,
   Box,
   AppBar,
   useMediaQuery,
-  Typography
+  Typography,
+  Dialog,
+  DialogTitle,
+  DialogContent,
+  IconButton
 } from '@mui/material'
 import {
   Restore as RestoreIcon,
   DeleteForever as DeleteForeverIcon,
-  CheckCircle as CheckCircleIcon
+  CheckCircle as CheckCircleIcon,
+  Close as CloseIcon
 } from '@mui/icons-material'
 import { useStore } from './store/useStore'
 import { createAppTheme } from './styles/theme'
@@ -29,9 +39,111 @@ import TagSelectionDialog from './components/TagSelectionDialog'
 import DragAnimationProvider from './components/DragAnimationProvider'
 import TodoEditDialog from './components/TodoEditDialog'
 import CreateTodoModal from './components/CreateTodoModal'
+import Profile from './components/Profile'
+import CommandPalette from './components/CommandPalette'
+
+function rewriteCssUrls(cssText, sheetHref) {
+  if (!cssText || !sheetHref) {
+    return cssText
+  }
+
+  try {
+    return cssText.replace(/url\(([^)]+)\)/g, (match, raw) => {
+      if (!raw) return match
+      const cleaned = raw.trim().replace(/^['"]|['"]$/g, '')
+      if (/^(data:|https?:|file:|app:|#)/i.test(cleaned)) {
+        return match
+      }
+      try {
+        const absolute = new URL(cleaned, sheetHref).href
+        // console.log('[Plugin Window] Rewriting URL:', cleaned, '->', absolute)
+        return `url("${absolute}")`
+      } catch (err) {
+        console.warn('[Plugin Window] URL 重写失败:', cleaned, err)
+        return match
+      }
+    })
+  } catch (error) {
+    console.warn('[Plugin Window] CSS URL 重写失败:', error)
+    return cssText
+  }
+}
+
+// 辅助函数：同步样式到 iframe
+const syncIframeStyles = async (iframe) => {
+  if (!iframe || !iframe.contentWindow) return
+
+  try {
+    const iframeDoc = iframe.contentDocument || iframe.contentWindow.document
+    const iframeHead = iframeDoc.head
+    
+    // 移除旧的样式（避免重复）
+    const oldStyles = iframeHead.querySelectorAll('style[data-emotion], style[data-inline-css], style[data-source], link[data-injected]')
+    oldStyles.forEach(s => s.remove())
+    
+    // 方案1：直接在 iframe 中添加 <link> 标签引用主应用的 CSS 文件
+    const mainStyleLinks = document.querySelectorAll('link[rel="stylesheet"]')
+    mainStyleLinks.forEach(link => {
+      const clonedLink = iframeDoc.createElement('link')
+      clonedLink.rel = 'stylesheet'
+      clonedLink.href = link.href
+      clonedLink.setAttribute('data-injected', 'true')
+      iframeHead.appendChild(clonedLink)
+    })
+    
+    // 方案2：复制所有 emotion 样式标签（Material-UI 的动态样式）
+    // 这些样式会随着组件渲染动态增加，所以需要持续监听
+    const copyEmotionStyles = () => {
+      const emotionStyles = document.querySelectorAll('style[data-emotion]')
+      const iframeEmotionStyles = iframeHead.querySelectorAll('style[data-emotion]')
+      
+      // 移除 iframe 中旧的 emotion 样式
+      iframeEmotionStyles.forEach(s => s.remove())
+      
+      // 复制新的样式
+      if (emotionStyles.length > 0) {
+        let totalLength = 0
+        emotionStyles.forEach(style => {
+          const cloned = style.cloneNode(true)
+          iframeHead.appendChild(cloned)
+          totalLength += style.textContent?.length || 0
+        })
+        console.log(`[Plugin Window] ✅ 已同步 ${emotionStyles.length} 个 emotion 样式，总长度: ${totalLength} 字符`)
+      }
+    }
+    
+    // 立即复制一次
+    copyEmotionStyles()
+    
+    // 持续监听主文档的样式变化，自动同步到 iframe
+    const styleObserver = new MutationObserver(() => {
+      copyEmotionStyles()
+    })
+    
+    styleObserver.observe(document.head, {
+      childList: true,
+      subtree: true,
+      attributes: true,
+      attributeFilter: ['data-emotion']
+    })
+    
+    // 将观察器保存到 iframe，以便后续清理
+    if (!iframe.__styleObserver) {
+      iframe.__styleObserver = styleObserver
+    }
+    
+    const totalStyles = iframeHead.querySelectorAll('style').length
+    const totalLinks = iframeHead.querySelectorAll('link[rel="stylesheet"]').length
+    console.log(`[Plugin Window] 样式初始化完成 - Style: ${totalStyles}, Link: ${totalLinks}`)
+  } catch (err) {
+    console.warn('[Plugin Window] 同步样式失败:', err)
+  }
+}
 import { createTodo as createTodoAPI } from './api/todoAPI'
 import TimeZoneUtils from './utils/timeZoneUtils'
-import { subscribePluginEvents, subscribePluginUiRequests } from './api/pluginAPI'
+import { subscribePluginEvents, subscribePluginUiRequests, subscribePluginWindowRequests, loadPluginFile, executePluginCommand } from './api/pluginAPI'
+import { injectUIBridge } from './utils/pluginUIBridge'
+import themeManager from './utils/pluginThemeManager'
 
 function App() {
   const { theme, primaryColor, loadNotes, currentView, initializeSettings, setCurrentView, createNote, batchDeleteNotes, batchDeleteTodos, batchCompleteTodos, batchRestoreNotes, batchPermanentDeleteNotes, getAllTags, batchSetTags, setSelectedNoteId } = useStore()
@@ -41,6 +153,7 @@ function App() {
   const [sidebarOpen, setSidebarOpen] = useState(true)
   const [secondarySidebarOpen, setSecondarySidebarOpen] = useState(true)
   const [showDeleted, setShowDeleted] = useState(false)
+  const [commandPaletteOpen, setCommandPaletteOpen] = useState(false)
   
   // TODO视图相关状态
   const [todoViewMode, setTodoViewMode] = useState('quadrant')
@@ -53,6 +166,7 @@ function App() {
   // 初始todo状态定义
   const initialTodoState = {
     content: '',
+    description: '',
     is_important: false,
     is_urgent: false,
     due_date: '',
@@ -79,6 +193,9 @@ function App() {
     itemType: ''
   })
   
+  // 插件窗口状态
+  const [pluginWindow, setPluginWindow] = useState(null)
+  
   // 存储当前多选实例的引用
   const [currentMultiSelectRef, setCurrentMultiSelectRef] = useState(null)
   
@@ -102,6 +219,27 @@ function App() {
   const appTheme = createAppTheme(theme, primaryColor)
   const isMobile = useMediaQuery(appTheme.breakpoints.down('md'))
 
+  // 暴露插件API到全局对象（用于调试和测试）
+  useEffect(() => {
+    if (!window.flashnotePlugin) {
+      window.flashnotePlugin = {
+        executeCommand: executePluginCommand
+      }
+    }
+  }, [])
+
+  // 监听主题色变化，通知花纹主题插件
+  useEffect(() => {
+    if (primaryColor) {
+      // 通知花纹主题插件更新主题色
+      executePluginCommand('pattern-theme', 'pattern-theme.settings', {
+        primaryColor: primaryColor
+      }).catch(() => {
+        // 插件可能未安装或未启用，忽略错误
+      })
+    }
+  }, [primaryColor])
+
   // 监听视图切换，自动退出多选模式
   useEffect(() => {
     if (currentMultiSelectRef && currentMultiSelectRef.isMultiSelectMode) {
@@ -118,13 +256,48 @@ function App() {
     }
   }, [initialTodoData]);
 
+  // 监听来自独立窗口的笔记更新（实现同步）
+  useEffect(() => {
+    if (!window.electronAPI?.notes?.onNoteUpdated) return
+
+    const handleNoteUpdate = (updatedNote) => {
+      console.log('接收到笔记更新事件:', updatedNote)
+      // 重新加载笔记列表以获取最新数据
+      loadNotes()
+    }
+
+    const unsubscribe = window.electronAPI.notes.onNoteUpdated(handleNoteUpdate)
+
+    return () => {
+      if (typeof unsubscribe === 'function') {
+        unsubscribe()
+      }
+    }
+  }, [loadNotes])
+
   useEffect(() => {
     refreshPluginCommands()
   }, [refreshPluginCommands])
 
+  // 监听命令面板快捷键 (Ctrl+Shift+P / Cmd+Shift+P)
+  useEffect(() => {
+    const handleKeyDown = (e) => {
+      // Ctrl+Shift+P (Windows/Linux) 或 Cmd+Shift+P (Mac)
+      if ((e.ctrlKey || e.metaKey) && e.shiftKey && e.key === 'P') {
+        e.preventDefault()
+        setCommandPaletteOpen(true)
+      }
+    }
+
+    window.addEventListener('keydown', handleKeyDown)
+    return () => window.removeEventListener('keydown', handleKeyDown)
+  }, [])
+
   useEffect(() => {
     const unsubscribe = subscribePluginEvents((event) => {
       if (!event) return
+
+      console.log('[App] 收到插件事件:', event.type, event)
 
       if (event.type === 'command-registered' && event.command && event.pluginId) {
         const surfaces = Array.isArray(event.command.surfaces)
@@ -153,8 +326,41 @@ function App() {
         return
       }
 
+      // 处理主题样式事件
+      if (event.type === 'plugin:theme-register-style') {
+        const { pluginId, styleId, css, priority } = event
+        if (pluginId && styleId && css !== undefined) {
+          themeManager.registerStyle(pluginId, styleId, css, priority || 0)
+          console.log(`[App] 已注册插件主题样式: ${pluginId}/${styleId}`)
+        }
+        return
+      }
+
+      if (event.type === 'plugin:theme-unregister-style') {
+        const { pluginId, styleId } = event
+        if (pluginId && styleId) {
+          themeManager.unregisterStyle(pluginId, styleId)
+          console.log(`[App] 已移除插件主题样式: ${pluginId}/${styleId}`)
+        }
+        return
+      }
+
+      if (event.type === 'plugin:theme-update-style') {
+        const { pluginId, styleId, css, priority } = event
+        if (pluginId && styleId && css !== undefined) {
+          themeManager.updateStyle(pluginId, styleId, css, priority)
+          console.log(`[App] 已更新插件主题样式: ${pluginId}/${styleId}`)
+        }
+        return
+      }
+
       if (['installed', 'uninstalled', 'enabled', 'disabled', 'ready', 'error', 'stopped'].includes(event.type)) {
         refreshPluginCommands()
+        
+        // 插件卸载时清理其主题样式
+        if (event.type === 'uninstalled' && event.pluginId) {
+          themeManager.unregisterAllStyles(event.pluginId)
+        }
       }
     })
 
@@ -176,6 +382,7 @@ function App() {
       
       await createTodoAPI({
         content: newTodo.content,
+        description: newTodo.description, // 添加 description 字段
         is_important: newTodo.is_important,
         is_urgent: newTodo.is_urgent,
         due_date: dueDateUTC,
@@ -305,6 +512,133 @@ function App() {
         unsubscribe && unsubscribe()
       }
     }, [setCurrentView, setSelectedNoteId])
+
+  // 监听插件窗口打开请求
+  useEffect(() => {
+    const unsubscribe = subscribePluginWindowRequests(async (payload) => {
+      if (!payload) return
+      
+      console.log('插件请求打开窗口:', payload)
+      
+      try {
+        // 加载插件HTML文件内容
+        const result = await loadPluginFile(payload.pluginId, payload.url)
+        
+        if (!result.success) {
+          console.error('加载插件文件失败:', result.error)
+          return
+        }
+        
+        // 在 HTML 中注入 base 标签，设置资源基准 URL
+        let htmlContent = result.content
+        const baseUrl = window.location.origin + window.location.pathname.replace(/[^/]*$/, '')
+        const baseTag = `<base href="${baseUrl}">`
+        
+        // 在 head 标签后插入 base 标签
+        if (htmlContent.includes('<head>')) {
+          htmlContent = htmlContent.replace('<head>', `<head>\n${baseTag}`)
+        } else if (htmlContent.includes('<HEAD>')) {
+          htmlContent = htmlContent.replace('<HEAD>', `<HEAD>\n${baseTag}`)
+        } else {
+          // 如果没有 head 标签，在 html 标签后添加
+          htmlContent = htmlContent.replace(/<html[^>]*>/i, `$&\n<head>\n${baseTag}\n</head>`)
+        }
+        
+        // 设置窗口信息，包含修改后的HTML内容
+        setPluginWindow({
+          pluginId: payload.pluginId,
+          url: payload.url,
+          htmlContent: htmlContent,
+          title: payload.title || '插件窗口',
+          width: payload.width || 800,
+          height: payload.height || 600,
+          resizable: payload.resizable !== false,
+          closable: payload.closable !== false
+        })
+      } catch (error) {
+        console.error('加载插件窗口失败:', error)
+      }
+    })
+
+    return () => {
+      unsubscribe && unsubscribe()
+    }
+  }, [])
+
+  // 在插件窗口打开时注入 UI Bridge 和依赖
+  useEffect(() => {
+    if (!pluginWindow || !pluginWindow.htmlContent) return
+    
+    let injected = false
+    let styleObserver = null
+    
+    // 尝试多次注入,确保成功
+    const tryInject = () => {
+      const iframe = document.querySelector('iframe[title="' + pluginWindow.title + '"]')
+      if (iframe && iframe.contentWindow && iframe.contentDocument) {
+        try {
+          // 注入 UI Bridge
+          injectUIBridge(iframe.contentWindow, appTheme, {
+            pluginId: pluginWindow.pluginId,
+            commandExecutor: executePluginCommand
+          })
+          
+          // 为 iframe 创建独立的 emotion cache，让样式注入到 iframe 内部
+          const iframeDoc = iframe.contentDocument || iframe.contentWindow.document
+          const iframeCache = createCache({
+            key: 'iframe-emotion',
+            container: iframeDoc.head,
+            prepend: true
+          })
+          
+          // 暴露 React 和 Material-UI 依赖
+          iframe.contentWindow.React = React
+          iframe.contentWindow.ReactDOM = ReactDOM
+          iframe.contentWindow.MaterialUI = MaterialUI
+          iframe.contentWindow.MaterialIcons = MaterialIcons
+          iframe.contentWindow.appTheme = appTheme
+          iframe.contentWindow.emotionCache = iframeCache  // 提供给插件使用
+          iframe.contentWindow.CacheProvider = CacheProvider  // 提供 CacheProvider
+          
+          injected = true
+          console.log('[UI Bridge] 已注入插件窗口:', pluginWindow.title)
+          console.log('[Dependencies] 已暴露: React, ReactDOM, MaterialUI, MaterialIcons, appTheme, emotionCache, CacheProvider')
+          console.log('[UI Bridge] ✅ Emotion cache 已配置，样式将自动注入到 iframe')
+          
+          return true
+        } catch (error) {
+          console.error('[UI Bridge] 注入失败:', error)
+          return false
+        }
+      }
+      return false
+    }
+    
+    // 立即尝试注入
+    if (tryInject()) return
+    
+    // 如果失败,使用定时器重试
+    const timer = setTimeout(() => {
+      if (!injected) {
+        tryInject()
+      }
+    }, 50)
+    
+    // 再设置一个备用定时器
+    const timer2 = setTimeout(() => {
+      if (!injected) {
+        tryInject()
+      }
+    }, 200)
+    
+    return () => {
+      clearTimeout(timer)
+      clearTimeout(timer2)
+      if (styleObserver) {
+        styleObserver.disconnect()
+      }
+    }
+  }, [pluginWindow, appTheme])
 
   // 处理todo创建，支持预设初始数据
   const handleOpenCreateTodo = (initialData = null) => {
@@ -590,7 +924,7 @@ function App() {
               />
               
               {/* 主内容区域 */}
-              <Box sx={{ flex: 1, overflow: 'hidden', minWidth: 600 }}>
+              <Box sx={{ flex: 1, overflow: 'hidden' }}>
                 {currentView === 'notes' && <NoteEditor />}
                 {currentView === 'todo' && (
               <TodoView 
@@ -604,29 +938,12 @@ function App() {
             )}
                 {currentView === 'calendar' && <CalendarView currentDate={calendarCurrentDate} onDateChange={setCalendarCurrentDate} onTodoSelect={setSelectedTodo} selectedDate={selectedDate} onSelectedDateChange={setSelectedDate} refreshToken={calendarRefreshTrigger} showCompleted={calendarShowCompleted} onShowCompletedChange={setCalendarShowCompleted} onTodoUpdated={handleTodoUpdated} />}
                 {currentView === 'settings' && <Settings />}
-                {currentView === 'files' && (
-                  <Box sx={{ p: 3 }}>
-                    <Typography variant="h4">文件管理</Typography>
-                    <Typography variant="body1" sx={{ mt: 2 }}>文件管理功能开发中...</Typography>
-                  </Box>
-                )}
                 {currentView === 'plugins' && (
                   <Box sx={{ p: 3, height: '100%', boxSizing: 'border-box' }}>
                     <PluginStore />
                   </Box>
                 )}
-                {currentView === 'vocabulary' && (
-                  <Box sx={{ p: 3 }}>
-                    <Typography variant="h4">单词本</Typography>
-                    <Typography variant="body1" sx={{ mt: 2 }}>单词本功能开发中...</Typography>
-                  </Box>
-                )}
-                {currentView === 'profile' && (
-                  <Box sx={{ p: 3 }}>
-                    <Typography variant="h4">个人资料</Typography>
-                    <Typography variant="body1" sx={{ mt: 2 }}>个人资料功能开发中...</Typography>
-                  </Box>
-                )}
+                {currentView === 'profile' && <Profile />}
               </Box>
             </Box>
           </Box>
@@ -660,7 +977,100 @@ function App() {
         onConfirm={handleConfirmBatchSetTags}
         noteIds={selectedNotesForTagging}
         getAllTags={getAllTags}
-      />      
+      />
+
+      {/* 插件窗口对话框 */}
+      {pluginWindow && pluginWindow.htmlContent && (
+        <Dialog
+          open={true}
+          onClose={pluginWindow.closable ? () => setPluginWindow(null) : undefined}
+          maxWidth={false}
+          PaperProps={{
+            sx: {
+              width: pluginWindow.width,
+              height: pluginWindow.height,
+              maxWidth: '90vw',
+              maxHeight: '90vh',
+              m: 2
+            }
+          }}
+        >
+          <DialogTitle sx={{ 
+            display: 'flex', 
+            justifyContent: 'space-between', 
+            alignItems: 'center',
+            p: 2,
+            borderBottom: 1,
+            borderColor: 'divider'
+          }}>
+            {pluginWindow.title}
+            {pluginWindow.closable && (
+              <IconButton
+                edge="end"
+                color="inherit"
+                onClick={() => setPluginWindow(null)}
+                aria-label="close"
+              >
+                <CloseIcon />
+              </IconButton>
+            )}
+          </DialogTitle>
+          <DialogContent sx={{ p: 0, overflow: 'hidden', height: `calc(${pluginWindow.height}px - 64px)` }}>
+            <iframe
+              srcDoc={pluginWindow.htmlContent}
+              style={{
+                width: '100%',
+                height: '100%',
+                border: 'none'
+              }}
+              title={pluginWindow.title}
+              sandbox="allow-scripts allow-same-origin"
+              onLoad={(e) => {
+                // iframe 加载完成后立即注入依赖
+                const iframe = e.target
+                if (iframe && iframe.contentWindow) {
+                  try {
+                    console.log('[Plugin Window] iframe onLoad 触发')
+                    
+                    // 注入 UI Bridge
+                    injectUIBridge(iframe.contentWindow, appTheme, {
+                      pluginId: pluginWindow.pluginId,
+                      commandExecutor: executePluginCommand
+                    })
+                    
+                    // 为 iframe 创建独立的 emotion cache
+                    const iframeDoc = iframe.contentDocument || iframe.contentWindow.document
+                    const iframeCache = createCache({
+                      key: 'iframe-emotion',
+                      container: iframeDoc.head,
+                      prepend: true
+                    })
+                    
+                    // 暴露 React 和 Material-UI 依赖
+                    iframe.contentWindow.React = React
+                    iframe.contentWindow.ReactDOM = ReactDOM
+                    iframe.contentWindow.MaterialUI = MaterialUI
+                    iframe.contentWindow.MaterialIcons = MaterialIcons
+                    iframe.contentWindow.appTheme = appTheme
+                    iframe.contentWindow.emotionCache = iframeCache
+                    iframe.contentWindow.CacheProvider = CacheProvider
+                    
+                    console.log('[Plugin Window] ✅ 依赖注入完成')
+                  } catch (error) {
+                    console.error('[Plugin Window] ❌ 依赖注入失败:', error)
+                  }
+                }
+              }}
+            />
+          </DialogContent>
+        </Dialog>
+      )}
+
+      {/* 命令面板 */}
+      <CommandPalette
+        open={commandPaletteOpen}
+        onClose={() => setCommandPaletteOpen(false)}
+      />
       </DragAnimationProvider>
     </ThemeProvider>
   )

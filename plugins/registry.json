@@ -22,5 +22,149 @@
     "minAppVersion": "2.0.0",
   "shortDescription": "抽一篇旧笔记立即回顾",
     "icon": null
+  },
+  {
+    "id": "test-extended-permissions",
+    "name": "测试扩展权限",
+    "description": "测试插件，用于验证新增的权限系统：完整笔记读取、待办操作、网络请求等功能",
+    "version": "1.0.0",
+    "author": {
+      "name": "FlashNote 团队",
+      "url": "https://github.com/Xperiamol"
+    },
+    "license": "MIT",
+    "homepage": "https://github.com/Xperiamol",
+    "repository": "https://github.com/Xperiamol/flashnote",
+    "source": {
+      "type": "directory",
+      "path": "plugins/examples/test-extended-permissions"
+    },
+    "tags": ["test", "permissions", "development"],
+    "categories": ["开发工具"],
+    "featured": false,
+    "permissions": ["notes:read", "notes:read:full", "todos:read", "todos:read:full", "todos:write", "network:request", "notifications:show", "storage:read", "storage:write"],
+    "minAppVersion": "2.0.0",
+    "shortDescription": "测试扩展权限系统",
+    "icon": null
+  },
+  {
+    "id": "comprehensive-api-demo",
+    "name": "全功能 API 演示",
+    "description": "演示插件系统所有可用 API 的综合示例插件，包括剪贴板、文件系统、标签管理、高级搜索、统计分析、AI 能力等",
+    "version": "1.0.0",
+    "author": {
+      "name": "FlashNote 团队",
+      "url": "https://github.com/Xperiamol"
+    },
+    "license": "MIT",
+    "homepage": "https://github.com/Xperiamol",
+    "repository": "https://github.com/Xperiamol/flashnote",
+    "source": {
+      "type": "directory",
+      "path": "plugins/examples/comprehensive-api-demo"
+    },
+    "tags": ["demo", "api", "comprehensive", "development"],
+    "categories": ["开发工具", "效率"],
+    "featured": true,
+    "permissions": ["notes:read", "notes:read:full", "notes:write", "todos:read", "todos:read:full", "todos:write", "tags:read", "tags:write", "ui:open-note", "notifications:show", "storage:read", "storage:write", "network:request", "filesystem:read", "filesystem:write", "clipboard:read", "clipboard:write", "search:advanced", "events:subscribe", "analytics:read", "ai:inference"],
+    "minAppVersion": "2.1.0",
+    "shortDescription": "全功能 API 演示插件",
+    "icon": null
+  },
+  {
+    "id": "ui-bridge-demo",
+    "name": "UI Bridge 完整演示",
+    "description": "展示 UI Bridge 的所有功能：CSS 变量、预构建类库、Web Components。演示如何使用 FlashNote 的 UI 资源系统构建美观一致的插件界面。",
+    "version": "1.0.0",
+    "author": {
+      "name": "FlashNote 团队",
+      "url": "https://github.com/Xperiamol"
+    },
+    "license": "MIT",
+    "homepage": "https://github.com/Xperiamol",
+    "repository": "https://github.com/Xperiamol/flashnote",
+    "source": {
+      "type": "directory",
+      "path": "plugins/examples/ui-bridge-demo"
+    },
+    "tags": ["demo", "ui", "development", "tutorial"],
+    "categories": ["开发工具"],
+    "featured": true,
+    "permissions": ["ui:open-window"],
+    "minAppVersion": "2.1.0",
+    "shortDescription": "UI Bridge 功能演示",
+    "icon": "icon.svg"
+  },
+  {
+    "id": "react-demo",
+    "name": "React 插件演示",
+    "description": "展示如何使用 React 构建 FlashNote 插件，使用 Material-UI 组件和 Hooks。完整演示待办管理功能。",
+    "version": "1.0.0",
+    "author": {
+      "name": "FlashNote 团队",
+      "url": "https://github.com/Xperiamol"
+    },
+    "license": "MIT",
+    "homepage": "https://github.com/Xperiamol",
+    "repository": "https://github.com/Xperiamol/flashnote",
+    "source": {
+      "type": "directory",
+      "path": "plugins/examples/react-demo"
+    },
+    "tags": ["react", "demo", "development", "tutorial", "mui"],
+    "categories": ["开发工具"],
+    "featured": true,
+    "permissions": ["ui:open-window", "notes:read", "todos:read", "todos:write", "notifications:show"],
+    "minAppVersion": "2.1.0",
+    "shortDescription": "React + Material-UI 演示",
+    "icon": "icon.svg"
+  },
+  {
+    "id": "ai-task-planner",
+    "name": "AI 任务规划助手",
+    "description": "使用 AI 智能拆解任务为可执行的待办事项，并提供可视化编辑界面。支持优先级设置、截止日期规划和批量创建待办。",
+    "version": "1.0.0",
+    "author": {
+      "name": "FlashNote 团队",
+      "url": "https://github.com/Xperiamol"
+    },
+    "license": "MIT",
+    "homepage": "https://github.com/Xperiamol",
+    "repository": "https://github.com/Xperiamol/flashnote",
+    "source": {
+      "type": "directory",
+      "path": "plugins/examples/ai-task-planner"
+    },
+    "tags": ["ai", "tasks", "productivity", "planning", "todos"],
+    "categories": ["效率", "AI"],
+    "featured": true,
+    "permissions": ["todos:read", "todos:write", "ai:inference", "ui:open-window", "notifications:show", "storage:read", "storage:write"],
+    "minAppVersion": "2.0.0",
+    "shortDescription": "AI 智能任务规划与拆解",
+    "icon": "icon.svg"
+  },
+  {
+    "id": "pattern-theme",
+    "name": "花纹主题",
+    "description": "为 FlashNote 添加炫酷的几何花纹背景主题，支持多种花纹样式切换。8种精美样式：圆点、网格、斜纹、蜂窝、波浪、电路、之字形、菱形，花纹颜色自动跟随应用主题色。",
+    "version": "1.0.0",
+    "author": {
+      "name": "FlashNote 团队",
+      "url": "https://github.com/Xperiamol"
+    },
+    "license": "MIT",
+    "homepage": "https://github.com/Xperiamol",
+    "repository": "https://github.com/Xperiamol/flashnote",
+    "source": {
+      "type": "directory",
+      "path": "plugins/examples/pattern-theme"
+    },
+    "tags": ["theme", "visual", "customization", "ui"],
+    "categories": ["效率", "外观"],
+    "featured": true,
+    "permissions": ["ui:theme", "storage:read", "storage:write", "notifications:show"],
+    "minAppVersion": "2.1.0",
+    "shortDescription": "炫酷几何花纹背景主题",
+    "icon": null
   }
 ]

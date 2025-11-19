@@ -7,6 +7,7 @@ class ShortcutService {
   constructor() {
     this.registeredShortcuts = new Map();
     this.mainWindow = null;
+    this.windowManager = null;
     this.pluginManager = null;
     this.pluginCommandShortcuts = new Map(); // key -> { shortcutId, accelerator }
     this.pluginShortcutSettings = new Map(); // key -> binding metadata
@@ -19,6 +20,14 @@ class ShortcutService {
    */
   setMainWindow(window) {
     this.mainWindow = window;
+  }
+
+  /**
+   * 设置WindowManager引用
+   * @param {import('./WindowManager')} windowManager
+   */
+  setWindowManager(windowManager) {
+    this.windowManager = windowManager;
   }
 
   /**
@@ -466,16 +475,33 @@ class ShortcutService {
   /**
    * 处理快速输入动作
    */
-  handleQuickInput() {
-    // TODO: 实现快速输入窗口
-    console.log('快速输入功能待实现');
-    if (this.mainWindow) {
-      this.mainWindow.webContents.send('quick-input');
-      if (this.mainWindow.isMinimized()) {
-        this.mainWindow.restore();
+  async handleQuickInput() {
+    try {
+      // 检查windowManager是否初始化
+      if (!this.windowManager) {
+        console.error('快速输入：WindowManager未初始化');
+        return;
       }
-      this.mainWindow.show();
-      this.mainWindow.focus();
+      
+      // 获取NoteService实例
+      const NoteService = require('./NoteService');
+      const noteService = new NoteService();
+      
+      // 创建空白笔记
+      const result = await noteService.createNote({
+        title: '快速笔记',
+        content: '',
+        category: '',
+        tags: []
+      });
+      
+      if (result.success && result.data) {
+        // 在独立窗口打开
+        await this.windowManager.createNoteWindow(result.data.id);
+        console.log('快速输入：创建笔记并在独立窗口打开成功');
+      }
+    } catch (error) {
+      console.error('快速输入失败:', error);
     }
   }
 

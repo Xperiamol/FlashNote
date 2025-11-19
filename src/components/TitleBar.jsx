@@ -1,9 +1,33 @@
 import React from 'react';
 import { Box, Typography } from '@mui/material';
 import { useTheme } from '@mui/material/styles';
+import { createTransitionString, ANIMATIONS } from '../utils/animationConfig';
+import { useStore } from '../store/useStore';
+import SyncStatusIndicator from './SyncStatusIndicator';
 
 const TitleBar = () => {
   const theme = useTheme();
+  const { currentView, titleBarStyle } = useStore();
+  
+  // 根据当前视图获取对应的标题
+  const getViewTitle = () => {
+    switch (currentView) {
+      case 'notes':
+        return 'FlashNote';
+      case 'todo':
+        return '待办事项';
+      case 'calendar':
+        return '日历';
+      case 'settings':
+        return '设置';
+      case 'plugins':
+        return '插件';
+      case 'profile':
+        return '个人中心';
+      default:
+        return 'FlashNote';
+    }
+  };
 
   const handleMinimize = async () => {
     if (window.electronAPI) {
@@ -42,86 +66,184 @@ const TitleBar = () => {
           : 'linear-gradient(180deg, #f6f6f6 0%, #ebebeb 100%)',
       }}
     >
-      {/* Mac风格的窗口控制按钮 - 左侧 */}
-      <Box
-        sx={{
-          position: 'absolute',
-          left: '12px',
-          display: 'flex',
-          alignItems: 'center',
-          gap: '8px',
-          WebkitAppRegion: 'no-drag',
-        }}
-      >
-        {/* 关闭按钮 - 红色 */}
+      {titleBarStyle === 'mac' ? (
+        /* Mac风格的窗口控制按钮 - 左侧 */
         <Box
-          onClick={handleClose}
           sx={{
-            width: '12px',
-            height: '12px',
-            borderRadius: '50%',
-            backgroundColor: '#ff5f57',
-            cursor: 'pointer',
+            position: 'absolute',
+            left: '12px',
             display: 'flex',
             alignItems: 'center',
-            justifyContent: 'center',
-            transition: 'all 0.2s ease',
-            '&:hover': {
-              backgroundColor: '#ff3b30',
-              transform: 'scale(1.1)',
-            },
-            '&:active': {
-              transform: 'scale(0.95)',
-            },
+            gap: '8px',
+            WebkitAppRegion: 'no-drag',
           }}
-        />
-        
-        {/* 最小化按钮 - 黄色 */}
+        >
+          {/* 关闭按钮 - 红色 */}
+          <Box
+            onClick={handleClose}
+            sx={{
+              width: '12px',
+              height: '12px',
+              borderRadius: '50%',
+              backgroundColor: '#ff5f57',
+              cursor: 'pointer',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              transition: createTransitionString(ANIMATIONS.button),
+              '&:hover': {
+                backgroundColor: '#ff3b30',
+                transform: 'scale(1.1)',
+              },
+              '&:active': {
+                transform: 'scale(0.95)',
+              },
+            }}
+          />
+          
+          {/* 最小化按钮 - 黄色 */}
+          <Box
+            onClick={handleMinimize}
+            sx={{
+              width: '12px',
+              height: '12px',
+              borderRadius: '50%',
+              backgroundColor: '#ffbd2e',
+              cursor: 'pointer',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              transition: createTransitionString(ANIMATIONS.button),
+              '&:hover': {
+                backgroundColor: '#ff9500',
+                transform: 'scale(1.1)',
+              },
+              '&:active': {
+                transform: 'scale(0.95)',
+              },
+            }}
+          />
+          
+          {/* 最大化按钮 - 绿色 */}
+          <Box
+            onClick={handleMaximize}
+            sx={{
+              width: '12px',
+              height: '12px',
+              borderRadius: '50%',
+              backgroundColor: '#28ca42',
+              cursor: 'pointer',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              transition: createTransitionString(ANIMATIONS.button),
+              '&:hover': {
+                backgroundColor: '#20a934',
+                transform: 'scale(1.1)',
+              },
+              '&:active': {
+                transform: 'scale(0.95)',
+              },
+            }}
+          />
+        </Box>
+      ) : (
+        /* Windows风格的窗口控制按钮 - 右侧 */
         <Box
-          onClick={handleMinimize}
           sx={{
-            width: '12px',
-            height: '12px',
-            borderRadius: '50%',
-            backgroundColor: '#ffbd2e',
-            cursor: 'pointer',
+            position: 'absolute',
+            right: '0',
             display: 'flex',
             alignItems: 'center',
-            justifyContent: 'center',
-            transition: 'all 0.2s ease',
-            '&:hover': {
-              backgroundColor: '#ff9500',
-              transform: 'scale(1.1)',
-            },
-            '&:active': {
-              transform: 'scale(0.95)',
-            },
+            height: '100%',
+            WebkitAppRegion: 'no-drag',
           }}
-        />
-        
-        {/* 最大化按钮 - 绿色 */}
-        <Box
-          onClick={handleMaximize}
-          sx={{
-            width: '12px',
-            height: '12px',
-            borderRadius: '50%',
-            backgroundColor: '#28ca42',
-            cursor: 'pointer',
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-            transition: 'all 0.2s ease',
-            '&:hover': {
-              backgroundColor: '#20a934',
-              transform: 'scale(1.1)',
-            },
-            '&:active': {
-              transform: 'scale(0.95)',
-            },
-          }}
-        />
-      </Box>
+        >
+          {/* 最小化按钮 */}
+          <Box
+            onClick={handleMinimize}
+            sx={{
+              width: '46px',
+              height: '100%',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              cursor: 'pointer',
+              transition: createTransitionString(ANIMATIONS.button),
+              '&:hover': {
+                backgroundColor: theme.palette.mode === 'dark' ? 'rgba(255, 255, 255, 0.1)' : 'rgba(0, 0, 0, 0.05)',
+              },
+              '&:active': {
+                backgroundColor: theme.palette.mode === 'dark' ? 'rgba(255, 255, 255, 0.15)' : 'rgba(0, 0, 0, 0.1)',
+              },
+            }}
+          >
+            <Box
+              sx={{
+                width: '10px',
+                height: '1px',
+                backgroundColor: theme.palette.text.primary,
+              }}
+            />
+          </Box>
+          
+          {/* 最大化按钮 */}
+          <Box
+            onClick={handleMaximize}
+            sx={{
+              width: '46px',
+              height: '100%',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              cursor: 'pointer',
+              transition: createTransitionString(ANIMATIONS.button),
+              '&:hover': {
+                backgroundColor: theme.palette.mode === 'dark' ? 'rgba(255, 255, 255, 0.1)' : 'rgba(0, 0, 0, 0.05)',
+              },
+              '&:active': {
+                backgroundColor: theme.palette.mode === 'dark' ? 'rgba(255, 255, 255, 0.15)' : 'rgba(0, 0, 0, 0.1)',
+              },
+            }}
+          >
+            <Box
+              sx={{
+                width: '9px',
+                height: '9px',
+                border: `1px solid ${theme.palette.text.primary}`,
+                borderRadius: '1px',
+              }}
+            />
+          </Box>
+          
+          {/* 关闭按钮 */}
+          <Box
+            onClick={handleClose}
+            sx={{
+              width: '46px',
+              height: '100%',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              cursor: 'pointer',
+              transition: createTransitionString(ANIMATIONS.button),
+              '&:hover': {
+                backgroundColor: '#e81123',
+                '& > svg': {
+                  color: '#fff',
+                },
+              },
+              '&:active': {
+                backgroundColor: '#c50d1d',
+              },
+            }}
+          >
+            <svg width="10" height="10" viewBox="0 0 10 10" style={{ color: theme.palette.text.primary }}>
+              <path d="M0.5 0.5 L9.5 9.5 M9.5 0.5 L0.5 9.5" stroke="currentColor" strokeWidth="1" />
+            </svg>
+          </Box>
+        </Box>
+      )}
 
       {/* 应用标题 - 居中 */}
       <Typography
@@ -135,8 +257,34 @@ const TitleBar = () => {
           textAlign: 'center',
         }}
       >
-        FlashNote 2.0
+        {getViewTitle()}
       </Typography>
+
+      {/* 同步状态指示器 - 右侧（Windows样式时） */}
+      {titleBarStyle === 'windows' && (
+        <Box
+          sx={{
+            position: 'absolute',
+            right: '150px', // 留出空间给窗口控制按钮
+            WebkitAppRegion: 'no-drag',
+          }}
+        >
+          <SyncStatusIndicator />
+        </Box>
+      )}
+
+      {/* 同步状态指示器 - 右侧（Mac样式时） */}
+      {titleBarStyle === 'mac' && (
+        <Box
+          sx={{
+            position: 'absolute',
+            right: '12px',
+            WebkitAppRegion: 'no-drag',
+          }}
+        >
+          <SyncStatusIndicator />
+        </Box>
+      )}
     </Box>
   );
 };

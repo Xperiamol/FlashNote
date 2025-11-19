@@ -12,6 +12,7 @@ import {
 } from '@mui/icons-material';
 import { useTheme } from '@mui/material/styles';
 import { useStore } from '../store/useStore';
+import { createTransitionString, ANIMATIONS } from '../utils/animationConfig';
 
 const Sidebar = ({ open = true, onClose }) => {
   const theme = useTheme();
@@ -39,22 +40,10 @@ const Sidebar = ({ open = true, onClose }) => {
       tooltip: '日历视图'
     },
     {
-      id: 'files',
-      icon: <Folder />,
-      label: '文件',
-      tooltip: '文件管理'
-    },
-    {
       id: 'plugins',
       icon: <Store />,
       label: '插件商店',
       tooltip: '插件商店'
-    },
-    {
-      id: 'vocabulary',
-      icon: <MenuBook />,
-      label: '单词本',
-      tooltip: '单词本'
     },
     {
       id: 'profile',
@@ -167,7 +156,7 @@ const Sidebar = ({ open = true, onClose }) => {
                 border: currentView === item.id
                   ? `2px solid ${theme.palette.primary.main}`
                   : '2px solid transparent',
-                transition: 'all 0.2s ease',
+                transition: createTransitionString(ANIMATIONS.button),
                 '&:hover': {
                   backgroundColor: currentView === item.id
                     ? theme.palette.mode === 'dark'
@@ -189,7 +178,7 @@ const Sidebar = ({ open = true, onClose }) => {
               {React.cloneElement(item.icon, {
                 sx: {
                   fontSize: '20px',
-                  transition: 'all 0.2s ease',
+                  transition: createTransitionString(ANIMATIONS.button),
                 }
               })}
             </IconButton>
@@ -231,7 +220,7 @@ const Sidebar = ({ open = true, onClose }) => {
               border: currentView === 'settings'
                 ? `2px solid ${theme.palette.primary.main}`
                 : '2px solid transparent',
-              transition: 'all 0.2s ease',
+              transition: createTransitionString(ANIMATIONS.button),
               '&:hover': {
                 backgroundColor: currentView === 'settings'
                   ? theme.palette.mode === 'dark'

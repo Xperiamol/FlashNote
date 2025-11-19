@@ -11,6 +11,8 @@ const zhCN = {
     fields: {
       contentLabel: '待办内容',
       contentPlaceholder: '请输入待办事项',
+      descriptionLabel: '详细描述',
+      descriptionPlaceholder: '添加更多描述信息（可选）',
       importantLabel: '重要',
       urgentLabel: '紧急',
       tagsPlaceholder: '标签（用逗号分隔）',

@@ -27,6 +27,7 @@ import {
   getPriorityColor, 
   getPriorityText 
 } from '../utils/priorityUtils';
+import { ANIMATIONS, createAnimationString, createTransitionString, GREEN_SWEEP_KEYFRAMES } from '../utils/animationConfig';
 
 /**
  * 获取Todo优先级颜色
@@ -43,7 +44,7 @@ const getTodoPriorityColor = (todo) => {
  * 获取优先级标签
  */
 const getPriorityLabel = (todo) => {
-  const priority = getPriorityFromQuadrant(todo.quadrant);
+  const priority = getPriorityFromQuadrant(todo.is_important, todo.is_urgent);
   return {
     label: getPriorityText(priority),
     color: getPriorityColor(priority),
@@ -79,7 +80,9 @@ const TodoItem = ({
   isSelected = false,
   showSecondaryInfo = true,
   compact = false,
-  variant = 'default' // 'default', 'calendar', 'mydaypanel'
+  variant = 'default', // 'default', 'calendar', 'mydaypanel', 'quadrant'
+  onDragStart,
+  onDragEnd
 }) => {
   const theme = useTheme();
   
@@ -114,18 +117,11 @@ const TodoItem = ({
         bottom: 0,
         background: 'rgba(76, 175, 80, 0.4)',
         transform: 'translateX(-100%)',
-        animation: 'greenSweep 0.3s cubic-bezier(0.25, 0.46, 0.45, 0.94) forwards',
+        animation: createAnimationString(ANIMATIONS.completion),
         zIndex: 1,
         pointerEvents: 'none'
       };
-      baseStyles['@keyframes greenSweep'] = {
-        '0%': {
-          transform: 'translateX(-100%)'
-        },
-        '100%': {
-          transform: 'translateX(0%)'
-        }
-      };
+      Object.assign(baseStyles, GREEN_SWEEP_KEYFRAMES);
     }
 
     return baseStyles;
@@ -177,7 +173,7 @@ const TodoItem = ({
         }}
         sx={{
           position: 'relative',
-          transition: 'all 0.3s ease',
+          transition: createTransitionString(ANIMATIONS.stateChange),
           zIndex: 2,
           ...(pendingComplete.has(todo.id) && {
             backgroundColor: 'warning.light',
@@ -193,7 +189,7 @@ const TodoItem = ({
           <RadioButtonUncheckedIcon 
             sx={{ 
               color: 'warning.main',
-              animation: 'pulse 1s infinite'
+              animation: createAnimationString(ANIMATIONS.pulse)
             }} 
           />
         ) : celebratingTodos.has(todo.id) ? (
@@ -308,6 +304,9 @@ const TodoItem = ({
 
     return (
       <Paper
+        draggable
+        onDragStart={(e) => onDragStart && onDragStart(e, todo)}
+        onDragEnd={(e) => onDragEnd && onDragEnd(e)}
         elevation={1}
         sx={{
           p: 2,
@@ -315,11 +314,14 @@ const TodoItem = ({
           backgroundColor: isCompleted ? 'grey.50' : 'background.paper',
           border: isOverdue ? '1px solid' : 'none',
           borderColor: isOverdue ? 'error.main' : 'transparent',
-          transition: 'all 0.2s ease',
-          cursor: 'pointer',
+          transition: createTransitionString(ANIMATIONS.hover),
+          cursor: 'grab',
+          '&:active': {
+            cursor: 'grabbing'
+          },
           '&:hover': {
             elevation: 2,
-            transform: 'translateY(-1px)'
+            boxShadow: `0 4px 12px ${getTodoPriorityColor(todo)}30`
           },
           ...getItemStyles()
         }}

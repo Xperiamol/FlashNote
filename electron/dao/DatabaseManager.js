@@ -111,6 +111,18 @@ class DatabaseManager {
         created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
         updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
         completed_at DATETIME NULL
+      )`,
+      
+      // 变更日志表 - 用于增量同步
+      `CREATE TABLE IF NOT EXISTS changes (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        entity_type TEXT NOT NULL,
+        entity_id INTEGER NOT NULL,
+        operation TEXT NOT NULL,
+        change_data TEXT,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        synced INTEGER DEFAULT 0,
+        synced_at DATETIME NULL
       )`
     ];
 
@@ -127,7 +139,10 @@ class DatabaseManager {
       'CREATE INDEX IF NOT EXISTS idx_todos_due_date ON todos(due_date)',
       'CREATE INDEX IF NOT EXISTS idx_todos_is_completed ON todos(is_completed)',
       'CREATE INDEX IF NOT EXISTS idx_todos_is_important ON todos(is_important)',
-      'CREATE INDEX IF NOT EXISTS idx_todos_is_urgent ON todos(is_urgent)'
+      'CREATE INDEX IF NOT EXISTS idx_todos_is_urgent ON todos(is_urgent)',
+      'CREATE INDEX IF NOT EXISTS idx_changes_entity ON changes(entity_type, entity_id)',
+      'CREATE INDEX IF NOT EXISTS idx_changes_synced ON changes(synced)',
+      'CREATE INDEX IF NOT EXISTS idx_changes_created_at ON changes(created_at DESC)'
     ];
 
     // 执行建表语句
@@ -239,6 +254,151 @@ class DatabaseManager {
         console.log('添加focus_time_seconds字段到todos表...');
         this.db.exec("ALTER TABLE todos ADD COLUMN focus_time_seconds INTEGER DEFAULT 0");
       }
+
+      if (!columnNames.includes('description')) {
+        console.log('添加description字段到todos表...');
+        this.db.exec("ALTER TABLE todos ADD COLUMN description TEXT DEFAULT ''");
+      }
+
+      // ===== 待办事项软删除支持 (2025-11-18) =====
+      if (!columnNames.includes('is_deleted')) {
+        console.log('添加is_deleted字段到todos表 (软删除支持)...');
+        this.db.exec("ALTER TABLE todos ADD COLUMN is_deleted INTEGER DEFAULT 0");
+      }
+
+      if (!columnNames.includes('deleted_at')) {
+        console.log('添加deleted_at字段到todos表 (软删除时间戳)...');
+        this.db.exec("ALTER TABLE todos ADD COLUMN deleted_at DATETIME NULL");
+      }
+      
+      // 添加索引
+      this.db.exec('CREATE INDEX IF NOT EXISTS idx_todos_is_deleted ON todos(is_deleted)');
+      console.log('待办事项软删除字段迁移完成');
+
+      // ===== 日程/待办区分和时间类型支持 (2025-11-11) =====
+      if (!columnNames.includes('item_type')) {
+        console.log('添加item_type字段到todos表 (区分日程/待办)...');
+        this.db.exec("ALTER TABLE todos ADD COLUMN item_type TEXT DEFAULT 'todo'"); // 'todo' 或 'event'
+      }
+
+      if (!columnNames.includes('has_time')) {
+        console.log('添加has_time字段到todos表 (区分全天/带时间)...');
+        this.db.exec("ALTER TABLE todos ADD COLUMN has_time INTEGER DEFAULT 0"); // 0=全天, 1=带时间
+      }
+
+      if (!columnNames.includes('end_date')) {
+        console.log('添加end_date字段到todos表 (支持结束时间)...');
+        this.db.exec("ALTER TABLE todos ADD COLUMN end_date DATETIME NULL");
+      }
+      
+      // 添加索引
+      this.db.exec('CREATE INDEX IF NOT EXISTS idx_todos_item_type ON todos(item_type)');
+      this.db.exec('CREATE INDEX IF NOT EXISTS idx_todos_has_time ON todos(has_time)');
+      
+      console.log('日程/待办字段迁移完成');
+
+      // ===== 笔记表基础字段检查 (2025-11-14) =====
+      // 检查notes表结构
+      const notesTableInfo = this.db.prepare("PRAGMA table_info(notes)").all();
+      const notesColumnNames = notesTableInfo.map(col => col.name);
+      
+      console.log('检查notes表字段:', notesColumnNames);
+      
+      // 检查并添加title字段（兼容旧版本数据库）
+      let titleAdded = false;
+      if (!notesColumnNames.includes('title')) {
+        console.log('添加title字段到notes表 (兼容旧版本)...');
+        this.db.exec("ALTER TABLE notes ADD COLUMN title TEXT NOT NULL DEFAULT ''");
+        titleAdded = true;
+        console.log('✅ title字段添加完成');
+      }
+      
+      // 检查FTS5表是否需要重建
+      let needRebuildFTS = titleAdded;
+      if (!needRebuildFTS) {
+        try {
+          // 尝试查询FTS表，看是否有title字段
+          this.db.prepare('SELECT title FROM notes_fts LIMIT 1').all();
+        } catch (error) {
+          if (error.message.includes('no such column: title')) {
+            console.log('检测到FTS5表缺少title字段，需要重建');
+            needRebuildFTS = true;
+          }
+        }
+      }
+      
+      // 如果需要，重建FTS5表
+      if (needRebuildFTS) {
+        console.log('重建FTS5全文搜索索引...');
+        try {
+          // 删除旧的FTS表和触发器
+          this.db.exec('DROP TRIGGER IF EXISTS notes_fts_insert');
+          this.db.exec('DROP TRIGGER IF EXISTS notes_fts_update');
+          this.db.exec('DROP TRIGGER IF EXISTS notes_fts_delete');
+          this.db.exec('DROP TABLE IF EXISTS notes_fts');
+          
+          // 重新创建FTS表
+          this.db.exec(`
+            CREATE VIRTUAL TABLE notes_fts USING fts5(
+              title, 
+              content, 
+              content=notes, 
+              content_rowid=id,
+              tokenize='unicode61 remove_diacritics 1'
+            )
+          `);
+          
+          // 同步现有数据
+          const existingNotes = this.db.prepare('SELECT id, title, content FROM notes').all();
+          const insertStmt = this.db.prepare(
+            'INSERT INTO notes_fts(rowid, title, content) VALUES (?, ?, ?)'
+          );
+          
+          for (const note of existingNotes) {
+            insertStmt.run(note.id, note.title || '', note.content || '');
+          }
+          
+          // 创建同步触发器
+          this.db.exec(`
+            CREATE TRIGGER IF NOT EXISTS notes_fts_insert AFTER INSERT ON notes BEGIN
+              INSERT INTO notes_fts(rowid, title, content) 
+              VALUES (new.id, new.title, new.content);
+            END
+          `);
+          
+          this.db.exec(`
+            CREATE TRIGGER IF NOT EXISTS notes_fts_update AFTER UPDATE ON notes BEGIN
+              UPDATE notes_fts SET title = new.title, content = new.content 
+              WHERE rowid = new.id;
+            END
+          `);
+          
+          this.db.exec(`
+            CREATE TRIGGER IF NOT EXISTS notes_fts_delete AFTER DELETE ON notes BEGIN
+              DELETE FROM notes_fts WHERE rowid = old.id;
+            END
+          `);
+          
+          console.log(`✅ FTS5全文搜索索引重建完成（已同步 ${existingNotes.length} 条笔记）`);
+        } catch (ftsError) {
+          console.error('重建FTS5索引失败:', ftsError);
+        }
+      }
+      
+      // ===== 笔记类型系统 (2025-11-11) =====
+      if (!notesColumnNames.includes('note_type')) {
+        console.log('添加note_type字段到notes表 (支持Markdown/白板等类型)...');
+        this.db.exec("ALTER TABLE notes ADD COLUMN note_type TEXT DEFAULT 'markdown'");
+        
+        // 迁移现有数据：将 category='whiteboard' 的笔记迁移为 note_type='whiteboard'
+        console.log('迁移现有白板笔记...');
+        this.db.exec("UPDATE notes SET note_type = 'whiteboard' WHERE category = 'whiteboard'");
+        
+        // 创建索引
+        this.db.exec('CREATE INDEX IF NOT EXISTS idx_notes_type ON notes(note_type)');
+        
+        console.log('笔记类型字段迁移完成');
+      }
       
       // 添加重复事项相关索引
       const repeatIndexes = [
@@ -253,6 +413,104 @@ class DatabaseManager {
       }
       
       console.log('重复事项字段迁移完成');
+      
+      // ===== 性能优化索引（2025-11-09 添加）=====
+      console.log('创建性能优化索引...');
+      
+      // 1. 笔记列表查询优化（最常用）
+      this.db.exec(`
+        CREATE INDEX IF NOT EXISTS idx_notes_list_updated 
+        ON notes(is_deleted, updated_at DESC, is_pinned DESC)
+      `);
+      
+      // 2. 置顶笔记快速查询
+      this.db.exec(`
+        CREATE INDEX IF NOT EXISTS idx_notes_pinned 
+        ON notes(is_deleted, is_pinned, updated_at DESC)
+      `);
+      
+      // 3. 已删除笔记查询优化
+      this.db.exec(`
+        CREATE INDEX IF NOT EXISTS idx_notes_deleted 
+        ON notes(is_deleted, deleted_at DESC)
+      `);
+      
+      // 4. 分类筛选优化
+      this.db.exec(`
+        CREATE INDEX IF NOT EXISTS idx_notes_category 
+        ON notes(category, is_deleted, updated_at DESC)
+      `);
+      
+      // 5. 创建时间索引
+      this.db.exec(`
+        CREATE INDEX IF NOT EXISTS idx_notes_created 
+        ON notes(is_deleted, created_at DESC)
+      `);
+      
+      console.log('✅ 性能索引创建完成');
+      
+      // 6. FTS5 全文搜索
+      try {
+        const ftsTables = this.db.prepare(
+          "SELECT name FROM sqlite_master WHERE type='table' AND name='notes_fts'"
+        ).all();
+        
+        if (ftsTables.length === 0) {
+          console.log('创建 FTS5 全文搜索引擎...');
+          
+          this.db.exec(`
+            CREATE VIRTUAL TABLE notes_fts USING fts5(
+              title, 
+              content, 
+              content=notes, 
+              content_rowid=id,
+              tokenize='unicode61 remove_diacritics 1'
+            )
+          `);
+          
+          // 同步现有数据
+          const existingNotes = this.db.prepare('SELECT id, title, content FROM notes').all();
+          const insertStmt = this.db.prepare(
+            'INSERT INTO notes_fts(rowid, title, content) VALUES (?, ?, ?)'
+          );
+          
+          for (const note of existingNotes) {
+            insertStmt.run(note.id, note.title || '', note.content || '');
+          }
+          
+          // 创建同步触发器
+          this.db.exec(`
+            CREATE TRIGGER IF NOT EXISTS notes_fts_insert AFTER INSERT ON notes BEGIN
+              INSERT INTO notes_fts(rowid, title, content) 
+              VALUES (new.id, new.title, new.content);
+            END
+          `);
+          
+          this.db.exec(`
+            CREATE TRIGGER IF NOT EXISTS notes_fts_update AFTER UPDATE ON notes BEGIN
+              UPDATE notes_fts SET title = new.title, content = new.content 
+              WHERE rowid = new.id;
+            END
+          `);
+          
+          this.db.exec(`
+            CREATE TRIGGER IF NOT EXISTS notes_fts_delete AFTER DELETE ON notes BEGIN
+              DELETE FROM notes_fts WHERE rowid = old.id;
+            END
+          `);
+          
+          console.log(`✅ FTS5 全文搜索引擎创建完成（已同步 ${existingNotes.length} 条笔记）`);
+        } else {
+          console.log('FTS5 全文搜索引擎已存在');
+        }
+      } catch (ftsError) {
+        console.warn('FTS5 创建失败（不影响应用）:', ftsError.message);
+      }
+      
+      // 分析表优化查询计划
+      this.db.exec('ANALYZE notes');
+      console.log('✅ 数据库性能优化完成');
+      
     } catch (error) {
       console.error('数据库迁移失败:', error);
       // 不抛出错误，允许应用继续运行
@@ -302,6 +560,93 @@ class DatabaseManager {
     } catch (error) {
       console.error('数据库备份失败:', error);
       throw error;
+    }
+  }
+
+  /**
+   * 修复损坏的数据库
+   * 处理 SQLITE_CORRUPT_VTAB 等错误
+   */
+  async repairDatabase() {
+    try {
+      console.log('🔧 开始修复数据库...');
+      
+      if (!this.db) {
+        throw new Error('数据库未初始化');
+      }
+
+      const results = {
+        walCheckpoint: false,
+        ftsRebuild: false,
+        vacuum: false,
+        analyze: false
+      };
+
+      // 1. 执行 WAL checkpoint
+      try {
+        console.log('  🔄 执行 WAL checkpoint...');
+        this.db.pragma('wal_checkpoint(TRUNCATE)');
+        results.walCheckpoint = true;
+        console.log('  ✅ WAL checkpoint 完成');
+      } catch (error) {
+        console.error('  ⚠️  WAL checkpoint 失败:', error.message);
+      }
+
+      // 2. 重建 FTS5 虚拟表
+      try {
+        console.log('  🔨 重建 FTS5 虚拟表...');
+        
+        const ftsExists = this.db.prepare(`
+          SELECT name FROM sqlite_master 
+          WHERE type='table' AND name='notes_fts'
+        `).get();
+
+        if (ftsExists) {
+          this.db.exec('DROP TABLE IF EXISTS notes_fts');
+          
+          this.db.exec(`
+            CREATE VIRTUAL TABLE notes_fts USING fts5(
+              content,
+              content='notes',
+              content_rowid='id',
+              tokenize='porter unicode61'
+            )`);
+          
+          this.db.exec('INSERT INTO notes_fts(notes_fts) VALUES(\'rebuild\')');
+          
+          results.ftsRebuild = true;
+          console.log('  ✅ FTS5 表重建完成');
+        }
+      } catch (error) {
+        console.error('  ⚠️  FTS5 重建失败:', error.message);
+      }
+
+      // 3. 优化数据库
+      try {
+        console.log('  ⚡ 执行 VACUUM...');
+        this.db.exec('VACUUM');
+        results.vacuum = true;
+        console.log('  ✅ VACUUM 完成');
+      } catch (error) {
+        console.error('  ⚠️  VACUUM 失败:', error.message);
+      }
+
+      // 4. 分析数据库
+      try {
+        console.log('  📊 执行 ANALYZE...');
+        this.db.exec('ANALYZE');
+        results.analyze = true;
+        console.log('  ✅ ANALYZE 完成');
+      } catch (error) {
+        console.error('  ⚠️  ANALYZE 失败:', error.message);
+      }
+
+      console.log('✅ 数据库修复完成');
+      return { success: true, results };
+      
+    } catch (error) {
+      console.error('❌ 数据库修复失败:', error);
+      return { success: false, error: error.message };
     }
   }
 

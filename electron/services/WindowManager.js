@@ -9,8 +9,10 @@ class WindowManager extends EventEmitter {
     super();
     this.settingsService = settingsService;
     this.windows = new Map(); // 存储所有窗口
+    this.noteWindows = new Map(); // 存储笔记ID到窗口ID的映射
     this.mainWindow = null;
     this.floatingWindow = null;
+    this.quickInputWindow = null;
   }
 
   /**
@@ -162,6 +164,96 @@ class WindowManager extends EventEmitter {
   }
 
   /**
+   * 创建快速输入窗口
+   */
+  async createQuickInputWindow() {
+    try {
+      // 如果窗口已存在，直接显示
+      if (this.quickInputWindow && !this.quickInputWindow.isDestroyed()) {
+        this.quickInputWindow.focus();
+        return this.quickInputWindow;
+      }
+
+      // 获取鼠标位置附近的显示器
+      const cursorPoint = screen.getCursorScreenPoint();
+      const activeDisplay = screen.getDisplayNearestPoint(cursorPoint);
+      
+      // 计算窗口位置（屏幕中央）
+      const { width: screenWidth, height: screenHeight } = activeDisplay.workAreaSize;
+      const { x: screenX, y: screenY } = activeDisplay.workArea;
+      const windowWidth = 600;
+      const windowHeight = 400;
+      const x = screenX + Math.round((screenWidth - windowWidth) / 2);
+      const y = screenY + Math.round((screenHeight - windowHeight) / 2);
+
+      this.quickInputWindow = new BrowserWindow({
+        width: windowWidth,
+        height: windowHeight,
+        x,
+        y,
+        minWidth: 400,
+        minHeight: 300,
+        maxWidth: 800,
+        maxHeight: 600,
+        show: false,
+        frame: false,
+        transparent: true,
+        alwaysOnTop: true,
+        skipTaskbar: true,
+        resizable: true,
+        movable: true,
+        webPreferences: {
+          nodeIntegration: false,
+          contextIsolation: true,
+          preload: path.join(__dirname, '../preload.js')
+        }
+      });
+
+      // 存储窗口引用
+      this.windows.set('quickInput', this.quickInputWindow);
+
+      // 加载快速输入页面
+      if (isDev) {
+        await this.quickInputWindow.loadURL('http://localhost:5174/#/quick-input');
+      } else {
+        await this.quickInputWindow.loadFile(path.join(__dirname, '../../dist/index.html'), {
+          hash: 'quick-input'
+        });
+      }
+
+      // 设置窗口事件
+      this.quickInputWindow.on('closed', () => {
+        this.quickInputWindow = null;
+        this.windows.delete('quickInput');
+        this.emit('quick-input-window-closed');
+      });
+
+      // 失去焦点时隐藏窗口
+      this.quickInputWindow.on('blur', () => {
+        if (this.quickInputWindow && !this.quickInputWindow.isDestroyed()) {
+          setTimeout(() => {
+            if (this.quickInputWindow && !this.quickInputWindow.isDestroyed() && !this.quickInputWindow.isFocused()) {
+              this.quickInputWindow.hide();
+            }
+          }, 200);
+        }
+      });
+
+      this.quickInputWindow.once('ready-to-show', () => {
+        this.quickInputWindow.show();
+        this.quickInputWindow.focus();
+        this.emit('quick-input-window-ready', this.quickInputWindow);
+      });
+
+      console.log('快速输入窗口创建成功');
+      return this.quickInputWindow;
+    } catch (error) {
+      console.error('创建快速输入窗口失败:', error);
+      throw error;
+    }
+  }
+
+  /**
    * 创建独立笔记窗口
    */
   async createNoteWindow(noteId) {
@@ -198,9 +290,32 @@ class WindowManager extends EventEmitter {
         closable: true
       });
 
+      // 处理新窗口打开请求（阻止外部链接在新窗口中打开）
+      noteWindow.webContents.setWindowOpenHandler(({ url }) => {
+        console.log('[NoteWindow] 拦截新窗口请求:', url)
+        
+        // 如果是 Excalidraw 素材库相关的 URL，在默认浏览器中打开
+        if (url.includes('excalidraw.com') || url.includes('libraries.excalidraw.com')) {
+          console.log('[NoteWindow] 在外部浏览器中打开 Excalidraw 链接')
+          shell.openExternal(url)
+          return { action: 'deny' }
+        }
+        
+        // 其他外部链接也在浏览器中打开
+        if (url.startsWith('http://') || url.startsWith('https://')) {
+          console.log('[NoteWindow] 在外部浏览器中打开链接:', url)
+          shell.openExternal(url)
+          return { action: 'deny' }
+        }
+        
+        // 阻止所有其他新窗口
+        return { action: 'deny' }
+      })
+
       // 生成窗口ID
       const windowId = `note-${noteId}-${Date.now()}`;
       this.windows.set(windowId, noteWindow);
+      this.noteWindows.set(noteId, windowId);
       
       // 加载独立窗口页面并传递笔记ID
       if (isDev) {
@@ -212,8 +327,44 @@ class WindowManager extends EventEmitter {
       }
 
       // 设置窗口事件
+      noteWindow.on('close', async (event) => {
+        // 阻止窗口立即关闭
+        event.preventDefault();
+        
+        try {
+          console.log('笔记窗口关闭，执行保存前操作');
+          
+          // 方法1: 使用 executeJavaScript 直接在渲染进程中执行保存
+          await noteWindow.webContents.executeJavaScript(`
+            (async () => {
+              console.log('[窗口关闭] 开始执行保存');
+              // 触发保存事件
+              const saveEvent = new CustomEvent('standalone-window-save');
+              window.dispatchEvent(saveEvent);
+              // 等待保存完成
+              await new Promise(resolve => setTimeout(resolve, 1500));
+              console.log('[窗口关闭] 保存完成');
+              return true;
+            })()
+          `);
+          
+          console.log('保存执行完成，准备关闭窗口');
+          
+          // 短暂延迟确保保存操作完全完成
+          await new Promise(resolve => setTimeout(resolve, 500));
+          
+        } catch (error) {
+          console.error('窗口关闭时保存失败:', error);
+        } finally {
+          // 移除事件监听器，允许窗口真正关闭
+          noteWindow.removeAllListeners('close');
+          noteWindow.close();
+        }
+      });
+      
       noteWindow.on('closed', () => {
         this.windows.delete(windowId);
+        this.noteWindows.delete(noteId);
       });
 
       // 添加页面加载失败的错误处理
@@ -571,6 +722,14 @@ class WindowManager extends EventEmitter {
    */
   getAllWindows() {
     return Array.from(this.windows.values());
+  }
+
+  isNoteOpenInWindow(noteId) {
+    return this.noteWindows.has(noteId);
+  }
+
+  getNoteWindowId(noteId) {
+    return this.noteWindows.get(noteId);
   }
 
   /**

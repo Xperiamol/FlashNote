@@ -6,6 +6,7 @@ const crypto = require('crypto')
 class ImageService {
   constructor() {
     this.imagesDir = path.join(app.getPath('userData'), 'images')
+    this.whiteboardDir = path.join(this.imagesDir, 'whiteboard')
     this.ensureImagesDirectory()
   }
 
@@ -13,6 +14,9 @@ class ImageService {
   ensureImagesDirectory() {
     if (!fs.existsSync(this.imagesDir)) {
       fs.mkdirSync(this.imagesDir, { recursive: true })
+    }
+    if (!fs.existsSync(this.whiteboardDir)) {
+      fs.mkdirSync(this.whiteboardDir, { recursive: true })
     }
   }
 
@@ -54,9 +58,21 @@ class ImageService {
 
   // 获取图片的完整路径
   getImagePath(relativePath) {
+    // 移除可能的前导斜杠
+    relativePath = relativePath.replace(/^\/+/, '')
+    
+    // 处理 images/ 前缀
     if (relativePath.startsWith('images/')) {
-      return path.join(this.imagesDir, relativePath.replace('images/', ''))
+      relativePath = relativePath.substring(7) // 移除 "images/"
     }
+    
+    // 处理白板图片路径
+    if (relativePath.startsWith('whiteboard/')) {
+      // whiteboard/xxx.png -> userData/images/whiteboard/xxx.png
+      return path.join(this.imagesDir, relativePath)
+    }
+    
+    // 普通图片：xxx.png -> userData/images/xxx.png
     return path.join(this.imagesDir, relativePath)
   }
 

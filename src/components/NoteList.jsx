@@ -19,7 +19,8 @@ import {
   Fade,
   Collapse,
   CircularProgress,
-  Checkbox
+  Checkbox,
+  useTheme
 } from '@mui/material'
 import {
   PushPin as PinIcon,
@@ -29,12 +30,16 @@ import {
   Search as SearchIcon,
   Clear as ClearIcon,
   Note as NoteIcon,
+  Brush as WhiteboardIcon,
   Restore as RestoreIcon,
-  DeleteForever as DeleteForeverIcon
+  DeleteForever as DeleteForeverIcon,
+  CheckCircle as TodoIcon,
+  OpenInNew as OpenInNewIcon
 } from '@mui/icons-material'
 import { useStore } from '../store/useStore'
 import { formatDistanceToNow } from 'date-fns'
 import { zhCN as dateFnsZhCN } from 'date-fns/locale/zh-CN'
+import { createTodo } from '../api/todoAPI'
 import { useMultiSelect } from '../hooks/useMultiSelect'
 import { useSearch } from '../hooks/useSearch'
 import { useSearchManager } from '../hooks/useSearchManager'
@@ -51,8 +56,10 @@ const {
 import MultiSelectToolbar from './MultiSelectToolbar'
 import { createDragHandler } from '../utils/DragManager'
 import { useDragAnimation } from './DragAnimationProvider'
+import { ANIMATIONS, createTransitionString } from '../utils/animationConfig'
 
 const NoteList = ({ showDeleted = false, onMultiSelectChange, onMultiSelectRefChange }) => {
+  const theme = useTheme()
   const {
     notes,
     selectedNoteId,
@@ -230,6 +237,65 @@ const NoteList = ({ showDeleted = false, onMultiSelectChange, onMultiSelectRefCh
     }
   }
 
+  // 在独立窗口打开笔记
+  const handleOpenStandalone = async () => {
+    if (!selectedNote) return
+    
+    try {
+      await window.electronAPI.createNoteWindow(selectedNote.id)
+      handleMenuClose()
+    } catch (error) {
+      console.error('打开独立窗口失败:', error)
+    }
+  }
+
+  // 转换笔记为待办事项
+  const handleConvertToTodo = async () => {
+    if (!selectedNote) return
+
+    try {
+      // 从笔记内容中提取第一行作为待办标题
+      let content = '未命名待办'
+      let description = ''
+      
+      if (selectedNote.content) {
+        const lines = selectedNote.content.trim().split('\n').filter(line => line.trim())
+        if (lines.length > 0) {
+          content = lines[0].replace(/^#+\s*/, '').trim() // 移除 Markdown 标题符号
+          if (lines.length > 1) {
+            description = lines.slice(1).join('\n').trim()
+          }
+        }
+      }
+
+      // 创建待办事项 - 注意：TodoService 使用 content 字段而不是 title
+      const todoData = {
+        content: content.substring(0, 200), // 限制内容长度
+        description: description || selectedNote.content,
+        is_important: false,
+        is_urgent: false,
+        tags: '', // 可以根据笔记标签设置
+        due_date: null,
+        item_type: 'todo'
+      }
+
+      const result = await createTodo(todoData)
+      
+      if (result) {
+        // 删除原笔记
+        await deleteNote(selectedNote.id)
+        
+        // 显示成功提示
+        console.log('已转换为待办事项:', result)
+      }
+      
+      handleMenuClose()
+    } catch (error) {
+      console.error('转换为待办失败:', error)
+      alert('转换失败: ' + error.message)
+    }
+  }
+
   // 批量操作处理函数
   const handleBatchRestore = async (selectedIds) => {
     if (selectedIds.length === 0) return
@@ -292,8 +358,20 @@ const NoteList = ({ showDeleted = false, onMultiSelectChange, onMultiSelectRefCh
     }
   }
 
-  const getPreviewText = (content) => {
+  const getPreviewText = (content, noteType) => {
     if (!content) return '空笔记'
+    
+    // Handle whiteboard notes specially
+    if (noteType === 'whiteboard') {
+      try {
+        const whiteboardData = JSON.parse(content)
+        return `白板 (${whiteboardData.elements?.length || 0} 个元素)`
+      } catch (error) {
+        return '白板笔记'
+      }
+    }
+    
+    // Handle markdown notes normally
     return content.replace(/[#*`\n]/g, '').substring(0, 100)
   }
 
@@ -384,12 +462,12 @@ const NoteList = ({ showDeleted = false, onMultiSelectChange, onMultiSelectRefCh
           in={filtersVisible} 
           timeout={200}
           easing={{
-            enter: 'cubic-bezier(0.25, 0.46, 0.45, 0.94)',
+            enter: ANIMATIONS.dragTransition.easing,
             exit: 'cubic-bezier(0.55, 0.06, 0.68, 0.19)'
           }}
           sx={{
             '& .MuiCollapse-wrapper': {
-              transition: 'transform 0.2s cubic-bezier(0.25, 0.46, 0.45, 0.94)'
+              transition: createTransitionString(ANIMATIONS.dragTransition)
             }
           }}
         >
@@ -462,7 +540,7 @@ const NoteList = ({ showDeleted = false, onMultiSelectChange, onMultiSelectRefCh
         )}
         
         {/* 笔记内容 */}
-        <Fade in={!isTransitioning} timeout={300}>
+        <Fade in={!isTransitioning} timeout={200}>
           <Box>
             {filteredNotes.length === 0 ? (
               <Box sx={{ p: 4, textAlign: 'center' }}>
@@ -506,9 +584,9 @@ const NoteList = ({ showDeleted = false, onMultiSelectChange, onMultiSelectRefCh
                           py: 1.5,
                           pr: multiSelect.isMultiSelectMode ? 2 : 6,
                           '&.Mui-selected': {
-                            backgroundColor: 'primary.light',
+                            backgroundColor: theme.palette.primary.main + '1A', // 10% 透明度
                             '&:hover': {
-                              backgroundColor: 'primary.light'
+                              backgroundColor: theme.palette.primary.main + '1A'
                             }
                           },
                           ...(multiSelect.isMultiSelectMode && multiSelect.isSelected(note.id) && {
@@ -531,6 +609,8 @@ const NoteList = ({ showDeleted = false, onMultiSelectChange, onMultiSelectRefCh
                         <ListItemIcon sx={{ minWidth: 36 }}>
                           {note.is_pinned ? (
                             <PinIcon color="primary" fontSize="small" />
+                          ) : note.note_type === 'whiteboard' ? (
+                            <WhiteboardIcon color="action" fontSize="small" />
                           ) : (
                             <NoteIcon color="action" fontSize="small" />
                           )}
@@ -574,9 +654,9 @@ const NoteList = ({ showDeleted = false, onMultiSelectChange, onMultiSelectRefCh
                                   display: 'block'
                                 }}
                               >
-                                {getPreviewText(note.content)}
-                              </Typography>
-                              <Typography component="span" variant="caption" color="text.secondary" sx={{ display: 'block' }}>
+                              {getPreviewText(note.content, note.note_type)}
+                            </Typography>
+                            <Typography component="span" variant="caption" color="text.secondary" sx={{ display: 'block' }}>
                                 {formatDate(note.updated_at)}
                               </Typography>
                             </Box>
@@ -640,6 +720,19 @@ const NoteList = ({ showDeleted = false, onMultiSelectChange, onMultiSelectRefCh
                 {selectedNote?.is_pinned ? '取消置顶' : '置顶笔记'}
               </ListItemText>
             </MenuItem>,
+            <MenuItem key="standalone" onClick={handleOpenStandalone}>
+              <ListItemIcon>
+                <OpenInNewIcon fontSize="small" />
+              </ListItemIcon>
+              <ListItemText>在独立窗口打开</ListItemText>
+            </MenuItem>,
+            <MenuItem key="convert" onClick={handleConvertToTodo}>
+              <ListItemIcon>
+                <TodoIcon fontSize="small" />
+              </ListItemIcon>
+              <ListItemText>转换为待办事项</ListItemText>
+            </MenuItem>,
+            <Divider key="divider" />,
             <MenuItem key="delete" onClick={handleDelete}>
               <ListItemIcon>
                 <DeleteIcon fontSize="small" />

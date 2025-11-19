@@ -1,6 +1,8 @@
 import React from 'react'
 import RocketLaunchRounded from '@mui/icons-material/RocketLaunchRounded'
 import ExtensionRounded from '@mui/icons-material/ExtensionRounded'
+import AutoAwesome from '@mui/icons-material/AutoAwesome'
+import ShuffleRounded from '@mui/icons-material/ShuffleRounded'
 import { Box } from '@mui/material'
 
 const DEFAULT_ICON = <ExtensionRounded fontSize="small" />
@@ -9,7 +11,14 @@ const BUILTIN_ICON_MAP = {
   rocket: RocketLaunchRounded,
   'rocket-launch': RocketLaunchRounded,
   plugin: ExtensionRounded,
-  extension: ExtensionRounded
+  extension: ExtensionRounded,
+  sparkles: AutoAwesome,
+  ai: AutoAwesome,
+  'auto-awesome': AutoAwesome,
+  dice: ShuffleRounded,
+  'dice-one': ShuffleRounded,
+  'dice-1': ShuffleRounded,
+  shuffle: ShuffleRounded
 }
 
 /**

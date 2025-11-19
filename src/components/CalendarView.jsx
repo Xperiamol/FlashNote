@@ -17,7 +17,9 @@ import {
   RadioButtonUnchecked as RadioButtonUncheckedIcon
 } from '@mui/icons-material';
 import { useTheme } from '@mui/material/styles';
+import { ANIMATIONS, createAnimationString, createTransitionString, GREEN_SWEEP_KEYFRAMES } from '../utils/animationConfig';
 import { fetchTodos, toggleTodoComplete } from '../api/todoAPI';
+import useTodoDrag from '../hooks/useTodoDrag';
 
 const CalendarView = ({ currentDate, onDateChange, onTodoSelect, selectedDate, onSelectedDateChange, refreshToken = 0, showCompleted = false, onShowCompletedChange, onTodoUpdated }) => {
   const theme = useTheme();
@@ -25,6 +27,21 @@ const CalendarView = ({ currentDate, onDateChange, onTodoSelect, selectedDate, o
   const [isLoading, setIsLoading] = useState(false);
   const [pendingComplete, setPendingComplete] = useState(new Set());
   const [celebratingTodos, setCelebratingTodos] = useState(new Set());
+  
+  // 使用拖放 hook
+  const {
+    handleDragStart,
+    handleDragEnd,
+    handleDragOver,
+    handleDragLeave,
+    handleDropDate,
+    isDragOver
+  } = useTodoDrag(() => {
+    loadTodos();
+    if (onTodoUpdated) {
+      onTodoUpdated();
+    }
+  });
 
   // 获取当月的所有Todo
   const loadTodos = async () => {
@@ -84,7 +101,7 @@ const CalendarView = ({ currentDate, onDateChange, onTodoSelect, selectedDate, o
               return newSet;
             });
           }, 1000);
-        }, 300);
+        }, 150);
         
         // 清除待完成状态
         setPendingComplete(prev => {
@@ -280,13 +297,20 @@ const CalendarView = ({ currentDate, onDateChange, onTodoSelect, selectedDate, o
             return (
               <Box
                   key={index}
+                  onDragOver={(e) => handleDragOver(e, dayInfo.date)}
+                  onDragLeave={handleDragLeave}
+                  onDrop={(e) => handleDropDate(e, dayInfo.date)}
                   sx={{
                     borderRight: index % 7 < 6 ? `1px solid ${theme.palette.divider}` : 'none',
                     borderBottom: index < calendarDays.length - 7 ? `1px solid ${theme.palette.divider}` : 'none',
                     minHeight: '100px',
                     position: 'relative',
                     overflow: 'hidden', // 防止内容溢出
-                    minWidth: 0 // 确保可以收缩
+                    minWidth: 0, // 确保可以收缩
+                    ...(isDragOver(dayInfo.date) && {
+                      backgroundColor: theme.palette.primary.light + '30',
+                      transition: 'background-color 0.2s ease'
+                    })
                   }}
                 >
                 <Box
@@ -315,7 +339,7 @@ const CalendarView = ({ currentDate, onDateChange, onTodoSelect, selectedDate, o
                     display: 'flex',
                     flexDirection: 'column',
                     cursor: 'pointer',
-                    transition: 'all 0.2s ease-in-out',
+                    transition: createTransitionString(ANIMATIONS.button),
                     '&:hover': {
                       backgroundColor: theme.palette.action.hover
                     },
@@ -391,9 +415,12 @@ const CalendarView = ({ currentDate, onDateChange, onTodoSelect, selectedDate, o
                     }}
                   >
                     {todosToDisplay.map((todo) => (
-                      <Fade key={todo.id} in timeout={300}>
+                      <Fade key={todo.id} in timeout={200}>
                         <Tooltip title={todo.content} placement="top">
                           <Box
+                            draggable
+                            onDragStart={(e) => handleDragStart(e, todo)}
+                            onDragEnd={handleDragEnd}
                             sx={{
                               display: 'flex',
                               alignItems: 'center',
@@ -404,7 +431,7 @@ const CalendarView = ({ currentDate, onDateChange, onTodoSelect, selectedDate, o
                               cursor: 'pointer',
                               position: 'relative',
                               overflow: 'hidden',
-                              transition: 'all 0.2s ease-in-out',
+                              transition: createTransitionString(ANIMATIONS.listItem),
                               minHeight: '22px', // 固定最小高度
                               '&:hover': {
                                 backgroundColor: `${getTodoPriorityColor(todo)}40`, // 颜色变暗
@@ -422,18 +449,11 @@ const CalendarView = ({ currentDate, onDateChange, onTodoSelect, selectedDate, o
                                   bottom: 0,
                                   background: 'rgba(76, 175, 80, 0.4)',
                                   transform: 'translateX(-100%)',
-                                  animation: 'greenSweep 0.3s cubic-bezier(0.25, 0.46, 0.45, 0.94) forwards',
+                                  animation: createAnimationString(ANIMATIONS.completion),
                                   zIndex: 1,
                                   pointerEvents: 'none'
                                 },
-                                '@keyframes greenSweep': {
-                                  '0%': {
-                                    transform: 'translateX(-100%)'
-                                  },
-                                  '100%': {
-                                    transform: 'translateX(0%)'
-                                  }
-                                }
+                                ...GREEN_SWEEP_KEYFRAMES
                               })
                             }}
                           >
@@ -451,7 +471,7 @@ const CalendarView = ({ currentDate, onDateChange, onTodoSelect, selectedDate, o
                                 mr: 0.5,
                                 p: 0,
                                 position: 'relative',
-                                transition: 'all 0.3s ease',
+                                transition: createTransitionString(ANIMATIONS.stateChange),
                                 zIndex: 2,
                                 ...(pendingComplete.has(todo.id) && {
                                   backgroundColor: 'warning.light',
@@ -468,7 +488,7 @@ const CalendarView = ({ currentDate, onDateChange, onTodoSelect, selectedDate, o
                                   sx={{ 
                                     color: 'warning.main',
                                     fontSize: 16,
-                                    animation: 'pulse 1s infinite'
+                                    animation: createAnimationString(ANIMATIONS.pulse)
                                   }} 
                                 />
                               ) : celebratingTodos.has(todo.id) ? (

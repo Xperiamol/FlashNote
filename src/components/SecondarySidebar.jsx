@@ -9,8 +9,20 @@ import {
   ListItemButton,
   ListItemText,
   Stack,
-  Chip
+  Chip,
+  ListItemIcon
 } from '@mui/material';
+import {
+  Settings as SettingsIcon,
+  Palette as PaletteIcon,
+  GetApp as ImportIcon,
+  Keyboard as KeyboardIcon,
+  Cloud as CloudIcon,
+  Psychology as AIIcon,
+  Memory as MemoryIcon,
+  Wifi as WifiIcon,
+  Info as InfoIcon
+} from '@mui/icons-material';
 import { useStore } from '../store/useStore';
 import NoteList from './NoteList';
 import TodoList from './TodoList';
@@ -24,6 +36,8 @@ const SecondarySidebar = ({ open, onClose, width = 320, onTodoSelect, onViewMode
   const pluginStoreCategories = useStore((state) => state.pluginStoreCategories);
   const setPluginStoreCategory = useStore((state) => state.setPluginStoreCategory);
   const setPluginStoreTab = useStore((state) => state.setPluginStoreTab);
+  const settingsTabValue = useStore((state) => state.settingsTabValue);
+  const setSettingsTabValue = useStore((state) => state.setSettingsTabValue);
 
   // 根据当前视图渲染不同的侧边栏内容
   const renderSidebarContent = () => {
@@ -47,13 +61,6 @@ const SecondarySidebar = ({ open, onClose, width = 320, onTodoSelect, onViewMode
         );
       case 'calendar':
         return <MyDayPanel selectedDate={selectedDate} onTodoSelect={onTodoSelect} refreshToken={calendarRefreshTrigger} onTodoUpdated={onTodoUpdated} />;
-      case 'files':
-        return (
-          <Box sx={{ p: 2 }}>
-            {/* 文件管理的侧边栏内容 */}
-            <div>文件夹树</div>
-          </Box>
-        );
       case 'plugins': {
         const categories = pluginStoreCategories && pluginStoreCategories.length > 0
           ? [{ id: 'all', name: '全部插件' }, ...pluginStoreCategories]
@@ -118,15 +125,52 @@ const SecondarySidebar = ({ open, onClose, width = 320, onTodoSelect, onViewMode
           </Box>
         )
       }
-      case 'vocabulary':
+      case 'settings': {
+        const settingsCategories = [
+          { id: 0, name: '通用设置', icon: <SettingsIcon /> },
+          { id: 1, name: '外观设置', icon: <PaletteIcon /> },
+          { id: 2, name: '快捷键设置', icon: <KeyboardIcon /> },
+          { id: 3, name: 'AI 功能', icon: <AIIcon /> },
+          { id: 4, name: 'MemoryEngine', icon: <MemoryIcon /> },
+          { id: 5, name: '云同步', icon: <CloudIcon /> },
+          { id: 6, name: '网络代理', icon: <WifiIcon /> },
+          { id: 7, name: '数据管理', icon: <ImportIcon /> },
+          { id: 8, name: '关于', icon: <InfoIcon /> }
+        ]
+
         return (
-          <Box sx={{ p: 2 }}>
-            {/* 单词本的侧边栏内容 */}
-            <div>单词本列表</div>
+          <Box sx={{ p: 2, display: 'flex', flexDirection: 'column', height: '100%' }}>
+            <Typography variant="h6" sx={{ mb: 2 }}>
+              设置
+            </Typography>
+
+            <List dense disablePadding sx={{ overflowY: 'auto' }}>
+              {settingsCategories.map((category) => (
+                <ListItemButton
+                  key={category.id}
+                  selected={settingsTabValue === category.id}
+                  onClick={() => setSettingsTabValue(category.id)}
+                  sx={{
+                    borderRadius: 1,
+                    mb: 0.5
+                  }}
+                >
+                  <ListItemIcon sx={{ minWidth: 40 }}>
+                    {category.icon}
+                  </ListItemIcon>
+                  <ListItemText
+                    primary={category.name}
+                    primaryTypographyProps={{
+                      fontSize: 14,
+                      fontWeight: settingsTabValue === category.id ? 600 : 400
+                    }}
+                  />
+                </ListItemButton>
+              ))}
+            </List>
           </Box>
-        );
-      case 'settings':
-        return null; // 设置页面不需要侧边栏
+        )
+      }
       default:
         return null;
     }
@@ -146,8 +190,9 @@ const SecondarySidebar = ({ open, onClose, width = 320, onTodoSelect, onViewMode
         height: '100%',
         overflow: 'hidden',
         flexShrink: 0,
-        zIndex: 50, // 确保在一级侧边栏下方
-        transition: theme.transitions.create(['width', 'minWidth', 'maxWidth'], {
+        zIndex: 50,
+        opacity: shouldShow ? 1 : 0,
+        transition: theme.transitions.create(['width', 'minWidth', 'maxWidth', 'opacity'], {
           easing: theme.transitions.easing.easeInOut,
           duration: theme.transitions.duration.standard,
         }),
@@ -156,8 +201,6 @@ const SecondarySidebar = ({ open, onClose, width = 320, onTodoSelect, onViewMode
       <Box
         sx={{
           width: width,
-          minWidth: width,
-          maxWidth: width,
           height: '100%',
           backgroundColor: 'background.paper',
           borderRight: 1,
@@ -165,12 +208,6 @@ const SecondarySidebar = ({ open, onClose, width = 320, onTodoSelect, onViewMode
           display: 'flex',
           flexDirection: 'column',
           overflow: 'hidden',
-          flexShrink: 0,
-          transform: shouldShow ? 'translateX(0)' : `translateX(-100%)`,
-          transition: theme.transitions.create(['transform'], {
-            easing: theme.transitions.easing.easeInOut,
-            duration: theme.transitions.duration.standard,
-          }),
         }}
       >
         {sidebarContent}

@@ -19,6 +19,7 @@ class CloudSyncService {
     // 同步配置
     this.config = {
       autoSync: true,
+      syncImages: false, // 图片同步开关，默认关闭(因为坚果云可能不稳定)
       conflictResolution: 'merge', // 'merge', 'local', 'remote'
       syncDeleted: true,
       encryptData: false
@@ -163,6 +164,24 @@ class CloudSyncService {
         console.log('冲突处理完成');
       }
       
+      // 7. 同步图片 (增量同步)
+      // 注意: 坚果云图片同步目前可能不稳定，如遇503错误属正常现象
+      let imagesSyncResult = null;
+      if (this.config.syncImages && this.imageSync && typeof this.imageSync.syncImages === 'function') {
+        try {
+          console.log('[图片同步] 开始同步图片...');
+          console.log('[图片同步] 提示: 坚果云服务器可能繁忙，如遇503错误会自动重试');
+          imagesSyncResult = await this.imageSync.syncImages();
+          console.log('[图片同步] 图片同步完成:', imagesSyncResult);
+        } catch (imageError) {
+          console.warn('[图片同步] 图片同步失败，但不影响主同步流程:', imageError.message);
+          console.warn('[图片同步] 提示: 如遇503错误，请稍后重试或等待坚果云服务恢复');
+          // 图片同步失败不影响主同步流程
+        }
+      } else if (!this.config.syncImages) {
+        console.log('[图片同步] 图片同步已禁用，如需启用请在设置中开启');
+      }
+      
       this.lastSyncTime = new Date();
       await this.saveConfig();
       
@@ -171,7 +190,8 @@ class CloudSyncService {
         timestamp: this.lastSyncTime,
         localChanges: mergeResult.localChanges.length,
         remoteChanges: mergeResult.remoteChanges.length,
-        conflicts: mergeResult.conflicts.length
+        conflicts: mergeResult.conflicts.length,
+        images: imagesSyncResult || { uploaded: 0, downloaded: 0, total: 0 }
       };
       
       this.emit('syncComplete', result);
@@ -189,6 +209,7 @@ class CloudSyncService {
 
   /**
    * 获取本地数据
+   * 注意：必须包含已删除的笔记(is_deleted=1)，否则删除状态无法同步到云端
    */
   async getLocalData() {
     const DatabaseManager = require('../dao/DatabaseManager');
@@ -196,7 +217,7 @@ class CloudSyncService {
     const db = dbManager.db; // 获取真正的数据库实例
     
     return {
-      notes: db.prepare('SELECT * FROM notes WHERE is_deleted = 0').all(),
+      notes: db.prepare('SELECT * FROM notes').all(), // 包含所有笔记，包括已删除的
       todos: db.prepare('SELECT * FROM todos').all(),
       settings: db.prepare('SELECT * FROM settings').all(),
       categories: db.prepare('SELECT * FROM categories').all(),
@@ -265,6 +286,7 @@ class CloudSyncService {
 
   /**
    * 合并单个数据表
+   * 正确处理软删除(is_deleted)标志的同步
    */
   async mergeTable(localItems, remoteItems, tableName) {
     const localChanges = [];
@@ -280,16 +302,60 @@ class CloudSyncService {
       const remoteItem = remoteMap.get(localItem.id);
       
       if (!remoteItem) {
-        // 本地新增项目
+        // 本地新增项目（包括新删除的项目）
         localChanges.push({
           type: 'create',
           table: tableName,
           data: localItem
         });
       } else {
-        // 比较更新时间
-        const localTime = new Date(localItem.updated_at || localItem.created_at);
-        const remoteTime = new Date(remoteItem.updated_at || remoteItem.created_at);
+        // 特别处理笔记的删除状态
+        if (tableName === 'notes') {
+          const localDeleted = localItem.is_deleted || 0;
+          const remoteDeleted = remoteItem.is_deleted || 0;
+          
+          // 删除状态不同，需要同步
+          if (localDeleted !== remoteDeleted) {
+            // 比较删除时间和更新时间，决定哪个版本更新
+            const localTime = new Date(localItem.deleted_at || localItem.updated_at || localItem.created_at);
+            const remoteTime = new Date(remoteItem.deleted_at || remoteItem.updated_at || remoteItem.created_at);
+            
+            if (localTime > remoteTime) {
+              // 本地版本更新（可能是删除或恢复操作）
+              console.log(`[同步] 笔记 ${localItem.id} 删除状态变化: local.is_deleted=${localDeleted}, remote.is_deleted=${remoteDeleted}, 使用本地版本`);
+              localChanges.push({
+                type: 'update',
+                table: tableName,
+                data: localItem
+              });
+            } else {
+              // 远程版本更新
+              console.log(`[同步] 笔记 ${remoteItem.id} 删除状态变化: local.is_deleted=${localDeleted}, remote.is_deleted=${remoteDeleted}, 使用远程版本`);
+              remoteChanges.push({
+                type: 'update',
+                table: tableName,
+                data: remoteItem
+              });
+            }
+            continue; // 已处理，跳过后续比较
+          }
+        }
+        
+        // 比较更新时间（对于笔记，也考虑deleted_at）
+        let localTime = new Date(localItem.updated_at || localItem.created_at);
+        let remoteTime = new Date(remoteItem.updated_at || remoteItem.created_at);
+        
+        // 如果是笔记且已删除，使用deleted_at作为时间参考
+        if (tableName === 'notes') {
+          if (localItem.is_deleted && localItem.deleted_at) {
+            const deletedTime = new Date(localItem.deleted_at);
+            if (deletedTime > localTime) localTime = deletedTime;
+          }
+          if (remoteItem.is_deleted && remoteItem.deleted_at) {
+            const deletedTime = new Date(remoteItem.deleted_at);
+            if (deletedTime > remoteTime) remoteTime = deletedTime;
+          }
+        }
         
         // 考虑到时间精度问题，允许1秒的误差
         const timeDiff = Math.abs(localTime.getTime() - remoteTime.getTime());
@@ -340,7 +406,7 @@ class CloudSyncService {
    * 检查内容是否有差异
    */
   hasContentDifference(item1, item2) {
-    const excludeFields = ['updated_at', 'created_at'];
+    const excludeFields = ['updated_at', 'created_at', 'deleted_at']; // deleted_at也排除，因为已在时间比较中处理
     
     for (const key in item1) {
       if (!excludeFields.includes(key) && item1[key] !== item2[key]) {
@@ -446,6 +512,7 @@ class CloudSyncService {
 
   /**
    * 获取数据版本
+   * 注意：必须包含已删除的笔记，否则删除操作不会更新版本号
    */
   async getDataVersion() {
     const DatabaseManager = require('../dao/DatabaseManager');
@@ -454,7 +521,7 @@ class CloudSyncService {
     
     const result = db.prepare(`
       SELECT MAX(updated_at) as last_update FROM (
-        SELECT updated_at FROM notes WHERE is_deleted = 0
+        SELECT updated_at FROM notes
         UNION ALL
         SELECT updated_at FROM todos
         UNION ALL

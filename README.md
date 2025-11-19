@@ -26,6 +26,14 @@
 - **导入导出**：支持多种格式的数据迁移
 - **备份恢复**：自动备份，一键恢复
 
+### 📅 日历同步
+- **CalDAV 协议**：支持 iCloud、Nextcloud 等标准 CalDAV 服务
+- **Google Calendar**：OAuth 2.0 安全授权，无需密码
+- **双向同步**：待办事项与日历事件自动同步
+- **多设备协同**：通过日历服务实现多设备数据同步
+
+> 📖 查看 [日历同步完整指南](./docs/CALENDAR_SYNC_GUIDE.md)
+
 ## 🚀 快速开始
 
 ### 系统要求
@@ -73,8 +81,8 @@
 - **前端框架**：React + Vite
 - **桌面框架**：Electron
 - **数据库**：SQLite (better-sqlite3)
-- **UI组件**：自定义组件库
-- **状态管理**：React Context
+- **UI组件**：Material-UI
+- **状态管理**：Zustand
 
 ### 本地开发
 
@@ -98,6 +106,62 @@ npm run electron-dev
 ```bash
 # 构建前端
 npm run build
+
+# 打包Electron应用
+npm run electron-build
+```
+
+### 🔌 插件开发
+
+FlashNote 2.1+ 支持强大的插件系统，你可以创建自己的插件来扩展功能！
+
+#### 快速开始
+
+```javascript
+// 创建 plugins/examples/my-plugin/manifest.json 和 index.js
+runtime.onActivate(async () => {
+  runtime.registerCommand({
+    id: 'hello',
+    title: '打招呼'
+  }, async () => {
+    await runtime.notifications.show({
+      title: '你好！',
+      body: '欢迎使用 FlashNote 插件系统',
+      type: 'success'
+    })
+  })
+})
+```
+
+#### 插件文档
+
+- 📚 **[插件开发文档](./plugins/docs/README.md)** - 完整文档索引
+- 🚀 **[快速开始](./plugins/docs/QUICK_START.md)** - 5分钟创建第一个插件
+- 🎯 **[最佳实践](./plugins/docs/BEST_PRACTICES.md)** - 必读！开发规范和技巧
+- 📖 **[API 参考](./plugins/docs/API_REFERENCE.md)** - 完整的 Runtime API
+- 💡 **[示例插件](./plugins/examples/)** - 学习参考
+  - [random-note](./plugins/examples/random-note/) - 简单命令示例
+  - [ai-task-planner](./plugins/examples/ai-task-planner/) - 自定义窗口示例
+
+#### 插件特性
+
+- ✅ **安全沙箱**: 插件在独立 Worker 中运行
+- ✅ **权限系统**: 细粒度权限控制
+- ✅ **Runtime API**: 访问笔记、待办、标签等数据
+- ✅ **自定义 UI**: 创建 Dialog 窗口展示界面
+- ✅ **热重载**: 开发时无需重启应用
+- ✅ **本地开发**: 方便的本地调试工具
+
+开始创建你的第一个插件吧！查看 [开发者完整指南](./docs/DEVELOPMENT_GUIDE.md) 了解详情。
+
+### 相关文档
+
+- 📖 **[开发者指南](./docs/DEVELOPMENT_GUIDE.md)** - IPC API、UI Bridge、插件开发完整文档
+- 🗓️ **[日历同步指南](./docs/CALENDAR_SYNC_GUIDE.md)** - CalDAV 和 Google Calendar 配置
+- 📋 **[项目文档归档](./docs/PROJECT_ARCHIVE.md)** - PRD、技术架构、开发计划
+- 🔧 **[IPC API 指南](./IPC_API_GUIDE.md)** - IPC 通信机制详解
+- 🌐 **[代理配置指南](./PROXY_CONFIG_GUIDE.md)** - 网络代理设置
+- 🔌 **[插件开发文档](./plugins/docs/)** - 详细的插件 API 和示例
 
 # 打包Electron应用
 npm run electron-build

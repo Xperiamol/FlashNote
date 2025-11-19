@@ -1,5 +1,5 @@
 const NutCloudSyncService = require('./NutCloudSyncService');
-const OneDriveSyncService = require('./OneDriveSyncService');
+// const OneDriveSyncService = require('./OneDriveSyncService'); // 暂时禁用，需要配置Azure应用ID
 
 /**
  * 云同步管理器
@@ -13,7 +13,7 @@ class CloudSyncManager {
     
     // 注册可用的同步服务
     this.registerService('nutcloud', NutCloudSyncService);
-    this.registerService('onedrive', OneDriveSyncService);
+    // this.registerService('onedrive', OneDriveSyncService); // 暂时禁用，需要配置Azure应用ID
   }
 
   /**
@@ -93,13 +93,36 @@ class CloudSyncManager {
     }
 
     try {
+      const service = this.services.get(serviceName);
+      
+      // 如果服务已经启用且是同一个服务，只更新配置
+      if (this.activeService === serviceName && service.instance && service.instance.isEnabled) {
+        console.log(`更新 ${this.getDisplayName(serviceName)} 服务配置`);
+        
+        // 更新配置
+        service.instance.config = {
+          ...service.instance.config,
+          ...config
+        };
+        
+        // 保存配置到文件（调用服务实例的saveConfig方法）
+        await service.instance.saveConfig();
+        
+        console.log(`配置已保存:`, service.instance.config);
+        
+        return {
+          success: true,
+          message: `${this.getDisplayName(serviceName)} 配置已更新`,
+          service: serviceName
+        };
+      }
+
       // 停用当前服务
       if (this.activeService && this.activeService !== serviceName) {
         await this.disableCurrentService();
       }
 
       // 启用新服务
-      const service = this.services.get(serviceName);
       if (!service.instance) {
         service.instance = new service.ServiceClass();
         await service.instance.initialize();

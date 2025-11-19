@@ -75,7 +75,7 @@ export const DragAnimationProvider = ({ children }) => {
             isNearBoundary: false,
             boundaryPosition: null
           }));
-        }, 200);
+        }, 100);
         
         // 调用原始回调
         if (originalCallbacks.onDragEnd) {

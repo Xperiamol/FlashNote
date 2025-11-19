@@ -10,10 +10,14 @@ import {
   Popper,
   ClickAwayListener,
   InputAdornment,
-  IconButton
+  IconButton,
+  CircularProgress,
+  Tooltip,
+  Divider
 } from '@mui/material';
-import { Tag as TagIcon, Clear as ClearIcon } from '@mui/icons-material';
+import { Tag as TagIcon, Clear as ClearIcon, AutoAwesome as AiIcon, KeyboardArrowRight as RightArrowIcon, KeyboardArrowLeft as LeftArrowIcon } from '@mui/icons-material';
 import { parseTags, formatTags, validateTags, getTagColor } from '../utils/tagUtils';
+import { usePluginExtensions } from '../hooks/usePluginExtensions';
 
 /**
  * 标签输入组件
@@ -27,13 +31,15 @@ const TagInput = ({
   disabled = false,
   maxTags = 10,
   showSuggestions = true,
-  getSuggestions, // 新增：自定义获取建议的函数
+  getSuggestions, // 自定义获取建议的函数
   size = 'small',
   variant = 'outlined',
   fullWidth = true,
   error = false,
   helperText = '',
-  inline = false, // 新增：是否内嵌显示标签
+  inline = false, // 是否内嵌显示标签
+  noteContent = '', // 笔记内容，用于插件上下文
+  noteId = null, // 笔记ID，用于插件上下文
   sx = {}
 }) => {
   const [inputValue, setInputValue] = useState('');
@@ -42,9 +48,23 @@ const TagInput = ({
   const [showSuggestionList, setShowSuggestionList] = useState(false);
   const [selectedSuggestionIndex, setSelectedSuggestionIndex] = useState(-1);
   const [isLoading, setIsLoading] = useState(false);
+  const [executingExtension, setExecutingExtension] = useState(null); // 当前执行的扩展
+  const [isExpanded, setIsExpanded] = useState(false); // 标签是否展开
+  const [showScrollButtons, setShowScrollButtons] = useState(false); // 是否显示滚动按钮
+  const tagsContainerRef = useRef(null); // 标签容器引用
   
   const inputRef = useRef(null);
   const anchorRef = useRef(null);
+
+  // 加载 tag-input 扩展点的插件
+  const { extensions, loading: extensionsLoading, executeExtension } = usePluginExtensions(
+    'tag-input',
+    {
+      currentTags: tags,
+      noteContent,
+      noteId
+    }
+  );
   const suggestionTimeoutRef = useRef(null);
 
   // 初始化标签
@@ -205,12 +225,88 @@ const TagInput = ({
     inputRef.current?.focus();
   };
 
+  // 执行插件扩展命令
+  const handleExtensionClick = async (extension) => {
+    if (disabled || executingExtension) return;
+    
+    try {
+      console.log('[TagInput] 执行插件扩展:', extension);
+      setExecutingExtension(extension.commandId);
+      
+      const result = await executeExtension(extension, {
+        currentTags: tags,
+        noteContent,
+        noteId
+      });
+      
+      console.log('[TagInput] 插件返回结果:', result);
+      
+      // 处理返回的标签
+      if (result?.data?.allTags && Array.isArray(result.data.allTags)) {
+        const suggestedTags = result.data.allTags;
+        const allTags = [...new Set([...tags, ...suggestedTags])];
+        const limitedTags = allTags.slice(0, maxTags);
+        console.log('[TagInput] 合并后的标签:', limitedTags);
+        setTags(limitedTags);
+        onChange?.(formatTags(limitedTags));
+      }
+    } catch (error) {
+      console.error('[TagInput] 执行插件扩展失败:', error);
+    } finally {
+      setExecutingExtension(null);
+    }
+  };
+
+  // 处理标签容器的滚动
+  const handleTagsScroll = () => {
+    const container = tagsContainerRef.current;
+    if (container) {
+      setShowScrollButtons(container.scrollWidth > container.clientWidth);
+    }
+  };
+
+  // 标签滚动导航
+  const scrollTagsLeft = () => {
+    const container = tagsContainerRef.current;
+    if (container) {
+      container.scrollLeft -= 100; // 向左滚动100px
+    }
+  };
+
+  const scrollTagsRight = () => {
+    const container = tagsContainerRef.current;
+    if (container) {
+      container.scrollLeft += 100; // 向右滚动100px
+    }
+  };
+
+  // 监听标签容器尺寸变化
+  useEffect(() => {
+    const container = tagsContainerRef.current;
+    if (container) {
+      // 初始化滚动状态
+      handleTagsScroll();
+      
+      // 监听窗口大小变化和标签变化
+      const resizeObserver = new ResizeObserver(() => handleTagsScroll());
+      resizeObserver.observe(container);
+      
+      // 监听标签变化
+      handleTagsScroll();
+      
+      return () => {
+        resizeObserver.unobserve(container);
+      };
+    }
+  }, [tags]);
+
+
   return (
     <ClickAwayListener onClickAway={() => setShowSuggestionList(false)}>
       <Box sx={{ position: 'relative', ...sx }}>
         {/* 非内嵌模式：标签显示在输入框上方 */}
         {!inline && tags.length > 0 && (
-          <Box sx={{ mb: 1, display: 'flex', flexWrap: 'wrap', gap: 0.5 }}>
+          <Box sx={{ mb: 1, display: 'flex', gap: 0.5, overflowX: 'auto' }}>
             {tags.map((tag, index) => (
               <Chip
                 key={`${tag}-${index}`}
@@ -220,6 +316,7 @@ const TagInput = ({
                 sx={{
                   backgroundColor: getTagColor(tag),
                   color: 'white',
+                  flexShrink: 0,
                   '& .MuiChip-deleteIcon': {
                     color: 'rgba(255, 255, 255, 0.7)',
                     '&:hover': {
@@ -254,15 +351,16 @@ const TagInput = ({
             // 内嵌模式：标签显示在输入框内部
             ...(inline && tags.length > 0 && {
               startAdornment: (
-                <InputAdornment position="start" sx={{ maxWidth: 'none' }}>
-                  <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
-                    <TagIcon sx={{ color: 'action.active', mr: 0.5 }} />
+                <InputAdornment position="start" sx={{ maxWidth: 'none', flex: 1 }}>
+                  <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5, width: '100%' }}>
+                    <TagIcon sx={{ color: 'action.active', mr: 0.5, flexShrink: 0 }} />
                     <Box 
                       sx={{ 
                         display: 'flex', 
                         gap: 0.5, 
                         overflowX: 'auto',
-                        maxWidth: '200px',
+                        flex: 1, // 占用所有剩余空间
+                        minWidth: 0, // 允许缩小到0
                         scrollbarWidth: 'thin',
                         '&::-webkit-scrollbar': {
                           height: '4px'
@@ -273,6 +371,9 @@ const TagInput = ({
                         '&::-webkit-scrollbar-thumb': {
                           background: 'rgba(0,0,0,0.2)',
                           borderRadius: '2px'
+                        },
+                        '&::-webkit-scrollbar-thumb:hover': {
+                          background: 'rgba(0,0,0,0.3)'
                         }
                       }}
                     >
@@ -304,16 +405,43 @@ const TagInput = ({
                 </InputAdornment>
               )
             }),
-            endAdornment: tags.length > 0 && (
+            endAdornment: (
               <InputAdornment position="end">
-                <IconButton
-                  size="small"
-                  onClick={clearAllTags}
-                  disabled={disabled}
-                  sx={{ p: 0.5 }}
-                >
-                  <ClearIcon fontSize="small" />
-                </IconButton>
+                <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
+                  {/* 动态加载的插件扩展按钮 */}
+                  {extensions.map((extension) => {
+                    const isExecuting = executingExtension === extension.commandId;
+                    return (
+                      <Tooltip key={extension.commandId} title={extension.description || extension.title}>
+                        <IconButton
+                          size="small"
+                          onClick={() => handleExtensionClick(extension)}
+                          disabled={disabled || isExecuting || !!executingExtension}
+                          sx={{ p: 0.5 }}
+                          color="primary"
+                        >
+                          {isExecuting ? (
+                            <CircularProgress size={16} />
+                          ) : (
+                            <AiIcon fontSize="small" />
+                          )}
+                        </IconButton>
+                      </Tooltip>
+                    );
+                  })}
+                  
+                  {/* 清空按钮 */}
+                  {tags.length > 0 && (
+                    <IconButton
+                      size="small"
+                      onClick={clearAllTags}
+                      disabled={disabled}
+                      sx={{ p: 0.5 }}
+                    >
+                      <ClearIcon fontSize="small" />
+                    </IconButton>
+                  )}
+                </Box>
               </InputAdornment>
             )
           }}
@@ -356,12 +484,6 @@ const TagInput = ({
           </Paper>
         </Popper>
         
-        {/* 标签计数提示 */}
-        {tags.length > 0 && (
-          <Box sx={{ mt: 0.5, fontSize: '0.75rem', color: 'text.secondary' }}>
-            {tags.length}/{maxTags} 个标签
-          </Box>
-        )}
       </Box>
     </ClickAwayListener>
   );

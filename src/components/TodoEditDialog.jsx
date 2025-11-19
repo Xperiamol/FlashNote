@@ -10,6 +10,7 @@ const mapTodoToForm = (todo) => {
   if (!todo) {
     return {
       content: '',
+      description: '',
       tags: '',
       is_important: false,
       is_urgent: false,
@@ -25,6 +26,7 @@ const mapTodoToForm = (todo) => {
 
   return {
     content: todo.content || '',
+    description: todo.description || '',
     tags: todo.tags || '',
     is_important: Boolean(todo.is_important),
     is_urgent: Boolean(todo.is_urgent),

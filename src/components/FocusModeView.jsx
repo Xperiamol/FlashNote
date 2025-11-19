@@ -26,8 +26,7 @@ import {
   List as ListIcon,
   CheckCircle as CheckCircleIcon
 } from '@mui/icons-material';
-import { format, parseISO } from 'date-fns';
-import { zhCN as dateFnsZhCN } from 'date-fns/locale';
+import TimeZoneUtils from '../utils/timeZoneUtils';
 import {
   getPriorityColor,
   getPriorityText,
@@ -353,15 +352,8 @@ const FocusModeView = ({
     }
 
     if (currentTodo.due_date) {
-      let formatted = '';
-      try {
-        formatted = format(typeof currentTodo.due_date === 'string' ? parseISO(currentTodo.due_date) : currentTodo.due_date, 'MM月dd日 HH:mm', {
-          locale: dateFnsZhCN
-        });
-      } catch (error) {
-        formatted = '';
-      }
-
+      const formatted = TimeZoneUtils.formatForDisplay(currentTodo.due_date, { shortFormat: true });
+      
       if (formatted) {
         chips.push(
           <Chip
@@ -563,19 +555,7 @@ const FocusModeView = ({
               {currentTodo.due_date && (
                 <Chip
                   icon={<AccessTimeIcon sx={{ fontSize: '0.875rem' }} />}
-                  label={(() => {
-                    try {
-                      return format(
-                        typeof currentTodo.due_date === 'string' 
-                          ? parseISO(currentTodo.due_date) 
-                          : currentTodo.due_date, 
-                        'MM月dd日 HH:mm', 
-                        { locale: dateFnsZhCN }
-                      );
-                    } catch {
-                      return '';
-                    }
-                  })()}
+                label={TimeZoneUtils.formatForDisplay(currentTodo.due_date, { shortFormat: true })}
                   size="small"
                   sx={{
                     fontFamily: '"OPPOSans R", "OPPOSans", system-ui, -apple-system, sans-serif',

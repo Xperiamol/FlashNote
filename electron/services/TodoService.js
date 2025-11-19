@@ -341,6 +341,7 @@ class TodoService extends EventEmitter {
 
     const todo = this.todoDAO.create({
       content: todoData.content.trim(),
+      description: todoData.description || '',
       tags: formattedTags,
       is_important: todoData.is_important ? 1 : 0,
       is_urgent: todoData.is_urgent ? 1 : 0,

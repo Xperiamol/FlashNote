@@ -185,6 +185,10 @@ function StandaloneWindow() {
       }
     }
   }, [isLoading, error, windowType, isElectronEnvironment])
+  
+  // 窗口关闭时的保存逻辑由 WindowManager 通过 executeJavaScript 同步触发
+  // 不需要在这里监听 IPC 事件或 beforeunload 事件
+  // WindowManager 会直接在渲染进程中执行保存代码
 
   // 如果不在Electron环境中，显示提示信息
   if (!isElectronEnvironment) {

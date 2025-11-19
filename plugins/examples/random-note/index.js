@@ -19,7 +19,7 @@ onActivate(() => {
 			title: '随机打开一篇笔记',
 			description: '快速打开一篇随机笔记以唤醒旧灵感',
 			surfaces: ['toolbar:notes'],
-			icon: 'rocket',
+			icon: 'shuffle',
 			shortcut: {
 				default: 'Ctrl+Alt+R',
 				description: '在任意界面抽取一篇随机笔记'

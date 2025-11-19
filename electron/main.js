@@ -1,7 +1,20 @@
-const { app, BrowserWindow, ipcMain, dialog, clipboard, Notification, shell, Tray, Menu, nativeImage } = require('electron')
+const { app, BrowserWindow, ipcMain, dialog, clipboard, Notification, shell, Tray, Menu, nativeImage, protocol } = require('electron')
 const path = require('path')
 const fs = require('fs')
 const isDev = process.env.NODE_ENV === 'development' || !app.isPackaged
+
+// 注册自定义协议（必须在 app.whenReady 之前）
+protocol.registerSchemesAsPrivileged([
+  {
+    scheme: 'app',
+    privileges: {
+      secure: true,
+      supportFetchAPI: true,
+      bypassCSP: true,
+      stream: true
+    }
+  }
+])
 
 // 导入服务
 const DatabaseManager = require('./dao/DatabaseManager')
@@ -15,7 +28,15 @@ const ShortcutService = require('./services/ShortcutService')
 const NotificationService = require('./services/NotificationService')
 const { CloudSyncManager } = require('./services/CloudSyncManager')
 const ImageService = require('./services/ImageService')
+const { getInstance: getImageStorageInstance } = require('./services/ImageStorageService')
 const PluginManager = require('./services/PluginManager')
+const AIService = require('./services/AIService')
+const Mem0Service = require('./services/Mem0Service')
+const HistoricalDataMigrationService = require('./services/HistoricalDataMigrationService')
+const IpcHandlerFactory = require('./utils/ipcHandlerFactory')
+const CalDAVSyncService = require('./services/CalDAVSyncService')
+const GoogleCalendarService = require('./services/GoogleCalendarService')
+const ProxyService = require('./services/ProxyService')
 
 // 保持对窗口对象的全局引用，如果不这样做，当JavaScript对象被垃圾回收时，窗口将自动关闭
 let mainWindow
@@ -43,6 +64,28 @@ function createWindow() {
     show: false // 先不显示窗口，等加载完成后再显示
   })
 
+  // 处理新窗口打开请求（阻止外部链接在新窗口中打开）
+  mainWindow.webContents.setWindowOpenHandler(({ url }) => {
+    console.log('[Main] 拦截新窗口请求:', url)
+    
+    // 如果是 Excalidraw 素材库相关的 URL，在默认浏览器中打开
+    if (url.includes('excalidraw.com') || url.includes('libraries.excalidraw.com')) {
+      console.log('[Main] 在外部浏览器中打开 Excalidraw 链接')
+      shell.openExternal(url)
+      return { action: 'deny' }
+    }
+    
+    // 其他外部链接也在浏览器中打开
+    if (url.startsWith('http://') || url.startsWith('https://')) {
+      console.log('[Main] 在外部浏览器中打开链接:', url)
+      shell.openExternal(url)
+      return { action: 'deny' }
+    }
+    
+    // 阻止所有其他新窗口
+    return { action: 'deny' }
+  })
+
   // 加载应用
   if (isDev) {
     mainWindow.loadURL('http://localhost:5174')
@@ -55,6 +98,9 @@ function createWindow() {
   // 当窗口准备好显示时显示窗口
   mainWindow.once('ready-to-show', () => {
     mainWindow.show()
+    
+    // 设置同步事件转发
+    setupSyncEventForwarding()
   })
 
   // 当窗口关闭时触发 - 最小化到托盘而不是退出
@@ -162,7 +208,7 @@ function createTray() {
     tray = new Tray(trayIcon)
     
     // 设置托盘提示文本
-    tray.setToolTip('FlashNote 2.0 - 快速笔记应用')
+    tray.setToolTip('FlashNote 2.2.2 - 快速笔记应用')
     
     // 创建托盘菜单
     const contextMenu = Menu.buildFromTemplate([
@@ -204,9 +250,23 @@ function createTray() {
       {
         label: '快速输入',
         accelerator: 'CmdOrCtrl+Shift+N',
-        click: () => {
-          // TODO: 实现快速输入窗口
-          console.log('快速输入功能待实现')
+        click: async () => {
+          try {
+            // 创建空白笔记
+            const result = await services.noteService.createNote({
+              title: '快速笔记',
+              content: '',
+              category: '',
+              tags: []
+            });
+            
+            if (result.success && result.data) {
+              // 在独立窗口打开
+              await windowManager.createNoteWindow(result.data.id);
+            }
+          } catch (error) {
+            console.error('快速输入失败:', error);
+          }
         }
       },
       {
@@ -282,12 +342,51 @@ async function initializeServices() {
     services.dataImportService = new DataImportService(services.noteService, services.settingsService)
     services.imageService = new ImageService()
     
+    // 暴露 DAO 供插件使用
+    const TodoDAO = require('./dao/TodoDAO')
+    services.todoDAO = new TodoDAO()
+    
+    // 初始化AI服务
+    const SettingDAO = require('./dao/SettingDAO')
+    const settingDAO = new SettingDAO()
+    services.aiService = new AIService(settingDAO)
+    await services.aiService.initialize()
+    
+    // 初始化 Mem0 服务 - 使用正确的数据库路径
+    const dbPath = path.join(app.getPath('userData'), 'database', 'flashnote.db')
+    const appDataPath = app.getPath('userData')
+    services.mem0Service = new Mem0Service(dbPath, appDataPath)
+    services.migrationService = new HistoricalDataMigrationService(services.mem0Service)
+    
+    // 异步初始化，不阻塞启动
+    services.mem0Service.initialize().then(result => {
+      if (result.success) {
+        console.log('[Main] Mem0 service initialized')
+      } else {
+        console.warn('[Main] Mem0 service initialization failed:', result.error)
+      }
+    }).catch(error => {
+      console.error('[Main] Mem0 service error:', error)
+    })
+    
     // 初始化通知服务
     services.notificationService = new NotificationService()
     
     // 初始化云同步管理器
     services.cloudSyncManager = new CloudSyncManager()
     await services.cloudSyncManager.initialize()
+    
+    // 初始化 CalDAV 日历同步服务
+    services.calDAVSyncService = new CalDAVSyncService()
+    console.log('[Main] CalDAV sync service initialized')
+    
+    // 初始化 Google Calendar OAuth 同步服务
+    services.googleCalendarService = new GoogleCalendarService()
+    console.log('[Main] Google Calendar service initialized')
+    
+    // 初始化代理服务
+    services.proxyService = new ProxyService()
+    console.log('[Main] Proxy service initialized')
     
     // 将通知服务连接到TodoService
     services.todoService.setNotificationService(services.notificationService)
@@ -344,6 +443,7 @@ async function initializeServices() {
       services,
       shortcutService,
       windowAccessor: () => BrowserWindow.getAllWindows(),
+      mainWindowAccessor: () => mainWindow,
       logger: console,
       isPackaged: app.isPackaged
     })
@@ -372,25 +472,49 @@ async function initializeServices() {
       if (notesResult.success && notesResult.data && notesResult.data.notes && notesResult.data.notes.length === 0) {
         console.log('检测到首次启动，创建示例笔记')
         const welcomeNote = {
-          title: '欢迎使用 FlashNote 2.0！',
-          content: `# 欢迎使用 FlashNote 2.0！ 🎉
+          title: '欢迎使用 FlashNote 2.2.2！',
+          content: `# 欢迎使用 FlashNote 2.3！ 🎉
 
-恭喜你成功安装了 FlashNote 2.0，这是一个现代化的本地笔记应用。
+恭喜你成功安装了 FlashNote，这是一个现代化的本地笔记应用。
+
+## 2.3 版本新功能
+
+### 白板笔记
+- **Excalidraw 集成**：创建白板笔记，支持手绘图形和流程图
+- **素材库支持**：使用内置素材库或浏览在线素材库
+- **独立窗口优化**：支持拖拽白板笔记到独立窗口中编辑
+- **PNG 导出**：一键导出白板为高清图片
+
+### Markdown 增强
+- **扩展语法**：支持高亮（==text==）、@orange{彩色文本}、[[Wiki 链接]]、#标签等
+- **自定义MD插件**：完整可插拔的 Markdown 插件系统
+- **实时预览**：所见即所得的编辑体验（测试中）
+
+### 插件系统
+- **扩展生态**：支持安装第三方插件
+- **本地开发**：可以开发自己的插件
+- **主题定制**：插件可以注入自定义样式
+- **命令面板**：Ctrl+Shift+P 打开命令面板使用插件功能
+
+### 同步优化
+- **新增日历同步**：可选CALDAV和Google Calendar（需要代理）
+- **智能冲突处理**：基于时间戳的智能冲突解决与增量同步
 
 ## 快速开始
 
 ### 基本操作
 - **创建笔记**：点击左上角的 "新建" 按钮或使用快捷键 \`Ctrl+N\`
+- **创建白板**：选择"白板笔记"类型，使用 Excalidraw 进行创作
 - **搜索笔记**：使用顶部搜索框快速找到你需要的笔记
 - **标签管理**：为笔记添加标签，方便分类和查找
 - **拖拽窗口**：试试拖动笔记列表到窗口外~
-
 
 ### 快捷键
 - \`Ctrl+N\`：新建笔记
 - \`Ctrl+S\`：保存笔记
 - \`Ctrl+F\`：搜索笔记
-- \`Ctrl+Shift+N\`：快速输入（开发中）
+- \`Ctrl+Shift+P\`：打开命令面板
+- \`Ctrl+Shift+N\`：快速输入
 
 ## 特色功能
 
@@ -398,6 +522,9 @@ async function initializeServices() {
 这个笔记应用支持 **Markdown** 语法，你可以：
 
 - 使用 **粗体** 和 *斜体*
+- 使用 ==高亮文本==
+- 创建 [[Wiki链接]]
+- 添加 #标签
 - 创建 [链接](https://github.com)
 - 添加代码块：
 
@@ -408,23 +535,37 @@ console.log('Hello, FlashNote!');
 - 制作任务列表：
   - [x] 安装 FlashNote
   - [x] 阅读欢迎笔记
-  - [ ] 创建第一个笔记
+  - [ ] 创建第一个白板笔记
+  - [ ] 尝试插件系统
   - [ ] 探索更多功能
+
+### 白板功能
+- 🎨 手绘风格图形
+- 📐 多种形状和箭头
+- 📝 文本注释
+- 🖼️ 图片插入
+- 📚 素材库管理
+- 💾 自动保存
 
 ### 数据安全
 - 所有数据都存储在本地，保护你的隐私
 - 支持数据导入导出功能
 - 自动保存，不用担心数据丢失
+- 支持坚果云、Google Calendar 等同步方案
 
 ## 开始使用
 
 现在你可以：
-1. 删除这个示例笔记（如果不需要的话）
-2. 创建你的第一个笔记
-3. 探索设置选项，个性化你的使用体验
+1. 创建你的第一个白板笔记
+2. 尝试使用 Markdown 扩展语法
+3. 打开命令面板（Ctrl+Shift+P）探索插件功能
+4. 在设置中配置云同步
+5. 探索设置选项，个性化你的使用体验
 
-祝你使用愉快！ 📝✨`,
-          tags: ['欢迎', '教程'],
+祝你使用愉快！ 📝✨
+By Xperiamol
+`,
+          tags: ['欢迎', '教程', '2.2.2'],
           category: 'default'
         }
         
@@ -465,7 +606,71 @@ if (!gotTheLock) {
 
   // Electron初始化完成，创建窗口
   app.whenReady().then(async () => {
+  // 注册 app:// 协议处理器
+  protocol.handle('app', async (request) => {
+    try {
+      const url = request.url
+      // app://images/abc.png -> images/abc.png
+      const relativePath = url.replace('app://', '')
+      
+      console.log('[Protocol] 处理 app:// 请求:', relativePath)
+      
+      // 获取完整路径
+      const fullPath = services.imageService.getImagePath(relativePath)
+      console.log('[Protocol] 完整路径:', fullPath)
+      
+      // 检查文件是否存在
+      if (!fs.existsSync(fullPath)) {
+        console.error('[Protocol] 文件不存在:', fullPath)
+        return new Response('File not found', { status: 404 })
+      }
+      
+      // 读取文件
+      const data = fs.readFileSync(fullPath)
+      
+      // 确定 MIME 类型
+      const ext = path.extname(fullPath).toLowerCase()
+      let mimeType = 'application/octet-stream'
+      switch (ext) {
+        case '.jpg':
+        case '.jpeg':
+          mimeType = 'image/jpeg'
+          break
+        case '.png':
+          mimeType = 'image/png'
+          break
+        case '.gif':
+          mimeType = 'image/gif'
+          break
+        case '.webp':
+          mimeType = 'image/webp'
+          break
+        case '.svg':
+          mimeType = 'image/svg+xml'
+          break
+      }
+      
+      console.log('[Protocol] 返回文件，MIME:', mimeType)
+      return new Response(data, {
+        headers: { 'Content-Type': mimeType }
+      })
+    } catch (error) {
+      console.error('[Protocol] 处理请求失败:', error)
+      return new Response('Internal Server Error', { status: 500 })
+    }
+  })
+  
   await initializeServices()
+  // 数据库迁移已在 DatabaseManager.initialize() 中自动执行
+  
+  // 加载并应用代理配置
+  try {
+    const proxyConfig = services.proxyService.getConfig();
+    services.proxyService.applyConfig(proxyConfig);
+  } catch (error) {
+    console.error('[启动] 加载代理配置失败:', error)
+  }
+  
   createWindow()
   createTray()
   
@@ -483,9 +688,10 @@ if (!gotTheLock) {
     console.error('初始化开机自启状态失败:', error)
   }
   
-  // 设置快捷键服务的主窗口引用
+  // 设置快捷键服务的主窗口和窗口管理器引用
   if (shortcutService && mainWindow) {
     shortcutService.setMainWindow(mainWindow)
+    shortcutService.setWindowManager(windowManager)
     
     // 加载并注册快捷键
     try {
@@ -609,6 +815,16 @@ ipcMain.handle('plugin-store:list-installed', async () => {
   }
 })
 
+ipcMain.handle('plugin-store:scan-local', async () => {
+  try {
+    const manager = ensurePluginManager()
+    return await manager.scanLocalPlugins()
+  } catch (error) {
+    console.error('扫描本地插件失败:', error)
+    return []
+  }
+})
+
 ipcMain.handle('plugin-store:get-details', async (event, pluginId) => {
   try {
     const manager = ensurePluginManager()
@@ -674,6 +890,103 @@ ipcMain.handle('plugin-store:execute-command', async (event, pluginId, commandId
   }
 })
 
+ipcMain.handle('plugin-store:open-plugin-folder', async (event, pluginId) => {
+  try {
+    const manager = ensurePluginManager()
+    const pluginPath = manager.getPluginPath(pluginId)
+    if (!pluginPath) {
+      return { success: false, error: '插件未安装' }
+    }
+    const { shell } = require('electron')
+    await shell.openPath(pluginPath)
+    return { success: true }
+  } catch (error) {
+    console.error(`打开插件目录失败: ${pluginId}`, error)
+    return { success: false, error: error.message }
+  }
+})
+
+ipcMain.handle('plugin-store:open-plugins-directory', async () => {
+  try {
+    const manager = ensurePluginManager()
+    const { shell } = require('electron')
+    // 打开插件目录
+    const isDev = process.env.NODE_ENV === 'development'
+    const localPluginsPath = isDev 
+      ? path.join(app.getAppPath(), 'plugins', 'examples')
+      : path.join(process.resourcesPath, 'plugins', 'examples')
+    await shell.openPath(localPluginsPath)
+    return { success: true }
+  } catch (error) {
+    console.error('打开插件目录失败:', error)
+    return { success: false, error: error.message }
+  }
+})
+
+ipcMain.handle('plugin-store:load-plugin-file', async (event, pluginId, filePath) => {
+  try {
+    const manager = ensurePluginManager()
+    const pluginPath = manager.getPluginPath(pluginId)
+    if (!pluginPath) {
+      return { success: false, error: '插件未安装' }
+    }
+    
+    const fullPath = path.join(pluginPath, filePath.replace(/^\//, ''))
+    if (!fs.existsSync(fullPath)) {
+      return { success: false, error: '文件不存在' }
+    }
+    
+    const content = fs.readFileSync(fullPath, 'utf8')
+    return { success: true, content, baseUrl: `file://${pluginPath}/` }
+  } catch (error) {
+    console.error(`读取插件文件失败: ${pluginId}/${filePath}`, error)
+    return { success: false, error: error.message }
+  }
+})
+
+// ==================== 云同步相关 IPC ====================
+// 注意：这些旧的处理器已被删除，新的处理器在文件末尾统一管理
+
+// 设置同步事件监听，将事件转发到渲染进程
+function setupSyncEventForwarding() {
+  if (!services.cloudSyncManager) return
+  
+  // 使用 getActiveService() 获取当前活跃的同步服务实例
+  const activeService = services.cloudSyncManager.getActiveService()
+  if (!activeService) return
+  
+  // 监听同步开始事件
+  activeService.on('syncStart', () => {
+    if (mainWindow && !mainWindow.isDestroyed()) {
+      mainWindow.webContents.send('sync:start')
+    }
+  })
+  
+  // 监听同步完成事件
+  activeService.on('syncComplete', (result) => {
+    if (mainWindow && !mainWindow.isDestroyed()) {
+      mainWindow.webContents.send('sync:complete', result)
+    }
+  })
+  
+  // 监听同步错误事件
+  activeService.on('syncError', (error) => {
+    if (mainWindow && !mainWindow.isDestroyed()) {
+      mainWindow.webContents.send('sync:error', { message: error.message })
+    }
+  })
+  
+  // 监听冲突检测事件
+  activeService.on('conflictDetected', (conflict) => {
+    if (mainWindow && !mainWindow.isDestroyed()) {
+      mainWindow.webContents.send('sync:conflict', conflict)
+    }
+  })
+}
+
+// 在窗口创建后调用
+// setupSyncEventForwarding() - 需要在 createWindow 后调用
+
 // 数据库调试相关（用于排查持久化问题）
 ipcMain.handle('db:get-info', async () => {
   try {
@@ -681,6 +994,17 @@ ipcMain.handle('db:get-info', async () => {
     return dbManager.getInfo()
   } catch (err) {
     return { error: err?.message || 'unknown error' }
+  }
+})
+
+// 数据库修复
+ipcMain.handle('db:repair', async () => {
+  try {
+    const dbManager = DatabaseManager.getInstance()
+    return await dbManager.repairDatabase()
+  } catch (err) {
+    console.error('数据库修复失败:', err)
+    return { success: false, error: err?.message || 'unknown error' }
   }
 })
 
@@ -867,6 +1191,20 @@ ipcMain.handle('setting:get-auto-launch', async (event) => {
   }
 })
 
+// 代理配置IPC处理
+ipcMain.handle('proxy:get-config', async (event) => {
+  const result = services.proxyService.getConfig();
+  return { success: true, data: result };
+})
+
+ipcMain.handle('proxy:save-config', async (event, config) => {
+  return services.proxyService.saveConfig(config);
+})
+
+ipcMain.handle('proxy:test', async (event, config) => {
+  return services.proxyService.testConnection(config);
+})
+
 // 数据导入导出IPC处理
 ipcMain.handle('data:export-notes', async (event, options) => {
   return await services.dataImportService.exportNotes(options)
@@ -898,6 +1236,305 @@ ipcMain.handle('data:get-stats', async (event) => {
 
 ipcMain.handle('data:select-file', async (event) => {
   return await services.dataImportService.selectFile()
+})
+
+// AI 相关 IPC 处理
+ipcMain.handle('ai:get-config', async (event) => {
+  try {
+    return await services.aiService.getConfig()
+  } catch (error) {
+    console.error('获取AI配置失败:', error)
+    return { success: false, error: error.message }
+  }
+})
+
+ipcMain.handle('ai:save-config', async (event, config) => {
+  try {
+    return await services.aiService.saveConfig(config)
+  } catch (error) {
+    console.error('保存AI配置失败:', error)
+    return { success: false, error: error.message }
+  }
+})
+
+ipcMain.handle('ai:test-connection', async (event, config) => {
+  try {
+    return await services.aiService.testConnection(config)
+  } catch (error) {
+    console.error('测试AI连接失败:', error)
+    return { success: false, error: error.message }
+  }
+})
+
+ipcMain.handle('ai:get-providers', async (event) => {
+  try {
+    return services.aiService.getProviders()
+  } catch (error) {
+    console.error('获取AI提供商列表失败:', error)
+    return { success: false, error: error.message }
+  }
+})
+
+ipcMain.handle('ai:chat', async (event, messages, options) => {
+  try {
+    return await services.aiService.chat(messages, options)
+  } catch (error) {
+    console.error('AI聊天失败:', error)
+    return { success: false, error: error.message }
+  }
+})
+
+// Mem0 记忆管理相关 IPC 处理
+ipcMain.handle('mem0:add', async (event, { userId, content, options }) => {
+  try {
+    return await services.mem0Service.addMemory(userId, content, options)
+  } catch (error) {
+    console.error('添加记忆失败:', error)
+    return { success: false, error: error.message }
+  }
+})
+
+ipcMain.handle('mem0:search', async (event, { userId, query, options }) => {
+  try {
+    const results = await services.mem0Service.searchMemories(userId, query, options)
+    return { success: true, results }
+  } catch (error) {
+    console.error('搜索记忆失败:', error)
+    return { success: false, error: error.message, results: [] }
+  }
+})
+
+ipcMain.handle('mem0:get', async (event, { userId, options }) => {
+  try {
+    console.log('[Mem0] 获取记忆请求:', { userId, options })
+    const memories = await services.mem0Service.getMemories(userId, options)
+    console.log(`[Mem0] 返回 ${memories.length} 条记忆`)
+    if (memories.length > 0) {
+      console.log('[Mem0] 第一条记忆类别:', memories[0].category)
+    }
+    return { success: true, memories }
+  } catch (error) {
+    console.error('获取记忆列表失败:', error)
+    return { success: false, error: error.message, memories: [] }
+  }
+})
+
+ipcMain.handle('mem0:delete', async (event, { memoryId }) => {
+  try {
+    const deleted = await services.mem0Service.deleteMemory(memoryId)
+    return { success: deleted }
+  } catch (error) {
+    console.error('删除记忆失败:', error)
+    return { success: false, error: error.message }
+  }
+})
+
+ipcMain.handle('mem0:clear', async (event, { userId }) => {
+  try {
+    const count = await services.mem0Service.clearUserMemories(userId)
+    return { success: true, count }
+  } catch (error) {
+    console.error('清除记忆失败:', error)
+    return { success: false, error: error.message }
+  }
+})
+
+ipcMain.handle('mem0:stats', async (event, { userId }) => {
+  try {
+    const stats = await services.mem0Service.getStats(userId)
+    return { success: true, stats }
+  } catch (error) {
+    console.error('获取统计信息失败:', error)
+    return { success: false, error: error.message }
+  }
+})
+
+ipcMain.handle('mem0:is-available', async (event) => {
+  try {
+    return { available: services.mem0Service.isAvailable() }
+  } catch (error) {
+    return { available: false }
+  }
+})
+
+ipcMain.handle('mem0:migrate-historical', async (event) => {
+  try {
+    console.log('[Mem0] 开始分析历史数据...')
+    
+    const userId = 'current_user'
+    let memoryCount = 0
+    
+    // 获取数据库实例
+    const dbManager = DatabaseManager.getInstance()
+    const db = dbManager.getDatabase()
+    
+    // 1. 分析待办事项模式
+    const todos = db.prepare(`
+      SELECT * FROM todos 
+      WHERE created_at >= date('now', '-90 days')
+      ORDER BY created_at DESC
+    `).all()
+    
+    console.log(`[Mem0] 找到 ${todos.length} 个待办事项`)
+    
+    if (todos.length > 0) {
+      // 统计优先级偏好
+      const importantCount = todos.filter(t => t.is_important === 1).length
+      const urgentCount = todos.filter(t => t.is_urgent === 1).length
+      const importantRatio = (importantCount / todos.length * 100).toFixed(0)
+      const urgentRatio = (urgentCount / todos.length * 100).toFixed(0)
+      
+      if (importantCount > todos.length * 0.3) {
+        await services.mem0Service.addMemory(userId, 
+          `用户在过去90天创建了${todos.length}个待办事项,其中${importantRatio}%标记为重要,显示出对重要任务的重视`, 
+          {
+            category: 'task_planning',
+            metadata: { source: 'historical_analysis', type: 'priority_pattern' }
+          }
+        )
+        memoryCount++
+      }
+      
+      if (urgentCount > todos.length * 0.3) {
+        await services.mem0Service.addMemory(userId, 
+          `用户有${urgentRatio}%的任务标记为紧急,倾向于处理时间敏感的工作`, 
+          {
+            category: 'task_planning',
+            metadata: { source: 'historical_analysis', type: 'urgency_pattern' }
+          }
+        )
+        memoryCount++
+      }
+      
+      // 分析常见任务类型
+      const taskTypes = new Map()
+      todos.forEach(todo => {
+        const keywords = todo.content.split(/[,，、\s]+/).filter(w => w.length > 1)
+        keywords.forEach(kw => {
+          taskTypes.set(kw, (taskTypes.get(kw) || 0) + 1)
+        })
+      })
+      
+      const frequentKeywords = Array.from(taskTypes.entries())
+        .filter(([_, count]) => count >= 5)
+        .sort((a, b) => b[1] - a[1])
+        .slice(0, 10)
+        .map(([kw]) => kw)
+      
+      if (frequentKeywords.length > 0) {
+        await services.mem0Service.addMemory(userId, 
+          `用户经常创建与这些主题相关的任务：${frequentKeywords.join('、')}`, 
+          {
+            category: 'task_planning',
+            metadata: { source: 'historical_analysis', type: 'frequent_topics' }
+          }
+        )
+        memoryCount++
+      }
+    }
+    
+    // 2. 分析已完成任务
+    const completedTodos = db.prepare(`
+      SELECT 
+        content,
+        is_important,
+        is_urgent,
+        created_at,
+        completed_at,
+        JULIANDAY(completed_at) - JULIANDAY(created_at) as completion_days
+      FROM todos 
+      WHERE is_completed = 1 
+      AND completed_at >= date('now', '-90 days')
+    `).all()
+    
+    console.log(`[Mem0] 找到 ${completedTodos.length} 个已完成任务`)
+    
+    if (completedTodos.length >= 10) {
+      const avgCompletionDays = (
+        completedTodos.reduce((sum, t) => sum + (t.completion_days || 0), 0) / completedTodos.length
+      ).toFixed(1)
+      
+      await services.mem0Service.addMemory(userId, 
+        `用户平均在${avgCompletionDays}天内完成任务,显示出稳定的执行力`, 
+        {
+          category: 'task_planning',
+          metadata: { source: 'historical_analysis', type: 'completion_speed' }
+        }
+      )
+      memoryCount++
+    }
+    
+    // 3. 存储所有笔记内容为独立记忆
+    const notes = db.prepare(`
+      SELECT id, content, tags, created_at 
+      FROM notes 
+      WHERE created_at >= date('now', '-90 days')
+      AND length(content) > 20
+      ORDER BY created_at DESC
+    `).all()
+    
+    console.log(`[Mem0] 找到 ${notes.length} 篇笔记,开始存储完整内容...`)
+    
+    // 将每条笔记的完整内容存储为独立记忆
+    for (const note of notes) {
+      try {
+        // 存储完整笔记内容
+        const fullContent = note.content.trim()
+        
+        console.log(`[Mem0] 处理笔记 ${note.id}, 长度: ${fullContent.length} 字符`)
+        
+        // 提取标签
+        const tags = note.tags ? note.tags.split(',').map(t => t.trim()).filter(t => t) : []
+        
+        // 使用 'knowledge' category 表示这是知识内容
+        const memoryId = await services.mem0Service.addMemory(userId, 
+          fullContent, 
+          {
+            category: 'knowledge',
+            metadata: { 
+              source: 'user_note',
+              note_id: note.id,
+              created_at: note.created_at,
+              tags: tags,
+              content_length: fullContent.length
+            }
+          }
+        )
+        
+        console.log(`[Mem0] 笔记 ${note.id} 存储成功, memory_id: ${memoryId}`)
+        memoryCount++
+        
+        // 每处理50条打印一次进度
+        if (memoryCount % 50 === 0) {
+          console.log(`[Mem0] 已处理 ${memoryCount} 条笔记...`)
+        }
+      } catch (err) {
+        console.error(`[Mem0] 存储笔记 ${note.id} 失败:`, err.message)
+      }
+    }
+    
+    console.log(`[Mem0] 笔记存储完成,共 ${notes.length} 条`)
+    
+    // 额外统计信息
+    if (notes.length > 20) {
+      const notesPerWeek = (notes.length / 13).toFixed(1)
+      await services.mem0Service.addMemory(userId, 
+        `用户保持着良好的笔记习惯,平均每周记录${notesPerWeek}篇笔记`, 
+        {
+          category: 'note_taking',
+          metadata: { source: 'historical_analysis', type: 'note_frequency' }
+        }
+      )
+      memoryCount++
+    }
+    
+    console.log(`[Mem0] 历史数据分析完成,添加了 ${memoryCount} 条记忆`)
+    
+    return { success: true, memoryCount }
+  } catch (error) {
+    console.error('[Mem0] 分析历史数据失败:', error)
+    return { success: false, error: error.message }
+  }
 })
 
 // 云同步相关IPC处理
@@ -1178,6 +1815,16 @@ ipcMain.handle('window:create-floating-ball', async (event) => {
 
 ipcMain.handle('window:create-note-window', async (event, noteId) => {
   return await windowManager.createNoteWindow(noteId)
+})
+
+ipcMain.handle('window:is-note-open', async (event, noteId) => {
+  try {
+    const isOpen = windowManager.isNoteOpenInWindow(noteId)
+    return { success: true, isOpen }
+  } catch (error) {
+    console.error('检查笔记窗口状态失败:', error)
+    return { success: false, error: error.message, isOpen: false }
+  }
 })
 
 ipcMain.handle('window:create-todo-window', async (event, todoListId) => {
@@ -1490,7 +2137,14 @@ ipcMain.handle('image:select-file', async () => {
 ipcMain.handle('image:get-path', async (event, relativePath) => {
   try {
     const fullPath = services.imageService.getImagePath(relativePath)
-    return { success: true, data: fullPath }
+    const fs = require('fs')
+    
+    // 检查文件是否存在
+    if (fs.existsSync(fullPath)) {
+      return { success: true, data: fullPath }
+    } else {
+      return { success: false, error: '图片文件不存在' }
+    }
   } catch (error) {
     console.error('获取图片路径失败:', error)
     return { success: false, error: error.message }
@@ -1513,6 +2167,201 @@ ipcMain.handle('image:delete', async (event, relativePath) => {
     return { success: true, data: result }
   } catch (error) {
     console.error('删除图片失败:', error)
+    return { success: false, error: error.message }
+  }
+})
+
+// 白板图片存储 IPC 处理器
+ipcMain.handle('whiteboard:save-images', async (event, files) => {
+  try {
+    const imageStorage = getImageStorageInstance()
+    const fileMap = await imageStorage.saveWhiteboardImages(files)
+    return { success: true, data: fileMap }
+  } catch (error) {
+    console.error('保存白板图片失败:', error)
+    return { success: false, error: error.message }
+  }
+})
+
+ipcMain.handle('whiteboard:load-images', async (event, fileMap) => {
+  try {
+    const imageStorage = getImageStorageInstance()
+    const files = await imageStorage.loadWhiteboardImages(fileMap)
+    return { success: true, data: files }
+  } catch (error) {
+    console.error('加载白板图片失败:', error)
+    return { success: false, error: error.message }
+  }
+})
+
+ipcMain.handle('whiteboard:delete-images', async (event, fileMap) => {
+  try {
+    const imageStorage = getImageStorageInstance()
+    await imageStorage.deleteWhiteboardImages(fileMap)
+    return { success: true }
+  } catch (error) {
+    console.error('删除白板图片失败:', error)
+    return { success: false, error: error.message }
+  }
+})
+
+ipcMain.handle('whiteboard:get-storage-stats', async () => {
+  try {
+    const imageStorage = getImageStorageInstance()
+    const stats = await imageStorage.getStorageStats()
+    return { success: true, data: stats }
+  } catch (error) {
+    console.error('获取存储统计失败:', error)
+    return { success: false, error: error.message }
+  }
+})
+
+// 图片云同步相关 IPC 处理器
+ipcMain.handle('sync:download-image', async (event, relativePath) => {
+  try {
+    const activeService = services.cloudSyncManager.getActiveService()
+    if (!activeService || !activeService.downloadImage) {
+      return { success: false, error: '云同步服务未启用或不支持图片同步' }
+    }
+    
+    const localPath = path.join(
+      relativePath.startsWith('images/whiteboard/')
+        ? path.join(app.getPath('userData'), 'images', 'whiteboard')
+        : path.join(app.getPath('userData'), 'images'),
+      path.basename(relativePath)
+    )
+    
+    await activeService.downloadImage(relativePath, localPath)
+    return { success: true }
+  } catch (error) {
+    console.error('下载图片失败:', error)
+    return { success: false, error: error.message }
+  }
+})
+
+ipcMain.handle('sync:upload-image', async (event, localPath, relativePath) => {
+  try {
+    const activeService = services.cloudSyncManager.getActiveService()
+    if (!activeService || !activeService.uploadImage) {
+      return { success: false, error: '云同步服务未启用或不支持图片同步' }
+    }
+    
+    const appUrl = await activeService.uploadImage(localPath, relativePath)
+    return { success: true, data: appUrl }
+  } catch (error) {
+    console.error('上传图片失败:', error)
+    return { success: false, error: error.message }
+  }
+})
+
+ipcMain.handle('sync:sync-images', async () => {
+  try {
+    const activeService = services.cloudSyncManager.getActiveService()
+    if (!activeService || !activeService.syncImagesOnly) {
+      return { success: false, error: '云同步服务未启用或不支持图片同步' }
+    }
+    
+    const result = await activeService.syncImagesOnly()
+    return { success: true, data: result }
+  } catch (error) {
+    console.error('同步图片失败:', error)
+    return { success: false, error: error.message }
+  }
+})
+
+// 清理未引用的图片
+ipcMain.handle('sync:cleanup-unused-images', async (event, retentionDays = 30) => {
+  console.log('[Main] 收到清理图片请求, retentionDays:', retentionDays);
+  try {
+    const activeService = services.cloudSyncManager.getActiveService()
+    console.log('[Main] activeService:', !!activeService);
+    console.log('[Main] imageSync:', !!activeService?.imageSync);
+    
+    if (!activeService || !activeService.imageSync) {
+      console.log('[Main] 云同步服务未启用');
+      return { success: false, error: '云同步服务未启用或不支持图片清理' }
+    }
+    
+    console.log('[Main] 开始调用 cleanupUnusedImages...');
+    const result = await activeService.imageSync.cleanupUnusedImages(retentionDays)
+    console.log('[Main] cleanupUnusedImages 完成, result:', result);
+    return { success: true, data: result }
+  } catch (error) {
+    console.error('[Main] 清理图片失败:', error)
+    return { success: false, error: error.message }
+  }
+})
+
+// 获取未引用图片的统计信息
+ipcMain.handle('sync:get-unused-images-stats', async (event, retentionDays = 30) => {
+  console.log('[Main] 收到获取统计信息请求, retentionDays:', retentionDays);
+  try {
+    const activeService = services.cloudSyncManager.getActiveService()
+    if (!activeService || !activeService.imageSync) {
+      return { success: false, error: '云同步服务未启用' }
+    }
+    
+    // 获取未引用图片列表（但不删除）
+    const referencedImages = await activeService.imageSync.scanActiveNoteReferences()
+    const localImages = await activeService.imageSync.scanLocalImages(false)  // 不需要 hash，加快速度
+    
+    console.log('[Main] 引用图片数:', referencedImages.size);
+    console.log('[Main] 本地图片数:', localImages.length);
+    
+    const now = Date.now()
+    const retentionMs = retentionDays * 24 * 60 * 60 * 1000
+    
+    let orphanedCount = 0
+    let totalSize = 0
+    let skippedByReference = 0
+    let skippedByAge = 0
+    
+    for (const image of localImages) {
+      // 使用与 cleanupUnusedImages 相同的匹配逻辑
+      const relativePath = image.relativePath;
+      
+      const pathVariants = [
+        relativePath,
+        relativePath.replace(/^images\//, ''),
+        relativePath.replace(/^images\/whiteboard\//, 'whiteboard/'),
+        image.fileName
+      ];
+      
+      const isReferenced = pathVariants.some(variant => referencedImages.has(variant));
+      
+      if (isReferenced) {
+        skippedByReference++;
+        continue;
+      }
+      
+      const mtime = new Date(image.mtime).getTime();
+      const fileAge = now - mtime;
+      const fileAgeDays = Math.floor(fileAge / 86400000);
+      
+      if (fileAge <= retentionMs) {
+        skippedByAge++;
+        continue;
+      }
+      
+      orphanedCount++;
+      totalSize += image.size;
+      if (orphanedCount <= 5) {
+        console.log(`[Main] 孤立图片: ${relativePath}, 年龄: ${fileAgeDays}天`);
+      }
+    }
+    
+    console.log(`[Main] 统计: 总计=${localImages.length}, 被引用=${skippedByReference}, 太新=${skippedByAge}, 孤立=${orphanedCount}, 总大小=${totalSize}`);
+    
+    return { 
+      success: true, 
+      data: { 
+        orphanedCount, 
+        totalSize,
+        totalSizeMB: (totalSize / 1024 / 1024).toFixed(2)
+      } 
+    }
+  } catch (error) {
+    console.error('获取图片统计失败:', error)
     return { success: false, error: error.message }
   }
 })

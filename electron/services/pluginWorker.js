@@ -58,10 +58,17 @@ function callHost(scope, action, payload) {
   const requestId = nextRequestId()
 
   return new Promise((resolve, reject) => {
+    // 根据调用类型动态设置超时时间
+    // AI 相关调用需要更长的超时时间
+    let timeoutDuration = rpcTimeout // 默认使用配置的超时时间
+    if (scope === 'ai' || action === 'chat') {
+      timeoutDuration = 60000 // AI 调用 60 秒超时
+    }
+
     const timer = setTimeout(() => {
       pendingRpcRequests.delete(requestId)
       reject(new Error(`调用宿主 API 超时: ${scope}.${action}`))
-    }, rpcTimeout)
+    }, timeoutDuration)
 
     pendingRpcRequests.set(requestId, {
       resolve: (value) => {
@@ -85,89 +92,165 @@ function callHost(scope, action, payload) {
 }
 
 const runtime = {
-  onActivate(callback) {
-    if (typeof callback === 'function') {
-      activateCallbacks.push(callback)
-    }
-  },
-  onDeactivate(callback) {
-    if (typeof callback === 'function') {
-      deactivateCallbacks.push(callback)
-    }
-  },
-  registerCommand(definition, handler) {
-    if (!definition || typeof definition !== 'object') {
-      throw new Error('registerCommand 需要提供命令描述对象')
-    }
-    if (!definition.id || typeof definition.id !== 'string') {
-      throw new Error('命令必须包含字符串类型的 id')
-    }
-    if (typeof handler !== 'function') {
-      throw new Error('命令处理函数必须是 function')
-    }
+	onActivate(callback) {
+		if (typeof callback === 'function') {
+			activateCallbacks.push(callback)
+		}
+	},
+	onDeactivate(callback) {
+		if (typeof callback === 'function') {
+			deactivateCallbacks.push(callback)
+		}
+	},
+	registerCommand(definition, handler) {
+		if (!definition || typeof definition !== 'object') {
+			throw new Error('registerCommand 需要提供命令描述对象')
+		}
+		if (!definition.id || typeof definition.id !== 'string') {
+			throw new Error('命令必须包含字符串类型的 id')
+		}
+		if (typeof handler !== 'function') {
+			throw new Error('命令处理函数必须是 function')
+		}
 
-    const surfaces = Array.isArray(definition.surfaces)
-      ? definition.surfaces
-      : definition.surface
-        ? [definition.surface]
-        : []
+		const surfaces = Array.isArray(definition.surfaces)
+			? definition.surfaces
+			: definition.surface
+				? [definition.surface]
+				: []
 
-    const command = {
-      id: definition.id,
-      title: definition.title || definition.id,
-      description: definition.description || '',
-      group: definition.group || null,
-      icon: definition.icon || null,
-      surfaces: surfaces
-        .map((surface) => (typeof surface === 'string' ? surface.trim() : ''))
-        .filter(Boolean)
-    }
+		const command = {
+			id: definition.id,
+			title: definition.title || definition.id,
+			description: definition.description || '',
+			group: definition.group || null,
+			icon: definition.icon || null,
+			surfaces: surfaces
+				.map((surface) => (typeof surface === 'string' ? surface.trim() : ''))
+				.filter(Boolean)
+		}
 
-    commandHandlers.set(command.id, handler)
-    parentPort.postMessage({ type: 'register-command', command })
-    return () => runtime.unregisterCommand(command.id)
-  },
-  unregisterCommand(commandId) {
-    if (!commandHandlers.has(commandId)) return
-    commandHandlers.delete(commandId)
-    parentPort.postMessage({ type: 'unregister-command', commandId })
-  },
-  notes: {
-    getRandom: () => callHost('notes', 'getRandom'),
-    list: (options) => callHost('notes', 'list', options)
-  },
-  ui: {
-    openNote: (noteId) => callHost('ui', 'openNote', { noteId })
-  },
-  storage: {
-    getItem: (key) => callHost('storage', 'getItem', { key }),
-    setItem: (key, value) => callHost('storage', 'setItem', { key, value }),
-    removeItem: (key) => callHost('storage', 'removeItem', { key }),
-    clear: () => callHost('storage', 'clear')
-  },
-  notifications: {
-    show: (payload) => callHost('notifications', 'show', payload)
-  },
-  logger,
-  permissions: {
-    has: (permission) => Boolean(permissions?.[permission]),
-    list: () => Object.entries(permissions || {})
-      .filter((entry) => Boolean(entry[1]))
-      .map((entry) => entry[0])
-  }
+		commandHandlers.set(command.id, handler)
+		parentPort.postMessage({ type: 'register-command', command })
+		return () => runtime.unregisterCommand(command.id)
+	},
+	unregisterCommand(commandId) {
+		if (!commandHandlers.has(commandId)) return
+		commandHandlers.delete(commandId)
+		parentPort.postMessage({ type: 'unregister-command', commandId })
+	},
+	notes: {
+		list: (options) => callHost('notes', 'list', options),
+		getRandom: () => callHost('notes', 'getRandom'),
+		findById: (id) => callHost('notes', 'findById', { id }),
+		create: (data) => callHost('notes', 'create', data),
+		update: (id, data) => callHost('notes', 'update', { id, data }),
+		delete: (id) => callHost('notes', 'delete', { id })
+	},
+	todos: {
+		list: (options) => callHost('todos', 'list', options),
+		findById: (id) => callHost('todos', 'findById', { id }),
+		create: (data) => callHost('todos', 'create', data),
+		update: (id, data) => callHost('todos', 'update', { id, data }),
+		delete: (id) => callHost('todos', 'delete', { id })
+	},
+	tags: {
+		list: () => callHost('tags', 'list'),
+		create: (name) => callHost('tags', 'create', { name }),
+		update: (id, data) => callHost('tags', 'update', { id, data }),
+		delete: (name) => callHost('tags', 'delete', { name })
+	},
+	network: {
+		fetch: (url, options) => callHost('network', 'fetch', { url, options })
+	},
+	clipboard: {
+		readText: () => callHost('clipboard', 'readText'),
+		writeText: (text) => callHost('clipboard', 'writeText', { text }),
+		readImage: () => callHost('clipboard', 'readImage'),
+		writeImage: (dataUrl) => callHost('clipboard', 'writeImage', { dataUrl })
+	},
+	filesystem: {
+		pickFile: (options) => callHost('filesystem', 'pickFile', options),
+		readFile: (filePath, encoding) => callHost('filesystem', 'readFile', { filePath, encoding }),
+		pickDirectory: () => callHost('filesystem', 'pickDirectory'),
+		writeFile: (filePath, content) => callHost('filesystem', 'writeFile', { filePath, content })
+	},
+	search: {
+		fullText: (query, options) => callHost('search', 'fullText', { query, options }),
+		filter: (conditions) => callHost('search', 'filter', { conditions })
+	},
+	events: {
+		subscribe: (eventType, listenerId) => callHost('events', 'subscribe', { eventType, listenerId }),
+		unsubscribe: (listenerId) => callHost('events', 'unsubscribe', { listenerId })
+	},
+	analytics: {
+		notesStats: (timeRange) => callHost('analytics', 'notesStats', { timeRange }),
+		todosStats: (timeRange) => callHost('analytics', 'todosStats', { timeRange })
+	},
+	ai: {
+		chat: (messages, options) => callHost('ai', 'chat', { messages, options }),
+		isAvailable: () => callHost('ai', 'isAvailable')
+	},
+	ui: {
+		openNote: (noteId) => callHost('ui', 'openNote', { noteId }),
+		openWindow: (options) => callHost('ui', 'openWindow', options)
+	},
+	storage: {
+		getItem: (key) => callHost('storage', 'getItem', { key }),
+		setItem: (key, value) => callHost('storage', 'setItem', { key, value }),
+		removeItem: (key) => callHost('storage', 'removeItem', { key }),
+		clear: () => callHost('storage', 'clear')
+	},
+	notifications: {
+		show: (payload) => callHost('notifications', 'show', payload)
+	},
+	mem0: {
+		add: (userId, content, options) => callHost('mem0', 'add', { userId, content, options }),
+		search: (userId, query, options) => callHost('mem0', 'search', { userId, query, options }),
+		get: (userId, options) => callHost('mem0', 'get', { userId, options }),
+		update: (memoryId, content, options) => callHost('mem0', 'update', { memoryId, content, options }),
+		delete: (memoryId) => callHost('mem0', 'delete', { memoryId }),
+		clear: (userId) => callHost('mem0', 'clear', { userId }),
+		stats: (userId) => callHost('mem0', 'stats', { userId }),
+		isAvailable: () => callHost('mem0', 'isAvailable')
+	},
+	theme: {
+		registerGlobalStyle: (styleId, css, options) => callHost('theme', 'registerGlobalStyle', { styleId, css, options }),
+		unregisterGlobalStyle: (styleId) => callHost('theme', 'unregisterGlobalStyle', { styleId }),
+		updateGlobalStyle: (styleId, css, options) => callHost('theme', 'updateGlobalStyle', { styleId, css, options }),
+		listStyles: () => callHost('theme', 'listStyles')
+	},
+	logger,
+	permissions: {
+		has: (permission) => Boolean(permissions?.[permission]),
+		list: () => Object.entries(permissions || {})
+			.filter((entry) => Boolean(entry[1]))
+			.map((entry) => entry[0])
+	}
 }
 
 const sdkFacade = Object.freeze({
-  onActivate: runtime.onActivate,
-  onDeactivate: runtime.onDeactivate,
-  registerCommand: runtime.registerCommand,
-  unregisterCommand: runtime.unregisterCommand,
-  notes: runtime.notes,
-  ui: runtime.ui,
-  storage: runtime.storage,
-  notifications: runtime.notifications,
-  logger: runtime.logger,
-  permissions: runtime.permissions
+	onActivate: runtime.onActivate,
+	onDeactivate: runtime.onDeactivate,
+	registerCommand: runtime.registerCommand,
+	unregisterCommand: runtime.unregisterCommand,
+	notes: runtime.notes,
+	todos: runtime.todos,
+	tags: runtime.tags,
+	network: runtime.network,
+	clipboard: runtime.clipboard,
+	filesystem: runtime.filesystem,
+	search: runtime.search,
+	events: runtime.events,
+	analytics: runtime.analytics,
+	ai: runtime.ai,
+	ui: runtime.ui,
+	storage: runtime.storage,
+	notifications: runtime.notifications,
+	mem0: runtime.mem0,
+	theme: runtime.theme,
+	logger: runtime.logger,
+	permissions: runtime.permissions
 })
 
 function createSandboxRequire(entryPath) {
@@ -328,6 +411,7 @@ function bootstrap() {
       __filename: entryPath,
       __dirname: path.dirname(entryPath),
       console: createConsole(),
+      runtime: sdkFacade,  // 将 runtime 暴露为全局变量
       setTimeout,
       setInterval,
       clearTimeout,

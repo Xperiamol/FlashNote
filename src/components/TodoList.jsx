@@ -37,10 +37,13 @@ import {
   Schedule as ScheduleIcon,
   Warning as WarningIcon,
   Flag as FlagIcon,
+  Sort as SortIcon,
+  AccessTime as AccessTimeIcon,
   FlashOn as FlashOnIcon,
   FilterList as FilterListIcon,
   ViewList as ViewListIcon,
-  ViewModule as ViewModuleIcon
+  ViewModule as ViewModuleIcon,
+  Note as NoteIcon
 } from '@mui/icons-material';
 import { format, isToday, isPast, parseISO } from 'date-fns';
 import { zhCN as dateFnsZhCN } from 'date-fns/locale';
@@ -50,8 +53,10 @@ import { useSearchManager } from '../hooks/useSearchManager';
 import { useMultiSelectManager } from '../hooks/useMultiSelectManager';
 import { useFiltersVisibility } from '../hooks/useFiltersVisibility';
 import { searchTodosAPI } from '../api/searchAPI';
+import { createNote } from '../api/noteAPI';
 import FilterContainer from './FilterContainer';
 import FilterToggleButton from './FilterToggleButton';
+import DropdownMenu from './DropdownMenu';
 import zhCN from '../locales/zh-CN';
 
 const {
@@ -73,6 +78,7 @@ import {
   toggleTodoComplete,
   deleteTodo as deleteTodoAPI
 } from '../api/todoAPI';
+import { ANIMATIONS, createAnimationString, createTransitionString, GREEN_SWEEP_KEYFRAMES } from '../utils/animationConfig';
 
 const TodoList = ({ onTodoSelect, onViewModeChange, onShowCompletedChange, viewMode, showCompleted, onMultiSelectChange, onMultiSelectRefChange, refreshTrigger, sortBy, onSortByChange, externalTodos, isExternalData = false, onTodoUpdated }) => {
   const [todos, setTodos] = useState([]);
@@ -350,7 +356,7 @@ const TodoList = ({ onTodoSelect, onViewModeChange, onShowCompletedChange, viewM
               return newSet;
             });
           }, 1000);
-        }, 300);
+        }, 150);
         
         // 清除待完成状态
         setPendingComplete(prev => {
@@ -396,6 +402,66 @@ const TodoList = ({ onTodoSelect, onViewModeChange, onShowCompletedChange, viewM
     if (selectedTodo && onTodoSelect) {
       onTodoSelect(selectedTodo);
       handleMenuClose();
+    }
+  };
+
+  // 转换待办为笔记
+  const handleConvertToNote = async () => {
+    if (!selectedTodo) return;
+
+    try {
+      // 构建笔记内容 - 使用 content 字段而不是 title
+      let noteContent = `# ${selectedTodo.content}\n\n`;
+      
+      if (selectedTodo.description) {
+        noteContent += `${selectedTodo.description}\n\n`;
+      }
+      
+      // 添加元数据
+      noteContent += `---\n`;
+      noteContent += `原待办事项信息：\n`;
+      
+      // 根据重要紧急程度显示优先级
+      if (selectedTodo.is_important && selectedTodo.is_urgent) {
+        noteContent += `- 优先级：重要且紧急\n`;
+      } else if (selectedTodo.is_important) {
+        noteContent += `- 优先级：重要但不紧急\n`;
+      } else if (selectedTodo.is_urgent) {
+        noteContent += `- 优先级：紧急但不重要\n`;
+      } else {
+        noteContent += `- 优先级：不重要不紧急\n`;
+      }
+      
+      if (selectedTodo.due_date) {
+        noteContent += `- 截止日期：${formatDate(selectedTodo.due_date)}\n`;
+      }
+      if (selectedTodo.tags) {
+        noteContent += `- 标签：${selectedTodo.tags}\n`;
+      }
+
+      // 创建笔记
+      const noteData = {
+        title: selectedTodo.content, // 使用待办内容作为笔记标题
+        content: noteContent,
+        note_type: 'markdown'
+      };
+
+      const result = await createNote(noteData);
+      
+      if (result) {
+        // 删除原待办
+        await deleteTodoAPI(selectedTodo.id);
+        
+        // 刷新待办列表
+        loadTodos();
+        
+        console.log('已转换为笔记:', result);
+      }
+      
+      handleMenuClose();
+    } catch (error) {
+      console.error('转换为笔记失败:', error);
+      alert('转换失败: ' + error.message);
     }
   };
 
@@ -496,6 +562,26 @@ const TodoList = ({ onTodoSelect, onViewModeChange, onShowCompletedChange, viewM
                     </IconButton>
                   </InputAdornment>
                 )}
+        {/* 排序按钮 */}
+        <DropdownMenu
+          icon={<SortIcon />}
+          tooltip="排序"
+          options={[
+            { value: 'priority', label: '按优先级', icon: FlagIcon },
+            { value: 'dueDate', label: '按截止时间', icon: ScheduleIcon },
+            { value: 'createdAt', label: '按创建时间', icon: AccessTimeIcon }
+          ]}
+          selectedValue={sortBy}
+          onSelect={onSortByChange}
+          size="small"
+          sx={{
+            ml: 1,
+            mr: 0.5,
+            fontSize: '0.8rem',
+            minWidth: 'auto',
+            width: 'auto'
+          }}
+        />
                 <FilterToggleButton
                   filtersVisible={filtersVisible}
                   onToggle={toggleFiltersVisibility}
@@ -510,12 +596,12 @@ const TodoList = ({ onTodoSelect, onViewModeChange, onShowCompletedChange, viewM
           in={filtersVisible} 
           timeout={200}
           easing={{
-            enter: 'cubic-bezier(0.25, 0.46, 0.45, 0.94)',
+            enter: ANIMATIONS.dragTransition.easing,
             exit: 'cubic-bezier(0.55, 0.06, 0.68, 0.19)'
           }}
           sx={{
             '& .MuiCollapse-wrapper': {
-              transition: 'transform 0.2s cubic-bezier(0.25, 0.46, 0.45, 0.94)'
+              transition: createTransitionString(ANIMATIONS.dragTransition)
             }
           }}
         >
@@ -558,7 +644,7 @@ const TodoList = ({ onTodoSelect, onViewModeChange, onShowCompletedChange, viewM
         ) : (
           <List sx={{ p: 0 }}>
             {todos.map((todo) => (
-              <Fade key={todo.id} in timeout={300}>
+              <Fade key={todo.id} in timeout={200}>
                 <ListItem
                   disablePadding
                   sx={{
@@ -585,18 +671,11 @@ const TodoList = ({ onTodoSelect, onViewModeChange, onShowCompletedChange, viewM
                         bottom: 0,
                         background: 'rgba(76, 175, 80, 0.4)',
                         transform: 'translateX(-100%)',
-                        animation: 'greenSweep 0.3s cubic-bezier(0.25, 0.46, 0.45, 0.94) forwards',
+                        animation: createAnimationString(ANIMATIONS.completion),
                         zIndex: 1,
                         pointerEvents: 'none'
                       },
-                      '@keyframes greenSweep': {
-                        '0%': {
-                          transform: 'translateX(-100%)'
-                        },
-                        '100%': {
-                          transform: 'translateX(0%)'
-                        }
-                      }
+                      ...GREEN_SWEEP_KEYFRAMES
                     })
                   }}
                 >
@@ -623,7 +702,7 @@ const TodoList = ({ onTodoSelect, onViewModeChange, onShowCompletedChange, viewM
                         }}
                         sx={{
                           position: 'relative',
-                          transition: 'all 0.3s ease',
+                          transition: createTransitionString(ANIMATIONS.stateChange),
                           zIndex: 2,
                           ...(pendingComplete.has(todo.id) && {
                             backgroundColor: 'warning.light',
@@ -639,7 +718,7 @@ const TodoList = ({ onTodoSelect, onViewModeChange, onShowCompletedChange, viewM
                           <RadioButtonUncheckedIcon 
                             sx={{ 
                               color: 'warning.main',
-                              animation: 'pulse 1s infinite'
+                              animation: createAnimationString(ANIMATIONS.pulse)
                             }} 
                           />
                         ) : celebratingTodos.has(todo.id) ? (
@@ -754,6 +833,13 @@ const TodoList = ({ onTodoSelect, onViewModeChange, onShowCompletedChange, viewM
           </ListItemIcon>
           <ListItemText>编辑</ListItemText>
         </MenuItem>
+        <MenuItem onClick={handleConvertToNote}>
+          <ListItemIcon>
+            <NoteIcon fontSize="small" />
+          </ListItemIcon>
+          <ListItemText>转换为笔记</ListItemText>
+        </MenuItem>
+        <Divider />
         <MenuItem onClick={handleDelete}>
           <ListItemIcon>
             <DeleteIcon fontSize="small" />

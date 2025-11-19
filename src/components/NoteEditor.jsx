@@ -11,7 +11,9 @@ import {
   Alert,
   Snackbar,
   ToggleButton,
-  ToggleButtonGroup
+  ToggleButtonGroup,
+  Icon,
+  InputAdornment
 } from '@mui/material'
 import {
   Save as SaveIcon,
@@ -22,7 +24,12 @@ import {
   Tag as TagIcon,
   Edit as EditIcon,
   Visibility as PreviewIcon,
-  ViewColumn as SplitViewIcon
+  ViewColumn as SplitViewIcon,
+  Article as ArticleIcon,
+  Brush as WhiteboardIcon,
+  OpenInNew as OpenInNewIcon,
+  Code as CodeIcon,
+  GetApp as GetAppIcon
 } from '@mui/icons-material'
 import { useStore } from '../store/useStore'
 import { useStandaloneContext } from './StandaloneProvider'
@@ -34,15 +41,23 @@ import shortcutManager from '../utils/ShortcutManager'
 import TagInput from './TagInput'
 import MarkdownPreview from './MarkdownPreview'
 import MarkdownToolbar from './MarkdownToolbar'
+import WhiteboardEditor from './WhiteboardEditor'
+import NoteTypeConversionDialog from './NoteTypeConversionDialog'
+import WYSIWYGEditor from './WYSIWYGEditor'
+import { useDebouncedSave } from '../hooks/useDebouncedSave'
 import { imageAPI } from '../api/imageAPI'
+import { convertMarkdownToWhiteboard } from '../utils/markdownToWhiteboardConverter'
 
 const NoteEditor = () => {
   // 检测是否在独立窗口模式下运行
   let standaloneContext = null
+  let isStandaloneMode = false
   try {
     standaloneContext = useStandaloneContext()
+    isStandaloneMode = true
   } catch (error) {
     // 不在独立窗口模式下，使用主应用store
+    isStandaloneMode = false
   }
   
   // 根据运行环境选择状态管理
@@ -54,50 +69,162 @@ const NoteEditor = () => {
     notes,
     updateNote,
     togglePinNote,
-    autoSaveNote
+    autoSaveNote,
+    editorMode
   } = store
 
   const [title, setTitle] = useState('')
   const [content, setContent] = useState('')
   const [category, setCategory] = useState('')
   const [tags, setTags] = useState('')
+  const [noteType, setNoteType] = useState('markdown') // 'markdown' or 'whiteboard'
   const [isAutoSaving, setIsAutoSaving] = useState(false)
   const [lastSaved, setLastSaved] = useState(null)
   const [showSaveSuccess, setShowSaveSuccess] = useState(false)
   const [hasUnsavedChanges, setHasUnsavedChanges] = useState(false)
   const [viewMode, setViewMode] = useState('edit') // 'edit', 'preview', 'split'
   const [isDragging, setIsDragging] = useState(false)
-  const autoSaveTimerRef = useRef(null)
+  const [conversionDialogOpen, setConversionDialogOpen] = useState(false)
+  const [pendingNoteType, setPendingNoteType] = useState(null)
+  const [whiteboardSaveFunc, setWhiteboardSaveFunc] = useState(null)
+  const [whiteboardExportFunc, setWhiteboardExportFunc] = useState(null)
+  const [showToolbar, setShowToolbar] = useState(!isStandaloneMode) // 独立窗口默认隐藏工具栏
+  const [wikiLinkError, setWikiLinkError] = useState('') // wiki 链接错误提示
+  const [isOpenInStandaloneWindow, setIsOpenInStandaloneWindow] = useState(false) // 是否在独立窗口中打开
   const contentRef = useRef(null)
   const titleRef = useRef(null)
+  const toolbarTimeoutRef = useRef(null)
+  const wysiwygEditorRef = useRef(null)
 
   const currentNote = notes.find(note => note.id === selectedNoteId)
+  const prevNoteIdRef = useRef(null)
+  const prevStateRef = useRef({ title: '', content: '', category: '', tags: '', noteType: 'markdown' })
+  const hasUnsavedChangesRef = useRef(false)
+  
+  // 保存函数（稳定引用）
+  const performSave = async () => {
+    if (!selectedNoteId) return
+    
+    setIsAutoSaving(true)
+    try {
+      const tagsArray = parseTags(prevStateRef.current.tags)
+      await updateNote(selectedNoteId, {
+        title: prevStateRef.current.title.trim() || '无标题',
+        content: prevStateRef.current.content,
+        category: prevStateRef.current.category.trim(),
+        tags: formatTags(tagsArray),
+        note_type: prevStateRef.current.noteType
+      })
+      setLastSaved(new Date().toISOString())
+      setHasUnsavedChanges(false)
+      hasUnsavedChangesRef.current = false
+      console.log('自动保存成功')
+    } catch (error) {
+      console.error('自动保存失败:', error)
+    } finally {
+      setIsAutoSaving(false)
+    }
+  }
+  
+  // 使用防抖保存 Hook
+  const { debouncedSave, saveNow, cancelSave } = useDebouncedSave(performSave, 2000)
 
-  // 加载笔记数据
+  // 同步 hasUnsavedChanges 到 ref
+  useEffect(() => {
+    hasUnsavedChangesRef.current = hasUnsavedChanges
+  }, [hasUnsavedChanges])
+
+  // 第一步：在切换笔记前保存旧笔记
+  useEffect(() => {
+    // 只在 selectedNoteId 真正变化时才执行
+    if (prevNoteIdRef.current !== null && prevNoteIdRef.current !== selectedNoteId) {
+      // 检查是否有未保存的更改
+      if (hasUnsavedChangesRef.current) {
+        // 立即保存旧笔记，使用 prevStateRef 中保存的状态
+        const oldNoteId = prevNoteIdRef.current
+        const stateToSave = {
+          title: prevStateRef.current.title.trim() || '无标题',
+          content: prevStateRef.current.content,
+          category: prevStateRef.current.category.trim(),
+          tags: formatTags(parseTags(prevStateRef.current.tags)),
+          note_type: prevStateRef.current.noteType
+        }
+
+        // 先取消当前的防抖保存
+        cancelSave()
+
+        // 立即保存
+        updateNote(oldNoteId, stateToSave).then(() => {
+          console.log('切换笔记前已自动保存')
+        }).catch(error => {
+          console.error('切换笔记时保存失败:', error)
+        })
+      }
+    }
+
+    // 更新 prevNoteIdRef
+    prevNoteIdRef.current = selectedNoteId
+  }, [selectedNoteId, updateNote, cancelSave])  // 检查笔记是否在独立窗口中打开（仅主窗口）
+  useEffect(() => {
+    if (isStandaloneMode || !selectedNoteId) {
+      setIsOpenInStandaloneWindow(false)
+      return
+    }
+
+    const checkWindowStatus = async () => {
+      try {
+        const result = await window.electronAPI?.isNoteOpenInWindow?.(selectedNoteId)
+        if (result?.success) {
+          setIsOpenInStandaloneWindow(result.isOpen)
+        }
+      } catch (error) {
+        console.error('检查独立窗口状态失败:', error)
+      }
+    }
+
+    checkWindowStatus()
+    // 定期检查状态（每2秒）
+    const interval = setInterval(checkWindowStatus, 2000)
+    return () => clearInterval(interval)
+  }, [selectedNoteId, isStandaloneMode])
+
+  // 第二步：加载新笔记的数据
   useEffect(() => {
     if (currentNote) {
-      setTitle(currentNote.title || '')
-      setContent(currentNote.content || '')
-      setCategory(currentNote.category || '')
-      setTags(currentNote.tags ? currentNote.tags.join(', ') : '')
+      const newTitle = currentNote.title || ''
+      const newContent = currentNote.content || ''
+      const newCategory = currentNote.category || ''
+      const newTags = currentNote.tags ? currentNote.tags.join(', ') : ''
+      const newNoteType = currentNote.note_type || 'markdown'
+      
+      setTitle(newTitle)
+      setContent(newContent)
+      setCategory(newCategory)
+      setTags(newTags)
+      setNoteType(newNoteType)
       setLastSaved(currentNote.updated_at)
       setHasUnsavedChanges(false)
       
+      // 保存新笔记的状态到 ref
+      prevStateRef.current = {
+        title: newTitle,
+        content: newContent,
+        category: newCategory,
+        tags: newTags,
+        noteType: newNoteType
+      }
+    
       // 如果是新创建的笔记（标题为"新笔记"且内容为空），自动聚焦到标题输入框
       if (currentNote.title === '新笔记' && !currentNote.content) {
-        console.log('检测到新笔记，准备自动聚焦')
         setTimeout(() => {
           if (titleRef.current) {
-            console.log('开始聚焦到标题输入框')
             const inputElement = titleRef.current.querySelector('input')
             if (inputElement) {
               inputElement.focus()
-              inputElement.select() // 选中标题文本，方便用户直接输入新标题
+              inputElement.select()
             }
-          } else {
-            console.log('titleRef.current 不存在')
           }
-        }, 300) // 增加延迟时间确保DOM完全渲染
+        }, 100)
       }
     } else {
       setTitle('')
@@ -106,8 +233,9 @@ const NoteEditor = () => {
       setTags('')
       setLastSaved(null)
       setHasUnsavedChanges(false)
+      prevStateRef.current = { title: '', content: '', category: '', tags: '' }
     }
-  }, [currentNote])
+  }, [selectedNoteId, currentNote])
 
   // 初始化快捷键管理器和注册监听器
   useEffect(() => {
@@ -126,63 +254,108 @@ const NoteEditor = () => {
 
     initializeShortcuts()
     
-    // 清理函数
+    // 清理函数：组件卸载时保存未保存的内容
     return () => {
       shortcutManager.unregisterListener(document)
+      
+      // 组件卸载时立即保存
+      if (hasUnsavedChangesRef.current && selectedNoteId) {
+        const tagsArray = parseTags(prevStateRef.current.tags)
+        updateNote(selectedNoteId, {
+          title: prevStateRef.current.title.trim() || '无标题',
+          content: prevStateRef.current.content,
+          category: prevStateRef.current.category.trim(),
+          tags: formatTags(tagsArray)
+        }).catch(error => {
+          console.error('组件卸载时保存失败:', error)
+        })
+      }
     }
   }, [])
 
-  // 自动保存逻辑
+  // 清理定时器（独立窗口模式）
   useEffect(() => {
-    if (hasUnsavedChanges && selectedNoteId) {
-      if (autoSaveTimerRef.current) {
-        clearTimeout(autoSaveTimerRef.current)
+    return () => {
+      if (toolbarTimeoutRef.current) {
+        clearTimeout(toolbarTimeoutRef.current)
       }
-
-      autoSaveTimerRef.current = setTimeout(async () => {
-        setIsAutoSaving(true)
-        try {
-          // 自动保存所有字段，不仅仅是内容
-          const tagsArray = parseTags(tags)
-          await updateNote(selectedNoteId, {
-            title: title.trim() || '无标题',
-            content,
-            category: category.trim(),
-            tags: formatTags(tagsArray)
-          })
-          setLastSaved(new Date().toISOString())
-          setHasUnsavedChanges(false)
-        } catch (error) {
-          console.error('自动保存失败:', error)
-        } finally {
-          setIsAutoSaving(false)
-        }
-      }, 2000) // 2秒后自动保存
     }
+  }, [])
+
+  // 独立窗口模式：监听窗口关闭事件，触发保存
+  useEffect(() => {
+    if (!isStandaloneMode) return
+
+    const handleStandaloneSave = async () => {
+      console.log('独立窗口保存事件触发', { noteType: prevStateRef.current.noteType })
+      
+      // 对于白板类型，触发全局保存事件由WhiteboardEditor处理
+      if (prevStateRef.current.noteType === 'whiteboard') {
+        console.log('白板类型，触发白板保存事件')
+        const whiteboardSaveEvent = new CustomEvent('whiteboard-save')
+        window.dispatchEvent(whiteboardSaveEvent)
+        // 等待白板保存完成
+        await new Promise(resolve => setTimeout(resolve, 500))
+        return
+      }
+      
+      // Markdown类型的保存逻辑
+      if (hasUnsavedChangesRef.current && selectedNoteId) {
+        try {
+          const tagsArray = parseTags(prevStateRef.current.tags)
+          await updateNote(selectedNoteId, {
+            title: prevStateRef.current.title.trim() || '无标题',
+            content: prevStateRef.current.content,
+            category: prevStateRef.current.category.trim(),
+            tags: formatTags(tagsArray),
+            note_type: prevStateRef.current.noteType
+          })
+          console.log('独立窗口关闭前Markdown保存成功')
+        } catch (error) {
+          console.error('独立窗口关闭前保存失败:', error)
+        }
+      }
+    }
+
+    // 监听自定义保存事件
+    window.addEventListener('standalone-window-save', handleStandaloneSave)
 
     return () => {
-      if (autoSaveTimerRef.current) {
-        clearTimeout(autoSaveTimerRef.current)
-      }
+      window.removeEventListener('standalone-window-save', handleStandaloneSave)
     }
-  }, [hasUnsavedChanges, selectedNoteId, title, content, category, tags]) // 添加所有字段作为依赖
+  }, [isStandaloneMode, selectedNoteId, updateNote])
 
   const handleTitleChange = (e) => {
-    setTitle(e.target.value)
+    const newValue = e.target.value
+    setTitle(newValue)
     setHasUnsavedChanges(true)
+    // 同时更新 ref，避免额外的 useEffect
+    prevStateRef.current.title = newValue
+    // 触发防抖保存
+    debouncedSave()
   }
 
   const handleContentChange = (e) => {
-    setContent(e.target.value)
+    const newValue = e.target.value
+    setContent(newValue)
     setHasUnsavedChanges(true)
+    // 同时更新 ref，避免额外的 useEffect
+    prevStateRef.current.content = newValue
+    // 触发防抖保存
+    debouncedSave()
   }
+
+
 
   const handleCategoryChange = (e) => {
-    setCategory(e.target.value)
+    const newValue = e.target.value
+    setCategory(newValue)
     setHasUnsavedChanges(true)
+    // 同时更新 ref，避免额外的 useEffect
+    prevStateRef.current.category = newValue
+    // 触发防抖保存
+    debouncedSave()
   }
-
-
 
   const handleManualSave = async () => {
     if (!selectedNoteId) return
@@ -209,6 +382,158 @@ const NoteEditor = () => {
     }
   }
 
+  // 处理 wiki 链接点击
+  const handleWikiLinkClick = (wikiTarget, wikiSection) => {
+    // 根据笔记标题查找所有匹配的笔记
+    const matchingNotes = notes.filter(note =>
+      note.title && note.title.toLowerCase() === wikiTarget.toLowerCase()
+    )
+
+    if (matchingNotes.length === 0) {
+      console.warn(`Wiki link target not found: ${wikiTarget}`)
+      setWikiLinkError(`找不到笔记"${wikiTarget}"`)
+      return
+    }
+
+    let targetNote
+
+    if (matchingNotes.length === 1) {
+      // 只有一个匹配的笔记，直接使用
+      targetNote = matchingNotes[0]
+    } else {
+      // 多个相同标题的笔记，优先选择最近修改的
+      targetNote = matchingNotes.reduce((latest, current) => {
+        const latestTime = new Date(latest.updated_at || latest.created_at || 0)
+        const currentTime = new Date(current.updated_at || current.created_at || 0)
+        return currentTime > latestTime ? current : latest
+      })
+
+      console.info(`Multiple notes found with title "${wikiTarget}", navigating to the most recently updated one (ID: ${targetNote.id})`)
+    }
+
+    // 设置选中的笔记 ID 来导航到该笔记
+    store.setSelectedNoteId(targetNote.id)
+  }
+
+  // 处理标签点击
+  const handleTagClick = (tag) => {
+    // 设置搜索查询来过滤显示该标签的笔记
+    store.setSearchQuery(`tag:${tag}`)
+  }
+
+  // 处理在独立窗口打开
+  const handleOpenStandalone = async () => {
+    if (!selectedNoteId) return
+    
+    try {
+      await window.electronAPI.createNoteWindow(selectedNoteId)
+    } catch (error) {
+      console.error('打开独立窗口失败:', error)
+    }
+  }
+
+  // 处理笔记类型切换
+  const handleNoteTypeChange = (event, newType) => {
+    if (newType === null) return
+    
+    // 如果切换到相同类型，不做任何操作
+    if (newType === noteType) return
+    
+    // 记录用户想要切换到的类型
+    setPendingNoteType(newType)
+    
+    // 显示转换确认对话框
+    setConversionDialogOpen(true)
+  }
+
+  // 处理转换确认
+  const handleConversionConfirm = async (confirmed) => {
+    setConversionDialogOpen(false)
+    
+    if (!confirmed || !pendingNoteType) {
+      // 用户取消，重置
+      setPendingNoteType(null)
+      return
+    }
+    
+    try {
+      if (noteType === 'markdown' && pendingNoteType === 'whiteboard') {
+        // Markdown → 白板转换
+        await convertMarkdownToWhiteboardNote()
+      } else if (noteType === 'whiteboard' && pendingNoteType === 'markdown') {
+        // 白板 → Markdown 转换（清空内容）
+        await convertWhiteboardToMarkdownNote()
+      }
+    } catch (error) {
+      console.error('笔记类型转换失败:', error)
+      // 显示错误提示
+      setShowSaveSuccess(false)
+    } finally {
+      setPendingNoteType(null)
+    }
+  }
+
+  // Markdown 转白板
+  const convertMarkdownToWhiteboardNote = async () => {
+    if (!selectedNoteId) return
+    
+    try {
+      // 转换 Markdown 内容为白板数据
+      const whiteboardContent = convertMarkdownToWhiteboard(content)
+      
+      // 更新笔记
+      await updateNote(selectedNoteId, {
+        content: whiteboardContent,
+        note_type: 'whiteboard',
+        title: title.trim() || '无标题',
+        category: category.trim(),
+        tags: formatTags(parseTags(tags))
+      })
+      
+      // 更新本地状态
+      setNoteType('whiteboard')
+      setContent('') // 清空 Markdown content 状态（白板数据存储在 note.content 中）
+      prevStateRef.current.noteType = 'whiteboard'
+      prevStateRef.current.content = ''
+      setHasUnsavedChanges(false)
+      hasUnsavedChangesRef.current = false
+      
+      console.log('Markdown 转白板成功')
+    } catch (error) {
+      console.error('Markdown 转白板失败:', error)
+      throw error
+    }
+  }
+
+  // 白板转 Markdown
+  const convertWhiteboardToMarkdownNote = async () => {
+    if (!selectedNoteId) return
+    
+    try {
+      // 清空内容，切换类型
+      await updateNote(selectedNoteId, {
+        content: '',
+        note_type: 'markdown',
+        title: title.trim() || '无标题',
+        category: category.trim(),
+        tags: formatTags(parseTags(tags))
+      })
+      
+      // 更新本地状态
+      setNoteType('markdown')
+      setContent('')
+      prevStateRef.current.noteType = 'markdown'
+      prevStateRef.current.content = ''
+      setHasUnsavedChanges(false)
+      hasUnsavedChangesRef.current = false
+      
+      console.log('白板转 Markdown 成功')
+    } catch (error) {
+      console.error('白板转 Markdown 失败:', error)
+      throw error
+    }
+  }
+
   // 处理Markdown工具栏插入文本
   const handleMarkdownInsert = (before, after = '', placeholder = '') => {
     if (!contentRef.current) return
@@ -228,6 +553,9 @@ const NoteEditor = () => {
     
     setContent(newContent)
     setHasUnsavedChanges(true)
+    prevStateRef.current.content = newContent
+    // 触发防抖保存
+    debouncedSave()
     
     // 设置新的光标位置
     setTimeout(() => {
@@ -265,49 +593,49 @@ const NoteEditor = () => {
     }
   }
 
-
-  
   // 处理键盘事件
   const handleKeyDown = (e) => {
-    // 处理Tab键缩进
-    if (e.key === 'Tab') {
-      e.preventDefault()
-      
-      const start = e.target.selectionStart
-      const end = e.target.selectionEnd
-      const newContent = content.substring(0, start) + '  ' + content.substring(end)
-      setContent(newContent)
-      setHasUnsavedChanges(true)
-      
-      // 设置光标位置
-      setTimeout(() => {
-        e.target.selectionStart = e.target.selectionEnd = start + 2
-      }, 0)
-      return
-    }
-    
-    // 处理Ctrl+B (粗体)
-    if (e.ctrlKey && e.key === 'b') {
-      e.preventDefault()
-      handleMarkdownInsert('**', '**', '粗体文本')
-      return
-    }
-    
-    // 处理Ctrl+I (斜体)
-    if (e.ctrlKey && e.key === 'i') {
-      e.preventDefault()
-      handleMarkdownInsert('*', '*', '斜体文本')
-      return
-    }
-    
-    // 处理Ctrl+Z (撤销) - 使用浏览器原生撤销功能
-    if (e.ctrlKey && e.key === 'z') {
-      // 不阻止默认行为，让浏览器处理撤销
-      return
-    }
-  }
+    // 只在Markdown模式下处理特殊键盘事件
+    if (editorMode === 'markdown') {
+      // 处理Tab键缩进
+      if (e.key === 'Tab') {
+        e.preventDefault()
 
-  // 处理图片粘贴
+        const start = e.target.selectionStart
+        const end = e.target.selectionEnd
+        
+        const newContent = content.substring(0, start) + '  ' + content.substring(end)
+        setContent(newContent)
+        setHasUnsavedChanges(true)
+        prevStateRef.current.content = newContent
+        // 触发防抖保存
+        debouncedSave()
+
+        // 设置光标位置
+        setTimeout(() => {
+          e.target.selectionStart = e.target.selectionEnd = start + 2
+        }, 0)
+        return
+      }
+
+      // 处理Ctrl+B (粗体)
+      if (e.ctrlKey && e.key === 'b') {
+        e.preventDefault()
+        handleMarkdownInsert('**', '**', '粗体文本')
+        return
+      }
+
+      // 处理Ctrl+I (斜体)
+      if (e.ctrlKey && e.key === 'i') {
+        e.preventDefault()
+        handleMarkdownInsert('*', '*', '斜体文本')
+        return
+      }
+    }
+
+    // 撤销/重做使用浏览器原生功能
+    // 不需要阻止默认行为
+  }  // 处理图片粘贴
   const handlePaste = async (e) => {
     const items = e.clipboardData?.items
     if (!items) return
@@ -423,18 +751,83 @@ const NoteEditor = () => {
     )
   }
 
+  // 处理鼠标移动事件（独立窗口模式）
+  const handleMouseMove = (e) => {
+    if (!isStandaloneMode) return
+    
+    const triggerAreaHeight = 50 // 触发展开的区域（最顶端50px）
+    const toolbarTotalHeight = 160 // TitleBar(28px) + 工具栏(48px) + 标题栏(48px) = 124px
+    
+    // 鼠标在整个工具栏区域内（包括触发区域）
+    if (e.clientY < toolbarTotalHeight) {
+      // 在触发区域或工具栏已展开
+      if (e.clientY < triggerAreaHeight || showToolbar) {
+        setShowToolbar(true)
+        // 清除隐藏定时器
+        if (toolbarTimeoutRef.current) {
+          clearTimeout(toolbarTimeoutRef.current)
+          toolbarTimeoutRef.current = null
+        }
+      }
+    } else if (showToolbar) {
+      // 鼠标离开了工具栏区域，设置延迟隐藏
+      if (!toolbarTimeoutRef.current) {
+        toolbarTimeoutRef.current = setTimeout(() => {
+          setShowToolbar(false)
+          toolbarTimeoutRef.current = null
+        }, 500) // 500ms延迟
+      }
+    }
+  }
+  
+  // 处理鼠标离开编辑器区域
+  const handleMouseLeave = (e) => {
+    if (!isStandaloneMode) return
+    
+    // 不立即隐藏，给一个延迟让handleMouseMove有机会处理
+    // 如果鼠标真的离开了整个窗口，这个延迟后会隐藏
+    if (toolbarTimeoutRef.current) {
+      clearTimeout(toolbarTimeoutRef.current)
+    }
+    
+    toolbarTimeoutRef.current = setTimeout(() => {
+      setShowToolbar(false)
+      toolbarTimeoutRef.current = null
+    }, 500)
+  }
+
   return (
-    <Box sx={{ height: '100%', display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
-      {/* 工具栏 */}
+    <Box
+      sx={{ height: '100%', display: 'flex', flexDirection: 'column', overflow: 'hidden', position: 'relative' }}
+      onMouseMove={handleMouseMove}
+      onMouseLeave={handleMouseLeave}
+    >
+      {/* 工具栏 - 调整高度 */}
       <Paper
         elevation={0}
         sx={{
-          p: 2,
+          p: 1,  // 降低内边距
+          height: '48px',  // 固定高度
           borderBottom: 1,
           borderColor: 'divider',
           display: 'flex',
           alignItems: 'center',
-          gap: 2
+          gap: 1,
+          overflow: 'hidden',  // 防止内容溢出
+          // 独立窗口模式下的特殊样式
+          ...(isStandaloneMode && {
+            position: 'absolute',
+            top: 0,
+            left: 0,
+            right: 0,
+            zIndex: 1000,
+            backgroundColor: 'background.paper',
+            opacity: showToolbar ? 1 : 0,
+            transform: showToolbar ? 'translateY(0)' : 'translateY(-100%)',
+            transition: 'opacity 0.3s ease, transform 0.3s ease',
+            pointerEvents: showToolbar ? 'auto' : 'none',
+            boxShadow: showToolbar ? 2 : 0
+          })
         }}
       >
         <Box sx={{ flex: 1, display: 'flex', alignItems: 'center', gap: 1 }}>
@@ -458,33 +851,28 @@ const NoteEditor = () => {
           )}
         </Box>
 
-        {/* 视图模式切换 */}
+        {/* 笔记类型切换 - 移到工具栏 */}
         <ToggleButtonGroup
-          value={viewMode}
+          value={noteType}
           exclusive
-          onChange={(event, newMode) => {
-            if (newMode !== null) {
-              setViewMode(newMode)
-            }
-          }}
+          onChange={handleNoteTypeChange}
           size="small"
         >
-          <ToggleButton value="edit">
-            <Tooltip title="编辑模式">
-              <EditIcon fontSize="small" />
-            </Tooltip>
+          <ToggleButton value="markdown">
+            <ArticleIcon fontSize="small" sx={{ mr: 0.5 }} />
+            Markdown
           </ToggleButton>
-          <ToggleButton value="preview">
-            <Tooltip title="预览模式">
-              <PreviewIcon fontSize="small" />
-            </Tooltip>
-          </ToggleButton>
-          <ToggleButton value="split">
-            <Tooltip title="分屏模式">
-              <SplitViewIcon fontSize="small" />
-            </Tooltip>
+          <ToggleButton value="whiteboard">
+            <WhiteboardIcon fontSize="small" sx={{ mr: 0.5 }} />
+            白板
           </ToggleButton>
         </ToggleButtonGroup>
+        
+        <Tooltip title="在独立窗口打开">
+          <IconButton onClick={handleOpenStandalone} size="small">
+            <OpenInNewIcon />
+          </IconButton>
+        </Tooltip>
         
         <Tooltip title={currentNote?.is_pinned ? '取消置顶' : '置顶笔记'}>
           <IconButton onClick={handleTogglePin} size="small">
@@ -496,204 +884,318 @@ const NoteEditor = () => {
           </IconButton>
         </Tooltip>
         
-        <Tooltip title="保存 (Ctrl+S)">
-          <IconButton 
-            onClick={handleManualSave} 
-            size="small"
-            disabled={!hasUnsavedChanges}
-          >
-            <SaveIcon />
-          </IconButton>
-        </Tooltip>
+        {/* Markdown 模式：保存按钮 */}
+        {noteType === 'markdown' && (
+          <Tooltip title="保存 (Ctrl+S)">
+            <IconButton 
+              onClick={handleManualSave} 
+              size="small"
+              disabled={!hasUnsavedChanges}
+            >
+              <SaveIcon />
+            </IconButton>
+          </Tooltip>
+        )}
+        
+        {/* 白板模式：保存白板和导出PNG */}
+        {noteType === 'whiteboard' && (
+          <>
+            <Tooltip title="保存白板 (Ctrl+S)">
+              <IconButton 
+                onClick={() => whiteboardSaveFunc?.()} 
+                size="small"
+              >
+                <SaveIcon />
+              </IconButton>
+            </Tooltip>
+            
+            <Tooltip title="导出 PNG">
+              <IconButton 
+                onClick={() => whiteboardExportFunc?.()}
+                size="small"
+              >
+                <GetAppIcon />
+              </IconButton>
+            </Tooltip>
+          </>
+        )}
       </Paper>
 
-      {/* 编辑区域 */}
-      <Box sx={{ flex: 1, display: 'flex', flexDirection: viewMode === 'split' ? 'row' : 'column', overflow: 'hidden', minHeight: 0, height: 'calc(100% - 80px)' }}>
-        {/* 编辑面板 */}
-        {(viewMode === 'edit' || viewMode === 'split') && (
-          <Box 
-            sx={{ 
-              flex: viewMode === 'split' ? 1 : 'auto',
-              p: 2, 
-              overflow: 'auto',
-              borderRight: viewMode === 'split' ? 1 : 0,
-              borderColor: 'divider',
-              minHeight: 0,
-              display: 'flex',
-              flexDirection: 'column',
-              position: 'relative',
-              // 拖拽样式
-              ...(isDragging && {
-                backgroundColor: 'action.hover',
-                '&::after': {
-                  content: '"拖拽图片到这里"',
-                  position: 'absolute',
-                  top: 0,
-                  left: 0,
-                  right: 0,
-                  bottom: 0,
-                  display: 'flex',
-                  alignItems: 'center',
-                  justifyContent: 'center',
-                  backgroundColor: 'rgba(25, 118, 210, 0.1)',
-                  color: 'primary.main',
-                  fontSize: '1.2rem',
-                  fontWeight: 'bold',
-                  zIndex: 1000,
-                  border: '2px dashed',
-                  borderColor: 'primary.main',
-                  borderRadius: 1
-                }
-              })
+      {/* 标签和标题栏 - 调整高度 */}
+      <Box
+        sx={{
+          p: 1,  // 降低内边距
+          height: '48px',  // 固定高度
+          borderBottom: 1,
+          borderColor: 'divider',
+          display: 'flex',
+          alignItems: 'center',
+          gap: 1,
+          flexWrap: 'nowrap',  // 防止换行
+          overflow: 'hidden',   // 防止内容溢出
+          // 独立窗口模式下的特殊样式
+          ...(isStandaloneMode && {
+            position: 'absolute',
+            top: 48,  // 工具栏高度
+            left: 0,
+            right: 0,
+            zIndex: 999,
+            backgroundColor: 'background.paper',
+            opacity: showToolbar ? 1 : 0,
+            transform: showToolbar ? 'translateY(0)' : 'translateY(-100%)',
+            transition: 'opacity 0.3s ease, transform 0.3s ease',
+            pointerEvents: showToolbar ? 'auto' : 'none',
+            boxShadow: showToolbar ? 1 : 0
+          })
+        }}
+      >
+        {/* 标题输入 - 紧凑样式 */}
+        <TextField
+          ref={titleRef}
+          fullWidth
+          variant="standard"
+          placeholder="笔记标题..."
+          value={title}
+          onChange={handleTitleChange}
+          onKeyDown={handleKeyDown}
+          sx={{
+            flex: 1,  // 减小标题宽度占比
+            '& .MuiInput-input': {
+              fontSize: '1.1rem',  // 减小字体大小
+              fontWeight: 500,
+              padding: '2px 0',    // 减小内边距
+              maxWidth: '100%'     // 确保不超过容器宽度
+            }
+          }}
+          InputProps={{
+            disableUnderline: true
+          }}
+        />
+
+        {/* 分类和标签 - 紧凑布局 */}
+        <Box sx={{ flex: 1, display: 'flex', alignItems: 'center', gap: 0.5, justifyContent: 'flex-end' }}>
+          <TextField
+            size="small"
+            placeholder="分类"
+            value={category}
+            onChange={handleCategoryChange}
+            onKeyDown={handleKeyDown}
+            InputProps={{
+              startAdornment: <InputAdornment position="start">
+                <CategoryIcon sx={{ mr: 0.5, color: 'action.active', fontSize: '14px' }} />
+              </InputAdornment>
             }}
-            onDragEnter={handleDragEnter}
-            onDragLeave={handleDragLeave}
-            onDragOver={handleDragOver}
-            onDrop={handleDrop}
-            onPaste={handlePaste}
-          >
-            {/* 标题输入 */}
-            <TextField
-              ref={titleRef}
-              fullWidth
-              variant="standard"
-              placeholder="笔记标题..."
-              value={title}
-              onChange={handleTitleChange}
-              onKeyDown={handleKeyDown}
-              sx={{
-                mb: 2,
-                '& .MuiInput-input': {
-                  fontSize: '1.5rem',
-                  fontWeight: 500
-                }
+            sx={{ 
+              minWidth: 100, 
+              maxWidth: '45%',  // 限制分类宽度
+              mr: 0.5,
+              '& .MuiInputBase-input': {
+                fontSize: '0.85rem'  // 减小字体大小
+              }
+            }}
+          />
+          <Box sx={{ flex: 1, maxWidth: '55%' }}>
+            <TagInput
+              value={tags}
+              onChange={(newTags) => {
+                setTags(newTags);
+                setHasUnsavedChanges(true);
+                prevStateRef.current.tags = newTags;
+                debouncedSave();
               }}
-              InputProps={{
-                disableUnderline: true
-              }}
-            />
-
-            {/* 分类和标签 */}
-            <Box sx={{ display: 'flex', gap: 2, mb: 2 }}>
-              <TextField
-                size="small"
-                placeholder="分类"
-                value={category}
-                onChange={handleCategoryChange}
-                onKeyDown={handleKeyDown}
-                InputProps={{
-                  startAdornment: <CategoryIcon sx={{ mr: 1, color: 'action.active' }} />
-                }}
-                sx={{ minWidth: 150 }}
-              />
-              <TagInput
-                    value={tags}
-                    onChange={(newTags) => {
-                      setTags(newTags);
-                      setHasUnsavedChanges(true);
-                    }}
-                    placeholder="标签 (用逗号分隔)"
-                    maxTags={10}
-                    showSuggestions={true}
-                    inline={true}
-                    sx={{ flex: 1 }}
-                  />
-            </Box>
-
-            <Divider sx={{ mb: 2 }} />
-
-             {/* Markdown工具栏 */}
-             <MarkdownToolbar 
-               onInsert={handleMarkdownInsert}
-               disabled={!selectedNoteId}
-             />
-
-             {/* 内容编辑器 */}
-            <TextField
-              ref={contentRef}
-              fullWidth
-              multiline
-              variant="standard"
-              placeholder="开始写笔记... (支持Markdown语法)"
-              value={content}
-              onChange={handleContentChange}
-              onKeyDown={handleKeyDown}
-              InputProps={{
-                disableUnderline: true
-              }}
-              sx={{
-                flex: 1,
-                '& .MuiInput-root': {
-                  height: '100%'
+              placeholder="标签"
+              maxTags={5}
+              showSuggestions={true}
+              inline={true}
+              noteContent={content}
+              noteId={selectedNoteId}
+              size="small"
+              sx={{ 
+                width: '100%',
+                // 确保标签输入框和分类输入框高度一致
+                '& .MuiInputBase-root': {
+                  height: '100%',
+                  fontSize: '0.85rem'
                 },
-                '& .MuiInput-input': {
-                  fontSize: '1rem',
-                  lineHeight: 1.6,
-                  fontFamily: 'monospace',
-                  height: '100% !important',
-                  overflow: 'auto !important'
+                '& .MuiInputBase-input': {
+                  fontSize: '0.85rem'
                 }
               }}
             />
           </Box>
+        </Box>
+      </Box>
+
+      {/* 编辑区域 */}
+      <Box sx={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden', minHeight: 0 }}>
+        {/* 独立窗口打开提示 */}
+        {isOpenInStandaloneWindow && !isStandaloneMode && (
+          <Alert severity="info" sx={{ m: 2, mb: 0 }}>
+            此笔记已在独立窗口中打开。为避免冲突，请在独立窗口中编辑，或关闭独立窗口后再在此编辑。
+          </Alert>
+        )}
+        {/* Markdown 编辑器 */}
+        {noteType === 'markdown' && (
+          <Box sx={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden', minHeight: 0 }}>
+            <Box
+              sx={{
+                // 独立窗口模式下的特殊样式
+                ...(isStandaloneMode && {
+                  position: 'absolute',
+                  top: 96,  // 工具栏(48px) + 标题栏(48px)
+                  left: 0,
+                  right: 0,
+                  zIndex: 998,
+                  opacity: showToolbar ? 1 : 0,
+                  transform: showToolbar ? 'translateY(0)' : 'translateY(-100%)',
+                  transition: 'opacity 0.3s ease, transform 0.3s ease',
+                  pointerEvents: showToolbar ? 'auto' : 'none'
+                })
+              }}
+            >
+              <MarkdownToolbar
+                onInsert={handleMarkdownInsert}
+                disabled={!selectedNoteId || viewMode === 'preview'}
+                viewMode={viewMode}
+                onViewModeChange={setViewMode}
+                editor={wysiwygEditorRef.current?.getEditor?.()}
+                editorMode={editorMode}
+              />
+            </Box>
+            <Box
+              sx={{
+                flex: 1,
+                display: 'flex',
+                flexDirection: viewMode === 'split' ? 'row' : 'column',
+                overflow: 'hidden',
+                minHeight: 0
+              }}
+            >
+              {/* 编辑面板 */}
+              {(viewMode === 'edit' || viewMode === 'split') && (
+                <Box 
+                  sx={{ 
+                    flex: viewMode === 'split' ? 1 : 'auto',
+                    p: editorMode === 'wysiwyg' ? 0 : 2, 
+                    overflow: 'auto',
+                    borderRight: viewMode === 'split' ? 1 : 0,
+                    borderColor: 'divider',
+                    minHeight: 0,
+                    display: 'flex',
+                    flexDirection: 'column',
+                    position: 'relative',
+                    // 拖拽样式
+                    ...(isDragging && editorMode === 'markdown' && {
+                      backgroundColor: 'action.hover',
+                      '&::after': {
+                        content: '"拖拽图片到这里"',
+                        position: 'absolute',
+                        top: 0,
+                        left: 0,
+                        right: 0,
+                        bottom: 0,
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                        backgroundColor: 'rgba(25, 118, 210, 0.1)',
+                        color: 'primary.main',
+                        fontSize: '1.2rem',
+                        fontWeight: 'bold',
+                        zIndex: 1000,
+                        border: '2px dashed',
+                        borderColor: 'primary.main',
+                        borderRadius: 1
+                      }
+                    })
+                  }}
+                  onDragEnter={editorMode === 'markdown' ? handleDragEnter : undefined}
+                  onDragLeave={editorMode === 'markdown' ? handleDragLeave : undefined}
+                  onDragOver={editorMode === 'markdown' ? handleDragOver : undefined}
+                  onDrop={editorMode === 'markdown' ? handleDrop : undefined}
+                  onPaste={editorMode === 'markdown' ? handlePaste : undefined}
+                >
+                  {/* 内容编辑器 - 根据 editorMode 切换 */}
+                  {editorMode === 'markdown' ? (
+                    <TextField
+                      ref={contentRef}
+                      fullWidth
+                      multiline
+                      variant="standard"
+                      placeholder="开始写笔记... (支持Markdown语法)"
+                      value={content}
+                      onChange={handleContentChange}
+                      onKeyDown={handleKeyDown}
+                      InputProps={{
+                        disableUnderline: true
+                      }}
+                      sx={{
+                        flex: 1,
+                        '& .MuiInput-root': {
+                          height: '100%'
+                        },
+                        '& .MuiInput-input': {
+                          fontSize: '1rem',
+                          lineHeight: 1.6,
+                          fontFamily: '"OPPOSans R", "OPPOSans", system-ui, -apple-system, sans-serif',
+                          height: '100% !important',
+                          overflow: 'auto !important'
+                        }
+                      }}
+                    />
+                  ) : (
+                    <WYSIWYGEditor
+                      ref={wysiwygEditorRef}
+                      content={content}
+                      onChange={(newContent) => {
+                        setContent(newContent)
+                        setHasUnsavedChanges(true)
+                        prevStateRef.current.content = newContent
+                        debouncedSave()
+                      }}
+                      placeholder="开始写笔记..."
+                    />
+                  )}
+                </Box>
+              )}
+
+              {/* 预览面板 */}
+              {(viewMode === 'preview' || viewMode === 'split') && (
+                <Box sx={{ 
+                  flex: viewMode === 'split' ? 1 : 'auto',
+                  height: viewMode === 'preview' ? '100%' : 'auto',
+                  overflow: 'hidden',
+                  display: 'flex',
+                  flexDirection: 'column',
+                  minHeight: 0
+                }}>
+                  <MarkdownPreview 
+                    content={content} 
+                    onWikiLinkClick={handleWikiLinkClick}
+                    onTagClick={handleTagClick}
+                    sx={{ 
+                      flex: 1,
+                      overflow: 'auto',
+                      minHeight: 0,
+                      maxWidth: '100%',
+                      width: '100%',
+                      boxSizing: 'border-box'
+                    }} 
+                  />
+                </Box>
+              )}
+            </Box>
+          </Box>
         )}
 
-        {/* 预览面板 */}
-        {(viewMode === 'preview' || viewMode === 'split') && (
-          <Box sx={{ 
-            flex: viewMode === 'split' ? 1 : 'auto',
-            height: viewMode === 'preview' ? '100%' : 'auto',
-            overflow: 'hidden',
-            display: 'flex',
-            flexDirection: 'column',
-            minHeight: 0
-          }}>
-            {viewMode === 'preview' && (
-              <Box sx={{ 
-                p: 2, 
-                borderBottom: 1, 
-                borderColor: 'divider',
-                userSelect: 'text', // 允许标题和标签文字选择
-                WebkitUserSelect: 'text',
-                MozUserSelect: 'text',
-                msUserSelect: 'text'
-              }}>
-                <Typography variant="h5" sx={{ fontWeight: 500, mb: 1 }}>
-                  {title || '无标题'}
-                </Typography>
-                {(category || tags) && (
-                  <Box sx={{ display: 'flex', gap: 1, alignItems: 'center', mb: 2 }}>
-                    {category && (
-                      <Chip
-                        icon={<CategoryIcon />}
-                        label={category}
-                        size="small"
-                        variant="outlined"
-                      />
-                    )}
-                    {tags && parseTags(tags).map((tag, index) => (
-                      <Chip
-                        key={index}
-                        label={tag}
-                        size="small"
-                        color="primary"
-                        variant="outlined"
-                      />
-                    ))}
-                  </Box>
-                )}
-              </Box>
-            )}
-            <MarkdownPreview 
-              content={content} 
-              sx={{ 
-                flex: 1,
-                overflow: 'auto',
-                minHeight: 0,
-                maxWidth: '100%',
-                width: '100%',
-                boxSizing: 'border-box'
-              }} 
+        {/* 白板编辑器 */}
+        {noteType === 'whiteboard' && selectedNoteId && (
+          <Box sx={{ flex: 1, overflow: 'hidden', minHeight: 0 }}>
+            <WhiteboardEditor
+              noteId={selectedNoteId}
+              showToolbar={showToolbar}
+              isStandaloneMode={isStandaloneMode}
+              onSaveWhiteboard={(func) => setWhiteboardSaveFunc(() => func)}
+              onExportPNG={(func) => setWhiteboardExportFunc(() => func)}
             />
           </Box>
         )}
@@ -710,6 +1212,30 @@ const NoteEditor = () => {
           笔记已保存
         </Alert>
       </Snackbar>
+
+      {/* Wiki 链接错误提示 */}
+      <Snackbar
+        open={!!wikiLinkError}
+        autoHideDuration={3000}
+        onClose={() => setWikiLinkError('')}
+        anchorOrigin={{ vertical: 'bottom', horizontal: 'center' }}
+      >
+        <Alert severity="warning" onClose={() => setWikiLinkError('')}>
+          {wikiLinkError}
+        </Alert>
+      </Snackbar>
+
+      {/* 笔记类型转换确认对话框 */}
+      <NoteTypeConversionDialog
+        open={conversionDialogOpen}
+        onClose={handleConversionConfirm}
+        conversionType={
+          noteType === 'markdown' && pendingNoteType === 'whiteboard'
+            ? 'markdown-to-whiteboard'
+            : 'whiteboard-to-markdown'
+        }
+        noteTitle={title}
+      />
     </Box>
   )
 }

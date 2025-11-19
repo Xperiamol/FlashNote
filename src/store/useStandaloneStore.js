@@ -16,6 +16,9 @@ export const useStandaloneStore = create((set, get) => ({
   // Todo相关状态
   todos: [],
   
+  // 编辑器模式
+  editorMode: 'markdown', // 'markdown' | 'wysiwyg'
+  
   // 主题模式
   themeMode: 'light',
   
@@ -183,6 +186,9 @@ export const useStandaloneStore = create((set, get) => ({
   
   // 设置主题模式
   setThemeMode: (mode) => set({ themeMode: mode }),
+  
+  // 设置编辑器模式
+  setEditorMode: (mode) => set({ editorMode: mode }),
   
   // 重置状态
   reset: () => set({

@@ -1,13 +1,12 @@
-import React, { useState, useEffect } from 'react'
+import React, { useState, useEffect, useMemo } from 'react'
 import { Box, Typography } from '@mui/material'
-import ReactMarkdown from 'react-markdown'
-import remarkGfm from 'remark-gfm'
-import rehypeHighlight from 'rehype-highlight'
-import rehypeRaw from 'rehype-raw'
 import { imageAPI } from '../api/imageAPI'
+import { getImageResolver } from '../utils/ImageProtocolResolver'
+import { createMarkdownRenderer } from '../markdown/index.js'
+import '../markdown/markdown.css'
 import 'highlight.js/styles/github.css'
 
-// 自定义图片组件
+// 自定义图片组件 - 支持 app:// 协议和云端图片
 const CustomImage = ({ src, alt, ...props }) => {
   const [imageSrc, setImageSrc] = useState(src)
   const [loading, setLoading] = useState(true)
@@ -15,19 +14,29 @@ const CustomImage = ({ src, alt, ...props }) => {
 
   useEffect(() => {
     const loadImage = async () => {
-      if (src && src.startsWith('images/')) {
-        try {
-          // 获取本地图片的base64数据
-          const base64Data = await imageAPI.getBase64(src)
-          setImageSrc(base64Data)
-        } catch (err) {
-          console.error('加载图片失败:', err)
+      if (!src) {
+        setLoading(false)
+        setError(true)
+        return
+      }
+
+      try {
+        // 使用协议解析器处理所有类型的图片路径
+        const resolver = getImageResolver()
+        const resolvedSrc = await resolver.resolve(src)
+        
+        if (resolvedSrc) {
+          setImageSrc(resolvedSrc)
+          setError(false)
+        } else {
           setError(true)
         }
-      } else {
-        setImageSrc(src)
+      } catch (err) {
+        console.error('加载图片失败:', err)
+        setError(true)
+      } finally {
+        setLoading(false)
       }
-      setLoading(false)
     }
 
     loadImage()
@@ -35,37 +44,34 @@ const CustomImage = ({ src, alt, ...props }) => {
 
   if (loading) {
     return (
-      <Box
-        sx={{
+      <span
+        style={{
           display: 'inline-block',
-          p: 1,
-          border: '1px dashed',
-          borderColor: 'divider',
-          borderRadius: 1,
-          color: 'text.secondary'
+          padding: '8px',
+          border: '1px dashed #ccc',
+          borderRadius: '4px',
+          color: '#666'
         }}
       >
         加载中...
-      </Box>
+      </span>
     )
   }
 
   if (error) {
     return (
-      <Box
-        sx={{
+      <span
+        style={{
           display: 'inline-block',
-          p: 1,
-          border: '1px solid',
-          borderColor: 'error.main',
-          borderRadius: 1,
-          color: 'error.main',
-          backgroundColor: 'error.light',
-          opacity: 0.1
+          padding: '8px',
+          border: '1px solid #f44336',
+          borderRadius: '4px',
+          color: '#f44336',
+          backgroundColor: 'rgba(244, 67, 54, 0.1)'
         }}
       >
         图片加载失败: {alt || src}
-      </Box>
+      </span>
     )
   }
 
@@ -85,7 +91,144 @@ const CustomImage = ({ src, alt, ...props }) => {
   )
 }
 
-const MarkdownPreview = ({ content, sx }) => {
+const MarkdownPreview = ({ content, sx, onWikiLinkClick, onTagClick }) => {
+  const [renderedHTML, setRenderedHTML] = useState('')
+
+  // 创建 Markdown 渲染器实例（使用 useMemo 避免重复创建）
+  const md = useMemo(() => {
+    return createMarkdownRenderer({
+      onWikiLinkClick,
+      onTagClick,
+      pluginOptions: {
+        highlight: {
+          className: 'markdown-highlight'
+        },
+        colorText: {
+          className: 'markdown-color-text'
+        },
+        callout: {
+          className: 'markdown-callout'
+        },
+        wikiLink: {
+          className: 'markdown-wiki-link',
+          baseUrl: '#note/'
+        },
+        tag: {
+          className: 'markdown-tag'
+        },
+        customContainer: {
+          className: 'markdown-container'
+        }
+      }
+    })
+  }, [onWikiLinkClick, onTagClick])
+
+  // 渲染 Markdown 内容
+  useEffect(() => {
+    if (!content || content.trim() === '') {
+      setRenderedHTML('')
+      return
+    }
+
+    try {
+      const html = md.render(content)
+      setRenderedHTML(html)
+    } catch (error) {
+      console.error('Markdown 渲染失败:', error)
+      setRenderedHTML(`<div style="color: red;">渲染失败: ${error.message}</div>`)
+    }
+  }, [content, md])
+
+  // 处理点击事件（Wiki 链接和标签）
+  useEffect(() => {
+    const handleClick = (e) => {
+      const target = e.target
+
+      // 处理 Wiki 链接点击
+      if (target.classList.contains('markdown-wiki-link')) {
+        e.preventDefault()
+        const wikiTarget = target.getAttribute('data-wiki-target')
+        const wikiSection = target.getAttribute('data-wiki-section')
+        
+        if (onWikiLinkClick && wikiTarget) {
+          onWikiLinkClick(wikiTarget, wikiSection)
+        }
+        return
+      }
+
+      // 处理标签点击
+      if (target.classList.contains('markdown-tag')) {
+        e.preventDefault()
+        const tag = target.getAttribute('data-tag')
+        
+        if (onTagClick && tag) {
+          onTagClick(tag)
+        }
+        return
+      }
+    }
+
+    const previewElement = document.querySelector('.markdown-preview-content')
+    if (previewElement) {
+      previewElement.addEventListener('click', handleClick)
+      return () => {
+        previewElement.removeEventListener('click', handleClick)
+      }
+    }
+  }, [onWikiLinkClick, onTagClick])
+
+  // 处理图片加载
+  useEffect(() => {
+    const loadImages = async () => {
+      const previewElement = document.querySelector('.markdown-preview-content')
+      if (!previewElement) return
+
+      const images = previewElement.querySelectorAll('img')
+      const resolver = getImageResolver()
+
+      console.log(`[MarkdownPreview] 开始加载 ${images.length} 张图片`)
+
+      for (const img of images) {
+        const originalSrc = img.getAttribute('src')
+        
+        console.log(`[MarkdownPreview] 图片原始路径:`, originalSrc)
+        
+        // 跳过已经是 data:、file:// 或 http(s) 的图片
+        if (!originalSrc || originalSrc.startsWith('data:') || originalSrc.startsWith('file://') || originalSrc.startsWith('http://') || originalSrc.startsWith('https://')) {
+          console.log(`[MarkdownPreview] 跳过已处理的图片:`, originalSrc)
+          continue
+        }
+
+        try {
+          // 使用协议解析器加载图片
+          console.log(`[MarkdownPreview] 解析图片路径:`, originalSrc)
+          const resolvedSrc = await resolver.resolve(originalSrc)
+          console.log(`[MarkdownPreview] 解析结果:`, resolvedSrc)
+          
+          if (resolvedSrc) {
+            img.src = resolvedSrc
+            console.log(`[MarkdownPreview] 图片加载成功:`, originalSrc)
+          } else {
+            throw new Error('图片解析失败')
+          }
+        } catch (error) {
+          console.error('[MarkdownPreview] 加载图片失败:', originalSrc, error)
+          img.style.border = '1px solid #f44336'
+          img.style.padding = '4px'
+          img.alt = `❌ 图片加载失败`
+          // 隐藏破损的图片，只显示错误消息
+          img.style.display = 'inline-block'
+          img.style.width = 'auto'
+          img.style.height = 'auto'
+        }
+      }
+    }
+
+    if (renderedHTML) {
+      loadImages()
+    }
+  }, [renderedHTML])
+
   if (!content || content.trim() === '') {
     return (
       <Box
@@ -107,6 +250,7 @@ const MarkdownPreview = ({ content, sx }) => {
 
   return (
     <Box
+      className="markdown-preview-content"
       sx={{
         height: '100%',
         overflow: 'auto',
@@ -117,10 +261,11 @@ const MarkdownPreview = ({ content, sx }) => {
         width: '100%',
         boxSizing: 'border-box',
         wordBreak: 'break-word',
-        userSelect: 'text', // 允许文字选择和复制
+        userSelect: 'text',
         WebkitUserSelect: 'text',
         MozUserSelect: 'text',
         msUserSelect: 'text',
+        fontFamily: '"OPPOSans R", "OPPOSans", system-ui, -apple-system, sans-serif',
         '& h1, & h2, & h3, & h4, & h5, & h6': {
           marginTop: 2,
           marginBottom: 1,
@@ -229,38 +374,8 @@ const MarkdownPreview = ({ content, sx }) => {
         },
         ...sx
       }}
-    >
-      <ReactMarkdown
-        remarkPlugins={[remarkGfm]}
-        rehypePlugins={[rehypeHighlight, rehypeRaw]}
-        components={{
-          // 自定义组件渲染
-          h1: ({ children }) => (
-            <Typography variant="h4" component="h1" gutterBottom>
-              {children}
-            </Typography>
-          ),
-          h2: ({ children }) => (
-            <Typography variant="h5" component="h2" gutterBottom>
-              {children}
-            </Typography>
-          ),
-          h3: ({ children }) => (
-            <Typography variant="h6" component="h3" gutterBottom>
-              {children}
-            </Typography>
-          ),
-          p: ({ children }) => (
-            <Typography variant="body1" paragraph>
-              {children}
-            </Typography>
-          ),
-          img: CustomImage
-        }}
-      >
-        {content}
-      </ReactMarkdown>
-    </Box>
+      dangerouslySetInnerHTML={{ __html: renderedHTML }}
+    />
   )
 }
 

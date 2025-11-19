@@ -23,6 +23,7 @@ const useStore = create(
         // 主题相关状态
         theme: 'light',
         primaryColor: '#1976d2',
+        titleBarStyle: 'mac', // 标题栏样式：'mac' 或 'windows'
         
         // 笔记相关状态
         notes: [],
@@ -34,6 +35,7 @@ const useStore = create(
         sidebarOpen: true,
         currentView: 'notes', // 当前选中的视图：notes, todo, calendar, files, profile, settings
         userAvatar: '', // 用户头像
+        editorMode: 'markdown', // 编辑器模式：'markdown' | 'wysiwyg'
 
         // 插件商店相关 UI 状态
         pluginStoreFilters: {
@@ -44,6 +46,9 @@ const useStore = create(
         pluginStoreSelectedPluginId: null,
         pluginStoreCategories: [],
         pluginCommands: [],
+        
+        // 设置页面相关状态
+        settingsTabValue: 0, // 设置页面当前选中的标签页
         
         // 筛选器相关设置
         filtersDefaultVisible: true, // 筛选器默认是否显示
@@ -56,6 +61,10 @@ const useStore = create(
         setTheme: (theme) => set({ theme }),
         
         setPrimaryColor: (color) => set({ primaryColor: color }),
+        
+        setTitleBarStyle: (style) => set({ titleBarStyle: style }),
+
+        setEditorMode: (mode) => set({ editorMode: mode }),
 
         setPluginStoreFilters: (updates) => set((state) => ({
           pluginStoreFilters: {
@@ -168,6 +177,9 @@ const useStore = create(
             return []
           }
         },
+
+        // 设置页面相关 actions
+        setSettingsTabValue: (value) => set({ settingsTabValue: value }),
         
         // 笔记相关 actions
         loadNotes: async (options = {}) => {
@@ -445,6 +457,9 @@ const useStore = create(
                 if (settings.userAvatar) {
                   set({ userAvatar: settings.userAvatar })
                 }
+                if (settings.titleBarStyle) {
+                  set({ titleBarStyle: settings.titleBarStyle })
+                }
               }
             }
           } catch (error) {
@@ -502,7 +517,8 @@ const useStore = create(
       name: 'flashnote-theme-settings',
       partialize: (state) => ({
         theme: state.theme,
-        primaryColor: state.primaryColor
+        primaryColor: state.primaryColor,
+        titleBarStyle: state.titleBarStyle
       })
     }
   )

@@ -178,6 +178,13 @@ contextBridge.exposeInMainWorld('electronAPI', {
       return () => ipcRenderer.removeAllListeners('setting:changed');
     }
   },
+
+  // 代理配置API
+  proxy: {
+    getConfig: () => ipcRenderer.invoke('proxy:get-config'),
+    saveConfig: (config) => ipcRenderer.invoke('proxy:save-config', config),
+    test: (config) => ipcRenderer.invoke('proxy:test', config)
+  },
   
   // 数据导入导出API
   dataImport: {
@@ -222,6 +229,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
   
   // 独立窗口创建API（顶层方法）
   createNoteWindow: (noteId) => ipcRenderer.invoke('window:create-note-window', noteId),
+  isNoteOpenInWindow: (noteId) => ipcRenderer.invoke('window:is-note-open', noteId),
   createTodoWindow: (todoData) => ipcRenderer.invoke('window:create-todo-window', todoData),
 
   // 窗口管理API
@@ -271,6 +279,14 @@ contextBridge.exposeInMainWorld('electronAPI', {
     onWindowClosed: (callback) => {
       ipcRenderer.on('window:closed', (event, data) => callback(data));
       return () => ipcRenderer.removeAllListeners('window:closed');
+    },
+    onWindowClosing: (callback) => {
+      const handler = () => callback();
+      ipcRenderer.on('window-closing', handler);
+      return () => ipcRenderer.removeListener('window-closing', handler);
+    },
+    removeWindowClosingListener: (callback) => {
+      ipcRenderer.removeListener('window-closing', callback);
     }
   },
   
@@ -301,7 +317,8 @@ contextBridge.exposeInMainWorld('electronAPI', {
 
   // 数据库调试
   db: {
-    getInfo: () => ipcRenderer.invoke('db:get-info')
+    getInfo: () => ipcRenderer.invoke('db:get-info'),
+    repair: () => ipcRenderer.invoke('db:repair')
   },
   
   // 悬浮球相关API
@@ -347,6 +364,21 @@ contextBridge.exposeInMainWorld('electronAPI', {
     delete: (relativePath) => ipcRenderer.invoke('image:delete', relativePath)
   },
 
+  // 白板图片存储API
+  whiteboard: {
+    // 保存白板图片
+    saveImages: (files) => ipcRenderer.invoke('whiteboard:save-images', files),
+    
+    // 加载白板图片
+    loadImages: (fileMap) => ipcRenderer.invoke('whiteboard:load-images', fileMap),
+    
+    // 删除白板图片
+    deleteImages: (fileMap) => ipcRenderer.invoke('whiteboard:delete-images', fileMap),
+    
+    // 获取存储统计
+    getStorageStats: () => ipcRenderer.invoke('whiteboard:get-storage-stats')
+  },
+
   // 版本管理API
   versions: {
     // 创建手动版本
@@ -365,16 +397,38 @@ contextBridge.exposeInMainWorld('electronAPI', {
     getDetails: (fileName) => ipcRenderer.invoke('version:get-details', fileName)
   },
 
+  // AI 相关 API
+  ai: {
+    // 获取AI配置
+    getConfig: () => ipcRenderer.invoke('ai:get-config'),
+    
+    // 保存AI配置
+    saveConfig: (config) => ipcRenderer.invoke('ai:save-config', config),
+    
+    // 测试连接
+    testConnection: (config) => ipcRenderer.invoke('ai:test-connection', config),
+    
+    // 获取支持的提供商列表
+    getProviders: () => ipcRenderer.invoke('ai:get-providers'),
+    
+    // AI聊天（供后续功能/插件使用）
+    chat: (messages, options) => ipcRenderer.invoke('ai:chat', messages, options)
+  },
+
   // 插件商店与插件运行时 API
   pluginStore: {
     listAvailable: () => ipcRenderer.invoke('plugin-store:list-available'),
     listInstalled: () => ipcRenderer.invoke('plugin-store:list-installed'),
+    scanLocalPlugins: () => ipcRenderer.invoke('plugin-store:scan-local'),
     getDetails: (pluginId) => ipcRenderer.invoke('plugin-store:get-details', pluginId),
     install: (pluginId) => ipcRenderer.invoke('plugin-store:install', pluginId),
     uninstall: (pluginId) => ipcRenderer.invoke('plugin-store:uninstall', pluginId),
     enable: (pluginId) => ipcRenderer.invoke('plugin-store:enable', pluginId),
     disable: (pluginId) => ipcRenderer.invoke('plugin-store:disable', pluginId),
     executeCommand: (pluginId, commandId, payload) => ipcRenderer.invoke('plugin-store:execute-command', pluginId, commandId, payload),
+    openPluginFolder: (pluginId) => ipcRenderer.invoke('plugin-store:open-plugin-folder', pluginId),
+    openPluginsDirectory: () => ipcRenderer.invoke('plugin-store:open-plugins-directory'),
+    loadPluginFile: (pluginId, filePath) => ipcRenderer.invoke('plugin-store:load-plugin-file', pluginId, filePath),
     onEvent: (callback) => {
       const channel = 'plugin-store:event'
       const handler = (event, data) => callback?.(data)
@@ -386,6 +440,108 @@ contextBridge.exposeInMainWorld('electronAPI', {
       const handler = (event, data) => callback?.(data)
       ipcRenderer.on(channel, handler)
       return () => ipcRenderer.removeListener(channel, handler)
+    },
+    onOpenWindow: (callback) => {
+      const channel = 'plugin:ui-open-window'
+      const handler = (event, data) => callback?.(data)
+      ipcRenderer.on(channel, handler)
+      return () => ipcRenderer.removeListener(channel, handler)
+    }
+  },
+  
+  // Mem0 知识记忆 API
+  mem0: {
+    // 添加记忆（需要 mem0:write）
+    add: (userId, content, options) => 
+      ipcRenderer.invoke('mem0:add', userId, content, options),
+    
+    // 搜索记忆（需要 mem0:read）
+    search: (userId, query, options) => 
+      ipcRenderer.invoke('mem0:search', userId, query, options),
+    
+    // 获取记忆列表（需要 mem0:read）
+    get: (userId, options) => 
+      ipcRenderer.invoke('mem0:get', userId, options),
+    
+    // 删除记忆（需要 mem0:write）
+    delete: (memoryId) => 
+      ipcRenderer.invoke('mem0:delete', memoryId),
+    
+    // 清空用户记忆（需要 mem0:write）
+    clear: (userId) => 
+      ipcRenderer.invoke('mem0:clear', userId),
+    
+    // 获取统计信息（需要 mem0:read）
+    stats: (userId) => 
+      ipcRenderer.invoke('mem0:stats', userId),
+    
+    // 检查可用性
+    isAvailable: () => 
+      ipcRenderer.invoke('mem0:is-available')
+  },
+  
+  // 云同步相关API
+  sync: {
+    // 获取可用的同步服务
+    getAvailableServices: () => ipcRenderer.invoke('sync:get-available-services'),
+    
+    // 获取同步状态
+    getStatus: () => ipcRenderer.invoke('sync:get-status'),
+    
+    // 测试连接
+    testConnection: (serviceName, config) => ipcRenderer.invoke('sync:test-connection', serviceName, config),
+    
+    // 切换同步服务
+    switchService: (serviceName, config) => ipcRenderer.invoke('sync:switch-service', serviceName, config),
+    
+    // 禁用同步
+    disable: () => ipcRenderer.invoke('sync:disable'),
+    
+    // 手动同步
+    manualSync: () => ipcRenderer.invoke('sync:manual-sync'),
+    
+    // 获取同步状态
+    getStatus: () => ipcRenderer.invoke('sync:get-status'),
+    
+    // 强制停止同步
+    forceStop: () => ipcRenderer.invoke('sync:force-stop'),
+    
+    // 获取冲突列表
+    getConflicts: () => ipcRenderer.invoke('sync:get-conflicts'),
+    
+    // 解决冲突
+    resolveConflict: (entityType, entityId, resolvedData) => 
+      ipcRenderer.invoke('sync:resolve-conflict', entityType, entityId, resolvedData),
+    
+    // 导出数据
+    exportData: (filePath) => ipcRenderer.invoke('sync:export-data', filePath),
+    
+    // 导入数据
+    importData: (filePath) => ipcRenderer.invoke('sync:import-data', filePath),
+    
+    // 图片同步相关
+    downloadImage: (relativePath) => ipcRenderer.invoke('sync:download-image', relativePath),
+    uploadImage: (localPath, relativePath) => ipcRenderer.invoke('sync:upload-image', localPath, relativePath),
+    syncImages: () => ipcRenderer.invoke('sync:sync-images'),
+    cleanupUnusedImages: (retentionDays) => ipcRenderer.invoke('sync:cleanup-unused-images', retentionDays),
+    getUnusedImagesStats: (retentionDays) => ipcRenderer.invoke('sync:get-unused-images-stats', retentionDays),
+    
+    // 同步事件监听
+    onSyncStart: (callback) => {
+      ipcRenderer.on('sync:start', () => callback());
+      return () => ipcRenderer.removeAllListeners('sync:start');
+    },
+    onSyncComplete: (callback) => {
+      ipcRenderer.on('sync:complete', (event, result) => callback(result));
+      return () => ipcRenderer.removeAllListeners('sync:complete');
+    },
+    onSyncError: (callback) => {
+      ipcRenderer.on('sync:error', (event, error) => callback(error));
+      return () => ipcRenderer.removeAllListeners('sync:error');
+    },
+    onConflictDetected: (callback) => {
+      ipcRenderer.on('sync:conflict', (event, conflict) => callback(conflict));
+      return () => ipcRenderer.removeAllListeners('sync:conflict');
     }
   },
   
@@ -407,7 +563,10 @@ contextBridge.exposeInMainWorld('electronAPI', {
         ipcRenderer.removeAllListeners(channel)
       }
     }
-  }
+  },
+
+  // 通用 invoke 接口（用于支持动态 IPC 调用）
+  invoke: (channel, ...args) => ipcRenderer.invoke(channel, ...args)
 })
 
 // 监听来自主进程的消息（如果需要的话）

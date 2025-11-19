@@ -21,7 +21,8 @@ import {
   DialogContent,
   DialogActions,
   LinearProgress,
-  Chip
+  Chip,
+  Tooltip
 } from '@mui/material';
 import {
   Settings as SettingsIcon,
@@ -38,11 +39,20 @@ import {
   Restore,
   Warning as WarningIcon,
   Info as InfoIcon,
-  Cloud as CloudIcon
+  Cloud as CloudIcon,
+  Psychology as AIIcon,
+  Memory as MemoryIcon,
+  CalendarToday as CalendarIcon,
+  Wifi as WifiIcon,
+  Code as CodeIcon,
+  Visibility as VisibilityIcon
 } from '@mui/icons-material';
 import { useStore } from '../store/useStore';
 import ShortcutInput from './ShortcutInput';
 import CloudSyncSettings from './CloudSyncSettings';
+import AISettings from './AISettings';
+import Mem0Settings from './Mem0Settings';
+import ProxySettings from './ProxySettings';
 import { 
   DEFAULT_SHORTCUTS, 
   SHORTCUT_CATEGORIES, 
@@ -71,13 +81,14 @@ function TabPanel({ children, value, index, ...other }) {
 }
 
 const Settings = () => {
-  const { theme, setTheme, setPrimaryColor, setUserAvatar } = useStore();
-  const [tabValue, setTabValue] = useState(0);
+  const { theme, setTheme, setPrimaryColor, setUserAvatar, titleBarStyle, setTitleBarStyle, editorMode, setEditorMode } = useStore();
+  const settingsTabValue = useStore((state) => state.settingsTabValue);
   const [settings, setSettings] = useState({
     theme: 'system',
     customThemeColor: '#1976d2',
     autoLaunch: false,
-    userAvatar: ''
+    userAvatar: '',
+    titleBarStyle: 'mac'
   });
   const [shortcuts, setShortcuts] = useState(DEFAULT_SHORTCUTS);
   const [shortcutConflicts, setShortcutConflicts] = useState({});
@@ -156,6 +167,11 @@ const Settings = () => {
       // 特殊处理主题颜色切换
       if (key === 'customThemeColor') {
         setPrimaryColor(value);
+      }
+      
+      // 特殊处理标题栏样式切换
+      if (key === 'titleBarStyle') {
+        setTitleBarStyle(value);
       }
       
       showSnackbar('设置已保存', 'success');
@@ -316,30 +332,12 @@ const Settings = () => {
     }
   };
 
-  const handleTabChange = (event, newValue) => {
-    setTabValue(newValue);
-  };
-
-
-
   return (
-    <Box sx={{ height: '100%', display: 'flex', flexDirection: 'column' }}>
-      {/* 标签页 */}
-      <Paper sx={{ borderBottom: 1, borderColor: 'divider' }}>
-        <Tabs value={tabValue} onChange={handleTabChange} aria-label="设置标签页">
-          <Tab label="通用设置" icon={<SettingsIcon />} />
-          <Tab label="外观设置" icon={<PaletteIcon />} />
-          <Tab label="快捷键设置" icon={<KeyboardIcon />} />
-          <Tab label="云同步" icon={<CloudIcon />} />
-          <Tab label="数据管理" icon={<ImportIcon />} />
-          <Tab label="关于" icon={<InfoIcon />} />
-        </Tabs>
-      </Paper>
-
+    <Box sx={{ height: '100%', display: 'flex', flexDirection: 'row' }}>
       {/* 内容区域 */}
       <Box sx={{ flex: 1, overflow: 'auto' }}>
         {/* 通用设置 */}
-        <TabPanel value={tabValue} index={0}>
+        <TabPanel value={settingsTabValue} index={0}>
           <List>
             <ListItem>
               <ListItemText
@@ -388,101 +386,201 @@ const Settings = () => {
               </ListItemSecondaryAction>
             </ListItem>
 
+            <Divider />
+            
+            <ListItem>
+              <ListItemText
+                primary="编辑器模式"
+                secondary="选择笔记编辑器的默认模式"
+              />
+              <ListItemSecondaryAction>
+                <Box sx={{ display: 'flex', gap: 1 }}>
+                  <Chip
+                    icon={<CodeIcon />}
+                    label="Markdown"
+                    variant={editorMode === 'markdown' ? 'filled' : 'outlined'}
+                    onClick={() => setEditorMode('markdown')}
+                    size="small"
+                    color={editorMode === 'markdown' ? 'primary' : 'default'}
+                  />
+                  <Chip
+                    icon={<VisibilityIcon />}
+                    label="所见即所得"
+                    variant={editorMode === 'wysiwyg' ? 'filled' : 'outlined'}
+                    onClick={() => setEditorMode('wysiwyg')}
+                    size="small"
+                    color={editorMode === 'wysiwyg' ? 'primary' : 'default'}
+                  />
+                </Box>
+              </ListItemSecondaryAction>
+            </ListItem>
+
+            <Alert severity="warning" sx={{ mt: 1, mb: 2 }}>
+              <Typography variant="caption">
+                <strong>重要提示：</strong>Markdown 模式保存的是 Markdown 文本，所见即所得模式保存的是 HTML 格式。两种模式<strong>不兼容</strong>，切换模式后现有笔记可能显示异常。建议在创建新笔记前选择好模式。
+              </Typography>
+            </Alert>
+
           </List>
         </TabPanel>
 
         {/* 外观设置 */}
-        <TabPanel value={tabValue} index={1}>
-          {/* 头像设置区域 */}
-          <Box sx={{ 
-            display: 'flex', 
-            alignItems: 'center', 
-            gap: 2, 
-            mb: 3, 
-            p: 2, 
-            border: '1px solid', 
-            borderColor: 'divider', 
-            borderRadius: 2,
-            backgroundColor: 'background.paper'
-          }}>
-            <Box sx={{ position: 'relative' }}>
-              {settings.userAvatar ? (
-                <Box
-                  component="img"
-                  src={settings.userAvatar}
-                  alt="用户头像"
-                  sx={{
-                    width: 80,
-                    height: 80,
-                    borderRadius: '50%',
-                    objectFit: 'cover',
-                    border: '2px solid',
-                    borderColor: 'primary.main'
-                  }}
-                />
-              ) : (
-                <AccountCircle 
-                  sx={{ 
-                    fontSize: 80, 
-                    color: 'text.secondary' 
-                  }} 
-                />
-              )}
-            </Box>
-            <Box sx={{ flex: 1 }}>
-              <Typography variant="h6" gutterBottom>
-                个人头像
-              </Typography>
-              <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
-                {settings.userAvatar ? '点击更换头像或删除当前头像' : '选择一张图片作为您的头像'}
-              </Typography>
-              <Box sx={{ display: 'flex', gap: 1 }}>
-                <Button
-                  variant="contained"
-                  size="small"
-                  startIcon={<PhotoCamera />}
-                  onClick={handleAvatarChange}
-                >
-                  {settings.userAvatar ? '更换头像' : '选择头像'}
-                </Button>
-                {settings.userAvatar && (
+        <TabPanel value={settingsTabValue} index={1}>
+          <List>
+            {/* 头像设置 */}
+            <ListItem>
+              <Box sx={{ display: 'flex', alignItems: 'center', gap: 2, width: '100%' }}>
+                <Box sx={{ position: 'relative' }}>
+                  {settings.userAvatar ? (
+                    <Box
+                      component="img"
+                      src={settings.userAvatar}
+                      alt="用户头像"
+                      sx={{
+                        width: 60,
+                        height: 60,
+                        borderRadius: '50%',
+                        objectFit: 'cover',
+                        border: '2px solid',
+                        borderColor: 'primary.main'
+                      }}
+                    />
+                  ) : (
+                    <AccountCircle 
+                      sx={{ 
+                        fontSize: 60, 
+                        color: 'text.secondary' 
+                      }} 
+                    />
+                  )}
+                </Box>
+                <Box sx={{ flex: 1 }}>
+                  <ListItemText
+                    primary="个人头像"
+                    secondary={settings.userAvatar ? '点击更换或删除头像' : '选择一张图片作为您的头像'}
+                  />
+                </Box>
+                <Box sx={{ display: 'flex', gap: 1 }}>
                   <Button
                     variant="outlined"
                     size="small"
-                    startIcon={<Delete />}
-                    onClick={handleAvatarDelete}
-                    color="error"
+                    startIcon={<PhotoCamera />}
+                    onClick={handleAvatarChange}
                   >
-                    删除头像
+                    {settings.userAvatar ? '更换' : '选择'}
                   </Button>
-                )}
+                  {settings.userAvatar && (
+                    <Button
+                      variant="outlined"
+                      size="small"
+                      startIcon={<Delete />}
+                      onClick={handleAvatarDelete}
+                      color="error"
+                    >
+                      删除
+                    </Button>
+                  )}
+                </Box>
               </Box>
-            </Box>
-          </Box>
+            </ListItem>
+
+            <Divider />
           
-          <List>
             <ListItem>
-              <ListItemText
-                primary="主题颜色"
-                secondary="自定义应用的主题色彩"
-              />
-              <ListItemSecondaryAction>
-                <TextField
-                  type="color"
-                  value={settings.customThemeColor}
-                  onChange={(e) => handleSettingChange('customThemeColor', e.target.value)}
-                  size="small"
-                  sx={{ width: 60 }}
+              <Box sx={{ width: '100%' }}>
+                <ListItemText
+                  primary="主题颜色"
+                  secondary="自定义应用的主题色彩"
+                  sx={{ mb: 2 }}
                 />
-              </ListItemSecondaryAction>
+                <Box sx={{ display: 'flex', alignItems: 'center', gap: 2, flexWrap: 'wrap' }}>
+                  {/* 快捷颜色选择按钮 - 潘通色系 */}
+                  <Box sx={{ display: 'flex', gap: 1, flexWrap: 'wrap' }}>
+                    {[
+                      { name: '经典蓝', color: '#0F4C81' },
+                      { name: '珊瑚橙', color: '#FF6F61' },
+                      { name: '紫外光', color: '#5F4B8B' },
+                      { name: '草木绿', color: '#88B04B' },
+                      { name: '水晶粉', color: '#F7CAC9' },
+                      { name: '宁静蓝', color: '#91A8D0' },
+                      { name: '活力橙', color: '#DD4124' },
+                      { name: '辐射兰', color: '#9B1B30' }
+                    ].map((preset) => (
+                      <Tooltip key={preset.color} title={preset.name}>
+                        <Box
+                          onClick={() => handleSettingChange('customThemeColor', preset.color)}
+                          sx={{
+                            width: 36,
+                            height: 36,
+                            borderRadius: 1,
+                            backgroundColor: preset.color,
+                            cursor: 'pointer',
+                            border: settings.customThemeColor === preset.color ? '3px solid' : '2px solid',
+                            borderColor: settings.customThemeColor === preset.color ? 'primary.main' : 'divider',
+                            transition: 'all 0.2s',
+                            '&:hover': {
+                              transform: 'scale(1.1)',
+                              boxShadow: 2
+                            }
+                          }}
+                        />
+                      </Tooltip>
+                    ))}
+                  </Box>
+                  
+                  {/* 自定义颜色选择器 */}
+                  <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+                    <Typography variant="body2" color="text.secondary">
+                      自定义：
+                    </Typography>
+                    <TextField
+                      type="color"
+                      value={settings.customThemeColor}
+                      onChange={(e) => handleSettingChange('customThemeColor', e.target.value)}
+                      size="small"
+                      sx={{ width: 60 }}
+                    />
+                  </Box>
+                </Box>
+              </Box>
             </ListItem>
             
+            <Divider />
+            
+            <ListItem>
+              <ListItemText
+                primary="标题栏样式"
+                secondary="选择窗口标题栏的外观风格"
+              />
+              <ListItemSecondaryAction>
+                <Box sx={{ display: 'flex', gap: 1 }}>
+                  <Chip
+                    label="Mac 风格"
+                    variant={titleBarStyle === 'mac' ? 'filled' : 'outlined'}
+                    onClick={() => {
+                      setTitleBarStyle('mac');
+                      handleSettingChange('titleBarStyle', 'mac');
+                    }}
+                    size="small"
+                  />
+                  <Chip
+                    label="Windows 风格"
+                    variant={titleBarStyle === 'windows' ? 'filled' : 'outlined'}
+                    onClick={() => {
+                      setTitleBarStyle('windows');
+                      handleSettingChange('titleBarStyle', 'windows');
+                    }}
+                    size="small"
+                  />
+                </Box>
+              </ListItemSecondaryAction>
+            </ListItem>
 
           </List>
         </TabPanel>
 
         {/* 快捷键设置 */}
-        <TabPanel value={tabValue} index={2}>
+        <TabPanel value={settingsTabValue} index={2}>
           <Box sx={{ mb: 2, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
             <Typography variant="h6">快捷键设置</Typography>
             <Button
@@ -555,13 +653,28 @@ const Settings = () => {
           })}
         </TabPanel>
 
+        {/* AI 功能设置 */}
+        <TabPanel value={settingsTabValue} index={3}>
+          <AISettings showSnackbar={showSnackbar} />
+        </TabPanel>
+
+        {/* 知识记忆管理 */}
+        <TabPanel value={settingsTabValue} index={4}>
+          <Mem0Settings />
+        </TabPanel>
+
         {/* 云同步设置 */}
-        <TabPanel value={tabValue} index={3}>
+        <TabPanel value={settingsTabValue} index={5}>
           <CloudSyncSettings />
         </TabPanel>
 
+        {/* 网络代理设置 */}
+        <TabPanel value={settingsTabValue} index={6}>
+          <ProxySettings showSnackbar={showSnackbar} />
+        </TabPanel>
+
         {/* 数据管理 */}
-        <TabPanel value={tabValue} index={4}>
+        <TabPanel value={settingsTabValue} index={7}>
           <List>
             <ListItem>
               <ListItemText
@@ -605,16 +718,16 @@ const Settings = () => {
         </TabPanel>
 
         {/* 关于 */}
-        <TabPanel value={tabValue} index={5}>
+        <TabPanel value={settingsTabValue} index={8}>
           <Box sx={{ textAlign: 'center', py: 4 }}>
             <Typography variant="h4" gutterBottom>
-              FlashNote 2.0
+              FlashNote 2.2.2
             </Typography>
             <Typography variant="body1" color="text.secondary" sx={{ mb: 3 }}>
               一个简洁高效的笔记应用
             </Typography>
             <Typography variant="body2" color="text.secondary" sx={{ mb: 4 }}>
-              版本 2.0.2
+              版本 2.2.2
             </Typography>
             
             <Box sx={{ display: 'flex', justifyContent: 'center', gap: 2 }}>

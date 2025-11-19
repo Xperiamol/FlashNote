@@ -51,6 +51,8 @@ import {
 } from '../api/todoAPI';
 import appLocale from '../locales/zh-CN';
 import { todoSchema, extractValidationErrors } from '../validators/todoValidation';
+import { ANIMATIONS, createTransitionString } from '../utils/animationConfig';
+import useTodoDrag from '../hooks/useTodoDrag';
 
 const {
   todo: { dialog: todoDialog }
@@ -68,6 +70,21 @@ const TodoView = ({ viewMode, showCompleted, onViewModeChange, onShowCompletedCh
   // 双击完成相关状态
   const [pendingComplete, setPendingComplete] = useState(new Set());
   const [celebratingTodos, setCelebratingTodos] = useState(new Set());
+
+  // 使用拖放 hook
+  const {
+    handleDragStart,
+    handleDragEnd,
+    handleDragOver,
+    handleDragLeave,
+    handleDropQuadrant,
+    isDragOver
+  } = useTodoDrag(() => {
+    loadTodos();
+    if (onRefresh) {
+      onRefresh();
+    }
+  });
 
   // 加载待办事项
   const computeStatsFromList = (list = []) => {
@@ -164,7 +181,7 @@ const TodoView = ({ viewMode, showCompleted, onViewModeChange, onShowCompletedCh
               return newSet;
             });
           }, 1000);
-        }, 300);
+        }, 150);
         
         // 清除待完成状态
         setPendingComplete(prev => {
@@ -259,6 +276,8 @@ const TodoView = ({ viewMode, showCompleted, onViewModeChange, onShowCompletedCh
         compact={false}
         pendingComplete={pendingComplete}
         celebratingTodos={celebratingTodos}
+        onDragStart={handleDragStart}
+        onDragEnd={handleDragEnd}
       />
     );
   };
@@ -273,11 +292,13 @@ const TodoView = ({ viewMode, showCompleted, onViewModeChange, onShowCompletedCh
         title: '重要且紧急',
         subtitle: '立即处理',
         color: '#f44336',
-        bgGradient: theme.palette.mode === 'dark' 
+        bgGradient: theme.palette.mode === 'dark'
           ? 'linear-gradient(135deg, #2d1b1b 0%, #3d2626 100%)'
           : 'linear-gradient(135deg, #ffebee 0%, #ffcdd2 100%)',
         icon: <WarningIcon />,
-        todos: todos.urgent_important || []
+        todos: todos.urgent_important || [],
+        isImportant: true,
+        isUrgent: true
       },
       {
         key: 'not_urgent_important',
@@ -288,7 +309,9 @@ const TodoView = ({ viewMode, showCompleted, onViewModeChange, onShowCompletedCh
           ? 'linear-gradient(135deg, #2d2419 0%, #3d3122 100%)'
           : 'linear-gradient(135deg, #fff3e0 0%, #ffe0b2 100%)',
         icon: <FlagIcon />,
-        todos: todos.not_urgent_important || []
+        todos: todos.not_urgent_important || [],
+        isImportant: true,
+        isUrgent: false
       },
       {
         key: 'urgent_not_important',
@@ -299,7 +322,9 @@ const TodoView = ({ viewMode, showCompleted, onViewModeChange, onShowCompletedCh
           ? 'linear-gradient(135deg, #1a2332 0%, #243242 100%)'
           : 'linear-gradient(135deg, #e3f2fd 0%, #bbdefb 100%)',
         icon: <FlashOnIcon />,
-        todos: todos.urgent_not_important || []
+        todos: todos.urgent_not_important || [],
+        isImportant: false,
+        isUrgent: true
       },
       {
         key: 'not_urgent_not_important',
@@ -310,7 +335,9 @@ const TodoView = ({ viewMode, showCompleted, onViewModeChange, onShowCompletedCh
           ? 'linear-gradient(135deg, #262626 0%, #333333 100%)'
           : 'linear-gradient(135deg, #fafafa 0%, #f5f5f5 100%)',
         icon: <CircleIcon />,
-        todos: todos.not_urgent_not_important || []
+        todos: todos.not_urgent_not_important || [],
+        isImportant: false,
+        isUrgent: false
       }
     ];
 
@@ -330,7 +357,15 @@ const TodoView = ({ viewMode, showCompleted, onViewModeChange, onShowCompletedCh
           }}
         >
           {quadrants.map((quadrant) => (
-            <Box key={quadrant.key}>
+            <Box
+              key={quadrant.key}
+              onDragOver={(e) => handleDragOver(e, quadrant.key)}
+              onDragLeave={handleDragLeave}
+              onDrop={(e) => handleDropQuadrant(e, {
+                isImportant: quadrant.isImportant,
+                isUrgent: quadrant.isUrgent
+              })}
+            >
               <Card
                 elevation={3}
                 sx={{
@@ -340,11 +375,19 @@ const TodoView = ({ viewMode, showCompleted, onViewModeChange, onShowCompletedCh
                   borderRadius: 3,
                   background: quadrant.bgGradient,
                   border: `2px solid ${quadrant.color}20`,
-                  transition: 'all 0.3s ease',
+                  transition: createTransitionString(ANIMATIONS.hover),
                   '&:hover': {
-                    transform: 'translateY(-4px)',
-                    boxShadow: `0 8px 25px ${quadrant.color}30`
-                  }
+                    boxShadow: `0 12px 40px ${quadrant.color}40`,
+                    backdropFilter: 'blur(8px)',
+                    backgroundColor: theme.palette.mode === 'dark'
+                      ? 'rgba(255, 255, 255, 0.05)'
+                      : 'rgba(255, 255, 255, 0.8)'
+                  },
+                  ...(isDragOver(quadrant.key) && {
+                    border: `3px solid ${quadrant.color}`,
+                    boxShadow: `0 12px 40px ${quadrant.color}60`,
+                    transform: 'scale(1.02)'
+                  })
                 }}
               >
                 <CardHeader

@@ -77,6 +77,21 @@ const TodoFormFields = ({
         helperText={errors.content}
       />
 
+      <TextField
+        margin="dense"
+        label={fields.descriptionLabel}
+        placeholder={fields.descriptionPlaceholder}
+        fullWidth
+        variant="outlined"
+        multiline
+        rows={3}
+        value={value.description || ''}
+        onChange={(e) => handleFieldChange('description', e.target.value)}
+        sx={{ mb: 2 }}
+        error={Boolean(errors.description)}
+        helperText={errors.description}
+      />
+
       <Box sx={{ display: 'flex', gap: 2, mb: 2 }}>
         <FormControlLabel
           control={
