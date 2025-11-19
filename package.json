@@ -102,6 +102,13 @@
       {
         "from": "plugins/registry.json",
         "to": "plugins/registry.json"
+      },
+      {
+        "from": "node_modules/@xenova/transformers/dist/",
+        "to": "models/transformers/",
+        "filter": [
+          "**/*"
+        ]
       }
     ],
     "win": {

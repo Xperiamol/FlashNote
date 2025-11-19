@@ -519,15 +519,31 @@
 			// 渲染应用 - 使用 CacheProvider 让样式注入到 iframe
 			const root = ReactDOM.createRoot(document.getElementById('root'))
 			
+			// 验证 emotionCache
+			if (emotionCache) {
+				console.log('[Planner] emotionCache 结构:', {
+					hasSheet: !!emotionCache.sheet,
+					hasRegistered: !!emotionCache.registered,
+					hasInserted: !!emotionCache.inserted,
+					key: emotionCache.key
+				})
+			}
+			
 			// 如果有 emotionCache，用 CacheProvider 包裹（注意：应该用 cache 属性，不是 value）
-			if (emotionCache && CacheProvider) {
-				console.log('[Planner] 使用 CacheProvider 包裹应用，样式将注入到 iframe')
+			if (emotionCache && CacheProvider && emotionCache.sheet && emotionCache.registered) {
+				console.log('[Planner] ✅ 使用 CacheProvider 包裹应用，样式将注入到 iframe')
 				root.render(
 					React.createElement(CacheProvider, { cache: emotionCache },
 						React.createElement(App)
 					)
 				)
 			} else {
+				console.warn('[Planner] ⚠️ emotionCache 无效或缺失，使用默认渲染（样式可能无法正确显示）')
+				console.warn('[Planner] 状态:', { 
+					hasCache: !!emotionCache, 
+					hasProvider: !!CacheProvider,
+					cacheValid: emotionCache && emotionCache.sheet && emotionCache.registered
+				})
 				console.warn('[Planner] 未找到 emotionCache 或 CacheProvider，使用默认渲染')
 				root.render(React.createElement(App))
 			}

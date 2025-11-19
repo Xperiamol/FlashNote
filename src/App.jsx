@@ -585,11 +585,25 @@ function App() {
           
           // 为 iframe 创建独立的 emotion cache，让样式注入到 iframe 内部
           const iframeDoc = iframe.contentDocument || iframe.contentWindow.document
+          
+          // 确保 head 存在
+          if (!iframeDoc.head) {
+            console.error('[UI Bridge] iframe head 不存在')
+            return false
+          }
+          
           const iframeCache = createCache({
             key: 'iframe-emotion',
             container: iframeDoc.head,
-            prepend: true
+            prepend: true,
+            speedy: false  // 禁用 speedy mode 确保样式正确注入
           })
+          
+          // 验证 cache 对象
+          if (!iframeCache || !iframeCache.sheet || !iframeCache.registered) {
+            console.error('[UI Bridge] emotion cache 创建失败', iframeCache)
+            return false
+          }
           
           // 暴露 React 和 Material-UI 依赖
           iframe.contentWindow.React = React
@@ -1040,11 +1054,23 @@ function App() {
                     
                     // 为 iframe 创建独立的 emotion cache
                     const iframeDoc = iframe.contentDocument || iframe.contentWindow.document
+                    
+                    if (!iframeDoc.head) {
+                      console.error('[Plugin Window] iframe head 不存在')
+                      return
+                    }
+                    
                     const iframeCache = createCache({
                       key: 'iframe-emotion',
                       container: iframeDoc.head,
-                      prepend: true
+                      prepend: true,
+                      speedy: false
                     })
+                    
+                    if (!iframeCache || !iframeCache.sheet || !iframeCache.registered) {
+                      console.error('[Plugin Window] emotion cache 创建失败', iframeCache)
+                      return
+                    }
                     
                     // 暴露 React 和 Material-UI 依赖
                     iframe.contentWindow.React = React
