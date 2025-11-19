@@ -39,6 +39,7 @@
     "better-sqlite3": "^12.4.1",
     "compute-cosine-similarity": "^1.1.0",
     "date-fns": "^4.1.0",
+    "dotenv": "^17.2.3",
     "googleapis": "^165.0.0",
     "https-proxy-agent": "^7.0.6",
     "ical.js": "^2.2.1",
@@ -94,7 +95,9 @@
       {
         "from": "plugins/examples",
         "to": "plugins/examples",
-        "filter": ["**/*"]
+        "filter": [
+          "**/*"
+        ]
       },
       {
         "from": "plugins/registry.json",

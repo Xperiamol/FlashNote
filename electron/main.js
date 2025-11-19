@@ -1,3 +1,6 @@
+// 加载环境变量
+require('dotenv').config()
+
 const { app, BrowserWindow, ipcMain, dialog, clipboard, Notification, shell, Tray, Menu, nativeImage, protocol } = require('electron')
 const path = require('path')
 const fs = require('fs')
