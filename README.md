@@ -1,5 +1,7 @@
 # FlashNote 2.0
 
+中文 | [English](./README_EN.md)
+
 一个现代化的桌面笔记应用，专为高效记录和管理笔记而设计。
 旧的1.x版本已经随风而逝了，迎接现在更开放更赏心悦目的新版本。
 
@@ -134,9 +136,7 @@ runtime.onActivate(async () => {
 #### 插件文档
 
 - 📚 **[插件开发文档](./plugins/docs/README.md)** - 完整文档索引
-- 🚀 **[快速开始](./plugins/docs/QUICK_START.md)** - 5分钟创建第一个插件
-- 🎯 **[最佳实践](./plugins/docs/BEST_PRACTICES.md)** - 必读！开发规范和技巧
-- 📖 **[API 参考](./plugins/docs/API_REFERENCE.md)** - 完整的 Runtime API
+- 🚀 **[开发者指南](./plugins/docs/development-guide.md)** - 完整的开发者指南
 - 💡 **[示例插件](./plugins/examples/)** - 学习参考
   - [random-note](./plugins/examples/random-note/) - 简单命令示例
   - [ai-task-planner](./plugins/examples/ai-task-planner/) - 自定义窗口示例
@@ -151,19 +151,6 @@ runtime.onActivate(async () => {
 - ✅ **本地开发**: 方便的本地调试工具
 
 开始创建你的第一个插件吧！查看 [开发者完整指南](./plugins/docs/development-guide.md) 了解详情。
-
-### 相关文档
-
-- 📖 **[开发者指南](./docs/DEVELOPMENT_GUIDE.md)** - IPC API、UI Bridge、插件开发完整文档
-- 🗓️ **[日历同步指南](./docs/CALENDAR_SYNC_GUIDE.md)** - CalDAV 和 Google Calendar 配置
-- 📋 **[项目文档归档](./docs/PROJECT_ARCHIVE.md)** - PRD、技术架构、开发计划
-- 🔧 **[IPC API 指南](./IPC_API_GUIDE.md)** - IPC 通信机制详解
-- 🌐 **[代理配置指南](./PROXY_CONFIG_GUIDE.md)** - 网络代理设置
-- 🔌 **[插件开发文档](./plugins/docs/)** - 详细的插件 API 和示例
-
-# 打包Electron应用
-npm run electron-build
-```
 
 ### 项目结构
 
