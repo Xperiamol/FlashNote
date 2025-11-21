@@ -267,7 +267,11 @@ const MarkdownToolbar = ({ onInsert, disabled = false, viewMode, onViewModeChang
         p: 1,
         borderBottom: 1,
         borderColor: 'divider',
-        backgroundColor: 'background.paper',
+        backgroundColor: (theme) => theme.palette.mode === 'dark'
+          ? 'rgba(30, 41, 59, 0.6)'
+          : 'rgba(255, 255, 255, 0.6)',
+        backdropFilter: 'blur(30px) saturate(180%)',
+        WebkitBackdropFilter: 'blur(30px) saturate(180%)',
         flexWrap: 'wrap'
       }}
     >
@@ -301,9 +305,9 @@ const MarkdownToolbar = ({ onInsert, disabled = false, viewMode, onViewModeChang
           )}
         </React.Fragment>
       ))}
-      
+
       <Divider orientation="vertical" flexItem />
-      
+
       {/* Wiki 链接按钮 - 仅在 Markdown 模式下显示 */}
       {editorMode !== 'wysiwyg' && (
         <>
@@ -327,19 +331,19 @@ const MarkdownToolbar = ({ onInsert, disabled = false, viewMode, onViewModeChang
               </IconButton>
             </span>
           </Tooltip>
-          
+
           <Divider orientation="vertical" flexItem />
         </>
       )}
-      
+
       {/* 图片上传按钮 */}
       <ImageUploadButton
         onImageInsert={onInsert}
         disabled={disabled}
       />
-      
+
       <Divider orientation="vertical" flexItem />
-      
+
       {/* 代码块按钮 */}
       <Tooltip title="代码块">
         <span>
@@ -428,7 +432,7 @@ const MarkdownToolbar = ({ onInsert, disabled = false, viewMode, onViewModeChang
       {viewMode && onViewModeChange && (
         <React.Fragment>
           <Divider orientation="vertical" flexItem />
-          
+
           <ToggleButtonGroup
             value={viewMode}
             exclusive

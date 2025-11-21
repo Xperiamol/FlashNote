@@ -63,10 +63,10 @@ import { t } from '../utils/i18n';
 const {
   filters: { placeholder }
 } = zhCN;
-import { 
-  getPriorityFromQuadrant, 
-  getPriorityIcon, 
-  getPriorityColor, 
+import {
+  getPriorityFromQuadrant,
+  getPriorityIcon,
+  getPriorityColor,
   getPriorityText,
   comparePriority
 } from '../utils/priorityUtils';
@@ -87,15 +87,15 @@ const TodoList = ({ onTodoSelect, onViewModeChange, onShowCompletedChange, viewM
   const [anchorEl, setAnchorEl] = useState(null);
   const [selectedTodo, setSelectedTodo] = useState(null);
   const [filterBy, setFilterBy] = useState('all'); // all, urgent, important, normal, low
-  
+
   // 新增筛选状态
   const [selectedTags, setSelectedTags] = useState([]);
   const [selectedPriorities, setSelectedPriorities] = useState([]);
-  
+
   // 双击完成相关状态
   const [pendingComplete, setPendingComplete] = useState(new Set());
   const [celebratingTodos, setCelebratingTodos] = useState(new Set());
-  
+
   // 筛选器可见性状态
   const { filtersVisible, toggleFiltersVisibility } = useFiltersVisibility('todo_filters_visible');
 
@@ -105,11 +105,11 @@ const TodoList = ({ onTodoSelect, onViewModeChange, onShowCompletedChange, viewM
     onSearchResult: (results) => {
       // 应用过滤和排序
       let filteredTodos = results;
-      
+
       if (!showCompleted) {
         filteredTodos = filteredTodos.filter(todo => !todo.completed);
       }
-      
+
       setTodos(applyFiltersAndSort(filteredTodos));
     },
     onError: (error) => {
@@ -152,7 +152,7 @@ const TodoList = ({ onTodoSelect, onViewModeChange, onShowCompletedChange, viewM
       setIsLoading(true);
       try {
         let filteredTodos = [...externalTodos];
-        
+
         // 映射数据字段（如果需要）
         filteredTodos = filteredTodos.map(todo => ({
           ...todo,
@@ -164,12 +164,12 @@ const TodoList = ({ onTodoSelect, onViewModeChange, onShowCompletedChange, viewM
             return Number.isFinite(focusSeconds) ? focusSeconds : 0;
           })()
         }));
-        
+
         // 根据完成状态筛选
         if (!showCompleted) {
           filteredTodos = filteredTodos.filter(todo => !todo.completed);
         }
-        
+
         // 应用所有筛选和排序
         setTodos(applyFiltersAndSort(filteredTodos));
       } catch (error) {
@@ -192,9 +192,9 @@ const TodoList = ({ onTodoSelect, onViewModeChange, onShowCompletedChange, viewM
       } else {
         result = await fetchTodosByCreatedAt();
       }
-      
+
       let filteredTodos = result || [];
-      
+
       // 映射数据字段
       filteredTodos = filteredTodos.map(todo => ({
         ...todo,
@@ -206,12 +206,12 @@ const TodoList = ({ onTodoSelect, onViewModeChange, onShowCompletedChange, viewM
           return Number.isFinite(focusSeconds) ? focusSeconds : 0;
         })()
       }));
-      
+
       // 根据完成状态筛选
       if (!showCompleted) {
         filteredTodos = filteredTodos.filter(todo => !todo.completed);
       }
-      
+
       // 应用所有筛选和排序
       setTodos(applyFiltersAndSort(filteredTodos));
     } catch (error) {
@@ -231,11 +231,11 @@ const TodoList = ({ onTodoSelect, onViewModeChange, onShowCompletedChange, viewM
   const stableSearchFunction = useCallback((query) => {
     searchTodos(query);
   }, [searchTodos]);
-  
+
   const stableLoadFunction = useCallback(() => {
     loadTodos();
   }, [loadTodos]);
-  
+
   // 使用搜索管理hook解决无限循环问题
   const { localSearchQuery, setLocalSearchQuery } = useSearchManager({
     searchFunction: stableSearchFunction,
@@ -254,17 +254,17 @@ const TodoList = ({ onTodoSelect, onViewModeChange, onShowCompletedChange, viewM
   // 应用过滤和排序的辅助函数
   const applyFiltersAndSort = (todoList) => {
     let filtered = [...todoList];
-    
+
     // 按优先级过滤（保留原有逻辑）
     if (filterBy !== 'all') {
       filtered = filtered.filter(todo => todo.priority === filterBy);
     }
-    
+
     // 按新的优先级筛选过滤
     if (selectedPriorities.length > 0) {
       filtered = filtered.filter(todo => selectedPriorities.includes(todo.priority));
     }
-    
+
     // 按标签过滤
     if (selectedTags.length > 0) {
       filtered = filtered.filter(todo => {
@@ -273,7 +273,7 @@ const TodoList = ({ onTodoSelect, onViewModeChange, onShowCompletedChange, viewM
         return selectedTags.some(selectedTag => todoTags.includes(selectedTag));
       });
     }
-    
+
     // 排序
     filtered.sort((a, b) => {
       switch (sortBy) {
@@ -290,7 +290,7 @@ const TodoList = ({ onTodoSelect, onViewModeChange, onShowCompletedChange, viewM
           return 0;
       }
     });
-    
+
     return filtered;
   };
 
@@ -328,14 +328,14 @@ const TodoList = ({ onTodoSelect, onViewModeChange, onShowCompletedChange, viewM
       }
       return;
     }
-    
+
     // 未完成的任务需要双击
     if (pendingComplete.has(todo.id)) {
       // 第二次点击，执行完成操作
       try {
         // 先显示庆祝动画
         setCelebratingTodos(prev => new Set([...prev, todo.id]));
-        
+
         // 延迟执行完成操作，让动画播放
         setTimeout(async () => {
           try {
@@ -348,7 +348,7 @@ const TodoList = ({ onTodoSelect, onViewModeChange, onShowCompletedChange, viewM
           } catch (err) {
             console.error('更新待办事项失败:', err);
           }
-          
+
           // 清除庆祝状态
           setTimeout(() => {
             setCelebratingTodos(prev => {
@@ -358,7 +358,7 @@ const TodoList = ({ onTodoSelect, onViewModeChange, onShowCompletedChange, viewM
             });
           }, 1000);
         }, 150);
-        
+
         // 清除待完成状态
         setPendingComplete(prev => {
           const newSet = new Set(prev);
@@ -371,7 +371,7 @@ const TodoList = ({ onTodoSelect, onViewModeChange, onShowCompletedChange, viewM
     } else {
       // 第一次点击，标记为待完成
       setPendingComplete(prev => new Set([...prev, todo.id]));
-      
+
       // 3秒后自动清除待完成状态
       setTimeout(() => {
         setPendingComplete(prev => {
@@ -413,15 +413,15 @@ const TodoList = ({ onTodoSelect, onViewModeChange, onShowCompletedChange, viewM
     try {
       // 构建笔记内容 - 使用 content 字段而不是 title
       let noteContent = `# ${selectedTodo.content}\n\n`;
-      
+
       if (selectedTodo.description) {
         noteContent += `${selectedTodo.description}\n\n`;
       }
-      
+
       // 添加元数据
       noteContent += `---\n`;
       noteContent += `原待办事项信息：\n`;
-      
+
       // 根据重要紧急程度显示优先级
       if (selectedTodo.is_important && selectedTodo.is_urgent) {
         noteContent += `- ${t('todos.urgentAndImportant')}\n`;
@@ -432,7 +432,7 @@ const TodoList = ({ onTodoSelect, onViewModeChange, onShowCompletedChange, viewM
       } else {
         noteContent += `- ${t('todos.neitherUrgentNorImportant')}\n`;
       }
-      
+
       if (selectedTodo.due_date) {
         noteContent += `- 截止日期：${formatDate(selectedTodo.due_date)}\n`;
       }
@@ -448,17 +448,17 @@ const TodoList = ({ onTodoSelect, onViewModeChange, onShowCompletedChange, viewM
       };
 
       const result = await createNote(noteData);
-      
+
       if (result) {
         // 删除原待办
         await deleteTodoAPI(selectedTodo.id);
-        
+
         // 刷新待办列表
         loadTodos();
-        
+
         console.log('已转换为笔记:', result);
       }
-      
+
       handleMenuClose();
     } catch (error) {
       console.error('转换为笔记失败:', error);
@@ -498,22 +498,22 @@ const TodoList = ({ onTodoSelect, onViewModeChange, onShowCompletedChange, viewM
 
 
   const renderLoadingState = () => (
-    <Box sx={{ 
-      display: 'flex', 
-      justifyContent: 'center', 
-      alignItems: 'center', 
-      height: 200 
+    <Box sx={{
+      display: 'flex',
+      justifyContent: 'center',
+      alignItems: 'center',
+      height: 200
     }}>
       <CircularProgress size={24} />
     </Box>
   );
 
   const renderEmptyState = () => (
-    <Box sx={{ 
-      display: 'flex', 
+    <Box sx={{
+      display: 'flex',
       flexDirection: 'column',
-      alignItems: 'center', 
-      justifyContent: 'center', 
+      alignItems: 'center',
+      justifyContent: 'center',
       height: 200,
       color: 'text.secondary'
     }}>
@@ -530,9 +530,9 @@ const TodoList = ({ onTodoSelect, onViewModeChange, onShowCompletedChange, viewM
   );
 
   return (
-    <Box sx={{ 
-      height: '100%', 
-      display: 'flex', 
+    <Box sx={{
+      height: '100%',
+      display: 'flex',
       flexDirection: 'column',
       overflow: 'hidden'
     }}>
@@ -563,26 +563,26 @@ const TodoList = ({ onTodoSelect, onViewModeChange, onShowCompletedChange, viewM
                     </IconButton>
                   </InputAdornment>
                 )}
-        {/* 排序按钮 */}
-        <DropdownMenu
-          icon={<SortIcon />}
-          tooltip={t('common.sort')}
-          options={[
-            { value: 'priority', label: t('todos.sortByPriority'), icon: FlagIcon },
-            { value: 'dueDate', label: t('todos.sortByDueDate'), icon: ScheduleIcon },
-            { value: 'createdAt', label: t('todos.sortByCreated'), icon: AccessTimeIcon }
-          ]}
-          selectedValue={sortBy}
-          onSelect={onSortByChange}
-          size="small"
-          sx={{
-            ml: 1,
-            mr: 0.5,
-            fontSize: '0.8rem',
-            minWidth: 'auto',
-            width: 'auto'
-          }}
-        />
+                {/* 排序按钮 */}
+                <DropdownMenu
+                  icon={<SortIcon />}
+                  tooltip={t('common.sort')}
+                  options={[
+                    { value: 'priority', label: t('todos.sortByPriority'), icon: FlagIcon },
+                    { value: 'dueDate', label: t('todos.sortByDueDate'), icon: ScheduleIcon },
+                    { value: 'createdAt', label: t('todos.sortByCreated'), icon: AccessTimeIcon }
+                  ]}
+                  selectedValue={sortBy}
+                  onSelect={onSortByChange}
+                  size="small"
+                  sx={{
+                    ml: 1,
+                    mr: 0.5,
+                    fontSize: '0.8rem',
+                    minWidth: 'auto',
+                    width: 'auto'
+                  }}
+                />
                 <FilterToggleButton
                   filtersVisible={filtersVisible}
                   onToggle={toggleFiltersVisibility}
@@ -591,10 +591,10 @@ const TodoList = ({ onTodoSelect, onViewModeChange, onShowCompletedChange, viewM
             )
           }}
         />
-        
+
         {/* 筛选容器 */}
-        <Collapse 
-          in={filtersVisible} 
+        <Collapse
+          in={filtersVisible}
           timeout={200}
           easing={{
             enter: ANIMATIONS.dragTransition.easing,
@@ -620,18 +620,18 @@ const TodoList = ({ onTodoSelect, onViewModeChange, onShowCompletedChange, viewM
       </Box>
 
       {/* 待办事项列表 */}
-      <Box 
+      <Box
         sx={{ flex: 1, overflow: 'auto' }}
         onMouseDown={(e) => {
           // 只在非多选模式下且有待办事项时启用拖拽
           if (!multiSelect.isMultiSelectMode && todos.length > 0 && e.button === 0) {
             // 检查是否点击在列表项上，而不是在具体的按钮或输入框上
             const target = e.target;
-            const isClickOnListArea = target.closest('.MuiList-root') && 
-                                    !target.closest('.MuiIconButton-root') && 
-                                    !target.closest('.MuiCheckbox-root') && 
-                                    !target.closest('.MuiTextField-root');
-            
+            const isClickOnListArea = target.closest('.MuiList-root') &&
+              !target.closest('.MuiIconButton-root') &&
+              !target.closest('.MuiCheckbox-root') &&
+              !target.closest('.MuiTextField-root');
+
             if (isClickOnListArea) {
               dragHandler.handleDragStart(e, todos)
             }
@@ -649,19 +649,9 @@ const TodoList = ({ onTodoSelect, onViewModeChange, onShowCompletedChange, viewM
                 <ListItem
                   disablePadding
                   sx={{
-                    borderBottom: 1,
-                    borderColor: 'divider',
+                    mb: 1,
                     position: 'relative',
-                    overflow: 'hidden',
-                    '&:hover': {
-                      backgroundColor: 'action.hover'
-                    },
-                    ...(multiSelect.isMultiSelectMode && multiSelect.isSelected(todo.id) && {
-                      backgroundColor: 'action.selected',
-                      '&:hover': {
-                        backgroundColor: 'action.selected'
-                      }
-                    }),
+                    overflow: 'visible', // Allow hover effects to show
                     ...(celebratingTodos.has(todo.id) && {
                       '&::before': {
                         content: '""',
@@ -674,7 +664,8 @@ const TodoList = ({ onTodoSelect, onViewModeChange, onShowCompletedChange, viewM
                         transform: 'translateX(-100%)',
                         animation: createAnimationString(ANIMATIONS.completion),
                         zIndex: 1,
-                        pointerEvents: 'none'
+                        pointerEvents: 'none',
+                        borderRadius: '12px'
                       },
                       ...GREEN_SWEEP_KEYFRAMES
                     })
@@ -683,7 +674,28 @@ const TodoList = ({ onTodoSelect, onViewModeChange, onShowCompletedChange, viewM
                   <ListItemButton
                     onClick={(e) => multiSelect.handleClick(e, todo.id, () => handleTodoClick(todo))}
                     onContextMenu={(e) => multiSelect.handleContextMenu(e, todo.id, multiSelect.isMultiSelectMode)}
-                    sx={{ py: 1.5 }}
+                    selected={multiSelect.isMultiSelectMode && multiSelect.isSelected(todo.id)}
+                    sx={{
+                      py: 1.5,
+                      borderRadius: '12px',
+                      border: '1px solid transparent',
+                      backgroundColor: (theme) => theme.palette.mode === 'dark' ? 'rgba(255,255,255,0.02)' : 'rgba(255,255,255,0.6)',
+                      transition: 'all 0.2s cubic-bezier(0.4, 0, 0.2, 1)',
+                      '&:hover': {
+                        backgroundColor: (theme) => theme.palette.action.hover,
+                        transform: 'translateY(-2px)',
+                        boxShadow: '0 4px 12px rgba(0,0,0,0.08)',
+                        borderColor: (theme) => theme.palette.divider,
+                        zIndex: 1,
+                      },
+                      '&.Mui-selected': {
+                        backgroundColor: (theme) => theme.palette.primary.main + '1A',
+                        borderColor: (theme) => theme.palette.primary.main + '33',
+                        '&:hover': {
+                          backgroundColor: (theme) => theme.palette.primary.main + '26'
+                        }
+                      }
+                    }}
                   >
                     {multiSelect.isMultiSelectMode && (
                       <ListItemIcon sx={{ minWidth: 40 }}>
@@ -716,25 +728,25 @@ const TodoList = ({ onTodoSelect, onViewModeChange, onShowCompletedChange, viewM
                         {todo.completed ? (
                           <CheckCircleIcon sx={{ color: 'success.main' }} />
                         ) : pendingComplete.has(todo.id) ? (
-                          <RadioButtonUncheckedIcon 
-                            sx={{ 
+                          <RadioButtonUncheckedIcon
+                            sx={{
                               color: 'warning.main',
                               animation: createAnimationString(ANIMATIONS.pulse)
-                            }} 
+                            }}
                           />
                         ) : celebratingTodos.has(todo.id) ? (
-                          <CheckCircleIcon 
-                            sx={{ 
+                          <CheckCircleIcon
+                            sx={{
                               color: 'success.main',
                               filter: 'drop-shadow(0 0 8px rgba(76, 175, 80, 0.6))'
-                            }} 
+                            }}
                           />
                         ) : (
                           <RadioButtonUncheckedIcon sx={{ color: 'text.secondary' }} />
                         )}
                       </IconButton>
                     </ListItemIcon>
-                    
+
                     <ListItemText
                       primary={
                         <Typography
@@ -749,10 +761,10 @@ const TodoList = ({ onTodoSelect, onViewModeChange, onShowCompletedChange, viewM
                       }
                       secondary={
                         <Typography component="div" variant="body2" color="textSecondary">
-                          <Box sx={{ 
-                            display: 'flex', 
-                            alignItems: 'center', 
-                            gap: 1, 
+                          <Box sx={{
+                            display: 'flex',
+                            alignItems: 'center',
+                            gap: 1,
                             mt: 0.5,
                             flexWrap: 'wrap',
                             maxWidth: 'calc(100% - 60px)' // 为右侧图标预留空间
@@ -796,7 +808,7 @@ const TodoList = ({ onTodoSelect, onViewModeChange, onShowCompletedChange, viewM
                         </Typography>
                       }
                     />
-                    
+
                     <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
                       {getPriorityIcon(todo.priority)}
                       <IconButton

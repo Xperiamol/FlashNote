@@ -347,7 +347,9 @@ async function initializeServices() {
     services.imageService = new ImageService()
     
     // 暴露 DAO 供插件使用
+    const NoteDAO = require('./dao/NoteDAO')
     const TodoDAO = require('./dao/TodoDAO')
+    services.noteDAO = new NoteDAO()
     services.todoDAO = new TodoDAO()
     
     // 初始化AI服务

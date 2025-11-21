@@ -239,6 +239,8 @@ const TagInput = ({
         noteId
       });
       
+      console.log('[TagInput] 插件返回结果:', result);
+      
       // 处理返回的标签
       if (result?.data?.allTags && Array.isArray(result.data.allTags)) {
         const suggestedTags = result.data.allTags;
@@ -246,6 +248,15 @@ const TagInput = ({
         const limitedTags = allTags.slice(0, maxTags);
         setTags(limitedTags);
         onChange?.(formatTags(limitedTags));
+      }
+      
+      // 如果插件更新了笔记（applied=true），需要刷新笔记数据以显示更新后的分类
+      if (result?.data?.applied && noteId) {
+        console.log('[TagInput] 插件已更新笔记，触发刷新');
+        // 触发自定义事件，通知父组件刷新笔记
+        window.dispatchEvent(new CustomEvent('plugin-note-updated', { 
+          detail: { noteId, result: result.data } 
+        }));
       }
     } catch (error) {
       console.error('[TagInput] 执行插件扩展失败:', error);

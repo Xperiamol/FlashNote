@@ -299,6 +299,15 @@ const useStore = create(
 
                 setSelectedNoteId: (id) => set({ selectedNoteId: id }),
 
+                // 局部更新笔记列表中的单个笔记（不重新排序）
+                updateNoteInList: (updatedNote) => {
+                    set((state) => ({
+                        notes: state.notes.map(note => 
+                            note.id === updatedNote.id ? { ...note, ...updatedNote } : note
+                        )
+                    }))
+                },
+
                 // 批量删除笔记
                 batchDeleteNotes: async (ids) => {
                     try {

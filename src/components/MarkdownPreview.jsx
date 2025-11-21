@@ -24,7 +24,7 @@ const CustomImage = ({ src, alt, ...props }) => {
         // 使用协议解析器处理所有类型的图片路径
         const resolver = getImageResolver()
         const resolvedSrc = await resolver.resolve(src)
-        
+
         if (resolvedSrc) {
           setImageSrc(resolvedSrc)
           setError(false)
@@ -149,7 +149,7 @@ const MarkdownPreview = ({ content, sx, onWikiLinkClick, onTagClick }) => {
         e.preventDefault()
         const wikiTarget = target.getAttribute('data-wiki-target')
         const wikiSection = target.getAttribute('data-wiki-section')
-        
+
         if (onWikiLinkClick && wikiTarget) {
           onWikiLinkClick(wikiTarget, wikiSection)
         }
@@ -160,7 +160,7 @@ const MarkdownPreview = ({ content, sx, onWikiLinkClick, onTagClick }) => {
       if (target.classList.contains('markdown-tag')) {
         e.preventDefault()
         const tag = target.getAttribute('data-tag')
-        
+
         if (onTagClick && tag) {
           onTagClick(tag)
         }
@@ -190,9 +190,9 @@ const MarkdownPreview = ({ content, sx, onWikiLinkClick, onTagClick }) => {
 
       for (const img of images) {
         const originalSrc = img.getAttribute('src')
-        
+
         console.log(`[MarkdownPreview] 图片原始路径:`, originalSrc)
-        
+
         // 跳过已经是 data:、file:// 或 http(s) 的图片
         if (!originalSrc || originalSrc.startsWith('data:') || originalSrc.startsWith('file://') || originalSrc.startsWith('http://') || originalSrc.startsWith('https://')) {
           console.log(`[MarkdownPreview] 跳过已处理的图片:`, originalSrc)
@@ -204,7 +204,7 @@ const MarkdownPreview = ({ content, sx, onWikiLinkClick, onTagClick }) => {
           console.log(`[MarkdownPreview] 解析图片路径:`, originalSrc)
           const resolvedSrc = await resolver.resolve(originalSrc)
           console.log(`[MarkdownPreview] 解析结果:`, resolvedSrc)
-          
+
           if (resolvedSrc) {
             img.src = resolvedSrc
             console.log(`[MarkdownPreview] 图片加载成功:`, originalSrc)

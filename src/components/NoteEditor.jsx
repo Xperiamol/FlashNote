@@ -60,13 +60,13 @@ const NoteEditor = () => {
     // 不在独立窗口模式下，使用主应用store
     isStandaloneMode = false
   }
-  
+
   // 根据运行环境选择状态管理
   const mainStore = useStore()
   const store = standaloneContext || mainStore
-  
+
   const { t } = useTranslation()
-  
+
   const {
     selectedNoteId,
     notes,
@@ -103,11 +103,11 @@ const NoteEditor = () => {
   const prevNoteIdRef = useRef(null)
   const prevStateRef = useRef({ title: '', content: '', category: '', tags: '', noteType: 'markdown' })
   const hasUnsavedChangesRef = useRef(false)
-  
+
   // 保存函数（稳定引用）
   const performSave = async () => {
     if (!selectedNoteId) return
-    
+
     setIsAutoSaving(true)
     try {
       const tagsArray = parseTags(prevStateRef.current.tags)
@@ -128,7 +128,7 @@ const NoteEditor = () => {
       setIsAutoSaving(false)
     }
   }
-  
+
   // 使用防抖保存 Hook
   const { debouncedSave, saveNow, cancelSave } = useDebouncedSave(performSave, 2000)
 
@@ -197,9 +197,12 @@ const NoteEditor = () => {
       const newTitle = currentNote.title || ''
       const newContent = currentNote.content || ''
       const newCategory = currentNote.category || ''
-      const newTags = currentNote.tags ? currentNote.tags.join(', ') : ''
+      // 处理 tags：可能是数组或逗号分隔的字符串
+      const newTags = Array.isArray(currentNote.tags) 
+        ? currentNote.tags.join(', ') 
+        : (currentNote.tags || '')
       const newNoteType = currentNote.note_type || 'markdown'
-      
+
       setTitle(newTitle)
       setContent(newContent)
       setCategory(newCategory)
@@ -207,7 +210,7 @@ const NoteEditor = () => {
       setNoteType(newNoteType)
       setLastSaved(currentNote.updated_at)
       setHasUnsavedChanges(false)
-      
+
       // 保存新笔记的状态到 ref
       prevStateRef.current = {
         title: newTitle,
@@ -216,7 +219,7 @@ const NoteEditor = () => {
         tags: newTags,
         noteType: newNoteType
       }
-    
+
       // 如果是新创建的笔记（标题为"新笔记"且内容为空），自动聚焦到标题输入框
       if (currentNote.title === '新笔记' && !currentNote.content) {
         setTimeout(() => {
@@ -245,22 +248,22 @@ const NoteEditor = () => {
     const initializeShortcuts = async () => {
       console.log('初始化快捷键管理器...')
       await shortcutManager.initialize()
-      
+
       // 只注册保存快捷键，其他快捷键使用编辑器原生实现
       const handlers = {
         save: handleManualSave
       }
-      
+
       shortcutManager.registerListener(document, handlers)
       console.log('编辑器快捷键监听器已注册')
     }
 
     initializeShortcuts()
-    
+
     // 清理函数：组件卸载时保存未保存的内容
     return () => {
       shortcutManager.unregisterListener(document)
-      
+
       // 组件卸载时立即保存
       if (hasUnsavedChangesRef.current && selectedNoteId) {
         const tagsArray = parseTags(prevStateRef.current.tags)
@@ -291,7 +294,7 @@ const NoteEditor = () => {
 
     const handleStandaloneSave = async () => {
       console.log('独立窗口保存事件触发', { noteType: prevStateRef.current.noteType })
-      
+
       // 对于白板类型，触发全局保存事件由WhiteboardEditor处理
       if (prevStateRef.current.noteType === 'whiteboard') {
         console.log('白板类型，触发白板保存事件')
@@ -301,7 +304,7 @@ const NoteEditor = () => {
         await new Promise(resolve => setTimeout(resolve, 500))
         return
       }
-      
+
       // Markdown类型的保存逻辑
       if (hasUnsavedChangesRef.current && selectedNoteId) {
         try {
@@ -427,7 +430,7 @@ const NoteEditor = () => {
   // 处理在独立窗口打开
   const handleOpenStandalone = async () => {
     if (!selectedNoteId) return
-    
+
     try {
       await window.electronAPI.createNoteWindow(selectedNoteId)
     } catch (error) {
@@ -438,13 +441,13 @@ const NoteEditor = () => {
   // 处理笔记类型切换
   const handleNoteTypeChange = (event, newType) => {
     if (newType === null) return
-    
+
     // 如果切换到相同类型，不做任何操作
     if (newType === noteType) return
-    
+
     // 记录用户想要切换到的类型
     setPendingNoteType(newType)
-    
+
     // 显示转换确认对话框
     setConversionDialogOpen(true)
   }
@@ -452,13 +455,13 @@ const NoteEditor = () => {
   // 处理转换确认
   const handleConversionConfirm = async (confirmed) => {
     setConversionDialogOpen(false)
-    
+
     if (!confirmed || !pendingNoteType) {
       // 用户取消，重置
       setPendingNoteType(null)
       return
     }
-    
+
     try {
       if (noteType === 'markdown' && pendingNoteType === 'whiteboard') {
         // Markdown → 白板转换
@@ -479,11 +482,11 @@ const NoteEditor = () => {
   // Markdown 转白板
   const convertMarkdownToWhiteboardNote = async () => {
     if (!selectedNoteId) return
-    
+
     try {
       // 转换 Markdown 内容为白板数据
       const whiteboardContent = convertMarkdownToWhiteboard(content)
-      
+
       // 更新笔记
       await updateNote(selectedNoteId, {
         content: whiteboardContent,
@@ -492,7 +495,7 @@ const NoteEditor = () => {
         category: category.trim(),
         tags: formatTags(parseTags(tags))
       })
-      
+
       // 更新本地状态
       setNoteType('whiteboard')
       setContent('') // 清空 Markdown content 状态（白板数据存储在 note.content 中）
@@ -500,7 +503,7 @@ const NoteEditor = () => {
       prevStateRef.current.content = ''
       setHasUnsavedChanges(false)
       hasUnsavedChangesRef.current = false
-      
+
       console.log('Markdown 转白板成功')
     } catch (error) {
       console.error('Markdown 转白板失败:', error)
@@ -511,7 +514,7 @@ const NoteEditor = () => {
   // 白板转 Markdown
   const convertWhiteboardToMarkdownNote = async () => {
     if (!selectedNoteId) return
-    
+
     try {
       // 清空内容，切换类型
       await updateNote(selectedNoteId, {
@@ -521,7 +524,7 @@ const NoteEditor = () => {
         category: category.trim(),
         tags: formatTags(parseTags(tags))
       })
-      
+
       // 更新本地状态
       setNoteType('markdown')
       setContent('')
@@ -529,7 +532,7 @@ const NoteEditor = () => {
       prevStateRef.current.content = ''
       setHasUnsavedChanges(false)
       hasUnsavedChangesRef.current = false
-      
+
       console.log('白板转 Markdown 成功')
     } catch (error) {
       console.error('白板转 Markdown 失败:', error)
@@ -540,7 +543,7 @@ const NoteEditor = () => {
   // 处理Markdown工具栏插入文本
   const handleMarkdownInsert = (before, after = '', placeholder = '') => {
     if (!contentRef.current) return
-    
+
     const textarea = contentRef.current.querySelector('textarea')
     if (!textarea) return
 
@@ -548,18 +551,18 @@ const NoteEditor = () => {
     const end = textarea.selectionEnd
     const selectedText = content.substring(start, end)
     const textToInsert = selectedText || placeholder
-    
-    const newContent = 
-      content.substring(0, start) + 
-      before + textToInsert + after + 
+
+    const newContent =
+      content.substring(0, start) +
+      before + textToInsert + after +
       content.substring(end)
-    
+
     setContent(newContent)
     setHasUnsavedChanges(true)
     prevStateRef.current.content = newContent
     // 触发防抖保存
     debouncedSave()
-    
+
     // 设置新的光标位置
     setTimeout(() => {
       const newCursorPos = start + before.length + textToInsert.length
@@ -580,13 +583,13 @@ const NoteEditor = () => {
         // SQLite的CURRENT_TIMESTAMP格式，假设为UTC时间
         date = new Date(dateString + 'Z')
       }
-      
+
       // 检查日期是否有效
       if (isNaN(date.getTime())) {
         // 如果解析失败，尝试直接解析
         date = new Date(dateString)
       }
-      
+
       return formatDistanceToNow(date, {
         addSuffix: true,
         locale: zhCN
@@ -606,7 +609,7 @@ const NoteEditor = () => {
 
         const start = e.target.selectionStart
         const end = e.target.selectionEnd
-        
+
         const newContent = content.substring(0, start) + '  ' + content.substring(end)
         setContent(newContent)
         setHasUnsavedChanges(true)
@@ -654,7 +657,7 @@ const NoteEditor = () => {
             const buffer = new Uint8Array(arrayBuffer)
             const fileName = `clipboard_${Date.now()}.png`
             const imagePath = await imageAPI.saveFromBuffer(buffer, fileName)
-            
+
             // 插入图片到光标位置
             const textarea = contentRef.current?.querySelector('textarea')
             if (textarea) {
@@ -664,7 +667,7 @@ const NoteEditor = () => {
               const newContent = content.substring(0, start) + imageMarkdown + content.substring(end)
               setContent(newContent)
               setHasUnsavedChanges(true)
-              
+
               // 设置光标位置到图片markdown之后
               setTimeout(() => {
                 textarea.selectionStart = textarea.selectionEnd = start + imageMarkdown.length
@@ -719,7 +722,7 @@ const NoteEditor = () => {
         const arrayBuffer = await file.arrayBuffer()
         const buffer = new Uint8Array(arrayBuffer)
         const imagePath = await imageAPI.saveFromBuffer(buffer, file.name)
-        
+
         // 插入图片到内容末尾
         const imageMarkdown = `![${file.name}](${imagePath})\n`
         setContent(prev => prev + imageMarkdown)
@@ -757,10 +760,10 @@ const NoteEditor = () => {
   // 处理鼠标移动事件（独立窗口模式）
   const handleMouseMove = (e) => {
     if (!isStandaloneMode) return
-    
+
     const triggerAreaHeight = 50 // 触发展开的区域（最顶端50px）
     const toolbarTotalHeight = 160 // TitleBar(28px) + 工具栏(48px) + 标题栏(48px) = 124px
-    
+
     // 鼠标在整个工具栏区域内（包括触发区域）
     if (e.clientY < toolbarTotalHeight) {
       // 在触发区域或工具栏已展开
@@ -782,17 +785,17 @@ const NoteEditor = () => {
       }
     }
   }
-  
+
   // 处理鼠标离开编辑器区域
   const handleMouseLeave = (e) => {
     if (!isStandaloneMode) return
-    
+
     // 不立即隐藏，给一个延迟让handleMouseMove有机会处理
     // 如果鼠标真的离开了整个窗口，这个延迟后会隐藏
     if (toolbarTimeoutRef.current) {
       clearTimeout(toolbarTimeoutRef.current)
     }
-    
+
     toolbarTimeoutRef.current = setTimeout(() => {
       setShowToolbar(false)
       toolbarTimeoutRef.current = null
@@ -809,14 +812,19 @@ const NoteEditor = () => {
       <Paper
         elevation={0}
         sx={{
-          p: 1,  // 降低内边距
-          height: '48px',  // 固定高度
+          p: 1,
+          height: '48px',
           borderBottom: 1,
           borderColor: 'divider',
           display: 'flex',
           alignItems: 'center',
           gap: 1,
-          overflow: 'hidden',  // 防止内容溢出
+          overflow: 'hidden',
+          backgroundColor: (theme) => theme.palette.mode === 'dark'
+            ? 'rgba(30, 41, 59, 0.6)'
+            : 'rgba(255, 255, 255, 0.6)',
+          backdropFilter: 'blur(30px) saturate(180%)',
+          WebkitBackdropFilter: 'blur(30px) saturate(180%)',
           // 独立窗口模式下的特殊样式
           ...(isStandaloneMode && {
             position: 'absolute',
@@ -824,7 +832,6 @@ const NoteEditor = () => {
             left: 0,
             right: 0,
             zIndex: 1000,
-            backgroundColor: 'background.paper',
             opacity: showToolbar ? 1 : 0,
             transform: showToolbar ? 'translateY(0)' : 'translateY(-100%)',
             transition: 'opacity 0.3s ease, transform 0.3s ease',
@@ -870,13 +877,13 @@ const NoteEditor = () => {
             白板
           </ToggleButton>
         </ToggleButtonGroup>
-        
+
         <Tooltip title={t('notes.openInNewWindow')}>
           <IconButton onClick={handleOpenStandalone} size="small">
             <OpenInNewIcon />
           </IconButton>
         </Tooltip>
-        
+
         <Tooltip title={currentNote?.is_pinned ? t('notes.unpinNote') : t('notes.pinNote')}>
           <IconButton onClick={handleTogglePin} size="small">
             {currentNote?.is_pinned ? (
@@ -886,12 +893,12 @@ const NoteEditor = () => {
             )}
           </IconButton>
         </Tooltip>
-        
+
         {/* Markdown 模式：保存按钮 */}
         {noteType === 'markdown' && (
           <Tooltip title={t('common.saveTooltip')}>
-            <IconButton 
-              onClick={handleManualSave} 
+            <IconButton
+              onClick={handleManualSave}
               size="small"
               disabled={!hasUnsavedChanges}
             >
@@ -899,21 +906,21 @@ const NoteEditor = () => {
             </IconButton>
           </Tooltip>
         )}
-        
+
         {/* 白板模式：保存白板和导出PNG */}
         {noteType === 'whiteboard' && (
           <>
             <Tooltip title={t('common.saveWhiteboardTooltip')}>
-              <IconButton 
-                onClick={() => whiteboardSaveFunc?.()} 
+              <IconButton
+                onClick={() => whiteboardSaveFunc?.()}
                 size="small"
               >
                 <SaveIcon />
               </IconButton>
             </Tooltip>
-            
+
             <Tooltip title={t('common.exportPngTooltip')}>
-              <IconButton 
+              <IconButton
                 onClick={() => whiteboardExportFunc?.()}
                 size="small"
               >
@@ -927,23 +934,27 @@ const NoteEditor = () => {
       {/* 标签和标题栏 - 调整高度 */}
       <Box
         sx={{
-          p: 1,  // 降低内边距
-          height: '48px',  // 固定高度
+          p: 1,
+          height: '48px',
           borderBottom: 1,
           borderColor: 'divider',
           display: 'flex',
           alignItems: 'center',
           gap: 1,
-          flexWrap: 'nowrap',  // 防止换行
-          overflow: 'hidden',   // 防止内容溢出
+          flexWrap: 'nowrap',
+          overflow: 'hidden',
+          backgroundColor: (theme) => theme.palette.mode === 'dark'
+            ? 'rgba(30, 41, 59, 0.6)'
+            : 'rgba(255, 255, 255, 0.6)',
+          backdropFilter: 'blur(30px) saturate(180%)',
+          WebkitBackdropFilter: 'blur(30px) saturate(180%)',
           // 独立窗口模式下的特殊样式
           ...(isStandaloneMode && {
             position: 'absolute',
-            top: 48,  // 工具栏高度
+            top: 48,
             left: 0,
             right: 0,
             zIndex: 999,
-            backgroundColor: 'background.paper',
             opacity: showToolbar ? 1 : 0,
             transform: showToolbar ? 'translateY(0)' : 'translateY(-100%)',
             transition: 'opacity 0.3s ease, transform 0.3s ease',
@@ -988,8 +999,8 @@ const NoteEditor = () => {
                 <CategoryIcon sx={{ mr: 0.5, color: 'action.active', fontSize: '14px' }} />
               </InputAdornment>
             }}
-            sx={{ 
-              minWidth: 100, 
+            sx={{
+              minWidth: 100,
               maxWidth: '45%',  // 限制分类宽度
               mr: 0.5,
               '& .MuiInputBase-input': {
@@ -1013,7 +1024,7 @@ const NoteEditor = () => {
               noteContent={content}
               noteId={selectedNoteId}
               size="small"
-              sx={{ 
+              sx={{
                 width: '100%',
                 // 确保标签输入框和分类输入框高度一致
                 '& .MuiInputBase-root': {
@@ -1076,10 +1087,10 @@ const NoteEditor = () => {
             >
               {/* 编辑面板 */}
               {(viewMode === 'edit' || viewMode === 'split') && (
-                <Box 
-                  sx={{ 
+                <Box
+                  sx={{
                     flex: viewMode === 'split' ? 1 : 'auto',
-                    p: editorMode === 'wysiwyg' ? 0 : 2, 
+                    p: 0,
                     overflow: 'auto',
                     borderRight: viewMode === 'split' ? 1 : 0,
                     borderColor: 'divider',
@@ -1123,7 +1134,7 @@ const NoteEditor = () => {
                       {t('common.dragImageHere')}
                     </Box>
                   )}
-                  
+
                   {/* 内容编辑器 - 根据 editorMode 切换 */}
                   {editorMode === 'markdown' ? (
                     <TextField
@@ -1141,7 +1152,8 @@ const NoteEditor = () => {
                       sx={{
                         flex: 1,
                         '& .MuiInput-root': {
-                          height: '100%'
+                          height: '100%',
+                          padding: '16px'
                         },
                         '& .MuiInput-input': {
                           fontSize: '1rem',
@@ -1170,7 +1182,7 @@ const NoteEditor = () => {
 
               {/* 预览面板 */}
               {(viewMode === 'preview' || viewMode === 'split') && (
-                <Box sx={{ 
+                <Box sx={{
                   flex: viewMode === 'split' ? 1 : 'auto',
                   height: viewMode === 'preview' ? '100%' : 'auto',
                   overflow: 'hidden',
@@ -1178,18 +1190,18 @@ const NoteEditor = () => {
                   flexDirection: 'column',
                   minHeight: 0
                 }}>
-                  <MarkdownPreview 
-                    content={content} 
+                  <MarkdownPreview
+                    content={content}
                     onWikiLinkClick={handleWikiLinkClick}
                     onTagClick={handleTagClick}
-                    sx={{ 
+                    sx={{
                       flex: 1,
                       overflow: 'auto',
                       minHeight: 0,
                       maxWidth: '100%',
                       width: '100%',
                       boxSizing: 'border-box'
-                    }} 
+                    }}
                   />
                 </Box>
               )}

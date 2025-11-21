@@ -560,14 +560,22 @@ const NoteList = ({ showDeleted = false, onMultiSelectChange, onMultiSelectRefCh
                   <React.Fragment key={note.id}>
                     <ListItem
                       disablePadding
+                      sx={{ mb: 1 }}
                       secondaryAction={
                         !multiSelect.isMultiSelectMode && (
                           <IconButton
                             edge="end"
                             onClick={(e) => handleMenuClick(e, note)}
                             size="small"
+                            sx={{
+                              opacity: 0,
+                              transition: 'opacity 0.2s',
+                              '.MuiListItemButton-root:hover &': {
+                                opacity: 1
+                              }
+                            }}
                           >
-                            <MoreVertIcon />
+                            <MoreVertIcon fontSize="small" />
                           </IconButton>
                         )
                       }
@@ -583,16 +591,30 @@ const NoteList = ({ showDeleted = false, onMultiSelectChange, onMultiSelectRefCh
                           }
                         }}
                         sx={{
+                          borderRadius: '12px',
+                          border: '1px solid',
+                          borderColor: 'transparent',
+                          backgroundColor: theme.palette.mode === 'dark' ? 'rgba(255,255,255,0.02)' : 'rgba(255,255,255,0.6)',
+                          transition: 'all 0.2s cubic-bezier(0.4, 0, 0.2, 1)',
                           py: 1.5,
                           pr: multiSelect.isMultiSelectMode ? 2 : 6,
+                          '&:hover': {
+                            backgroundColor: theme.palette.action.hover,
+                            transform: 'translateY(-2px)',
+                            boxShadow: '0 4px 12px rgba(0,0,0,0.08)',
+                            borderColor: theme.palette.divider,
+                            zIndex: 1,
+                          },
                           '&.Mui-selected': {
                             backgroundColor: theme.palette.primary.main + '1A', // 10% 透明度
+                            borderColor: theme.palette.primary.main + '33',
                             '&:hover': {
-                              backgroundColor: theme.palette.primary.main + '1A'
+                              backgroundColor: theme.palette.primary.main + '26'
                             }
                           },
                           ...(multiSelect.isMultiSelectMode && multiSelect.isSelected(note.id) && {
                             backgroundColor: 'action.selected',
+                            borderColor: theme.palette.primary.main,
                             '&:hover': {
                               backgroundColor: 'action.selected'
                             }
@@ -623,7 +645,7 @@ const NoteList = ({ showDeleted = false, onMultiSelectChange, onMultiSelectRefCh
                               <Typography
                                 variant="subtitle2"
                                 sx={{
-                                  fontWeight: note.is_pinned ? 600 : 400,
+                                  fontWeight: note.is_pinned ? 600 : 500,
                                   overflow: 'hidden',
                                   textOverflow: 'ellipsis',
                                   whiteSpace: 'nowrap',
@@ -643,7 +665,7 @@ const NoteList = ({ showDeleted = false, onMultiSelectChange, onMultiSelectRefCh
                             </Box>
                           }
                           secondary={
-                            <Box component="span" sx={{ display: 'block' }}>
+                            <Box component="span" sx={{ display: 'block', mt: 0.5 }}>
                               <Typography
                                 component="span"
                                 variant="body2"
@@ -653,12 +675,13 @@ const NoteList = ({ showDeleted = false, onMultiSelectChange, onMultiSelectRefCh
                                   textOverflow: 'ellipsis',
                                   whiteSpace: 'nowrap',
                                   mb: 0.5,
-                                  display: 'block'
+                                  display: 'block',
+                                  fontSize: '0.85rem'
                                 }}
                               >
                                 {getPreviewText(note.content, note.note_type)}
                               </Typography>
-                              <Typography component="span" variant="caption" color="text.secondary" sx={{ display: 'block' }}>
+                              <Typography component="span" variant="caption" color="text.secondary" sx={{ display: 'block', opacity: 0.8 }}>
                                 {formatDate(note.updated_at)}
                               </Typography>
                             </Box>
@@ -666,85 +689,85 @@ const NoteList = ({ showDeleted = false, onMultiSelectChange, onMultiSelectRefCh
                         />
                       </ListItemButton>
                     </ListItem>
-                    {index < filteredNotes.length - 1 && <Divider />}
                   </React.Fragment>
                 ))}
               </List>
             )}
           </Box>
         </Fade>
-      </Box>
+      </Box >
 
       {/* 右键菜单 */}
-      <Menu
+      < Menu
         anchorEl={anchorEl}
         open={Boolean(anchorEl)}
         onClose={handleMenuClose}
         transformOrigin={{ horizontal: 'right', vertical: 'top' }}
         anchorOrigin={{ horizontal: 'right', vertical: 'bottom' }}
       >
-        {showDeleted ? (
-          [
-            <MenuItem key="restore" onClick={handleRestore}>
-              <ListItemIcon>
-                <RestoreIcon fontSize="small" />
-              </ListItemIcon>
-              <ListItemText>{t('notes.restoreNote')}</ListItemText>
-            </MenuItem>,
-            <MenuItem
-              key="permanent-delete"
-              onClick={handlePermanentDelete}
-              sx={permanentDeleteConfirm ? {
-                backgroundColor: 'error.main',
-                color: 'error.contrastText',
-                '&:hover': {
-                  backgroundColor: 'error.dark'
-                }
-              } : {}}
-            >
-              <ListItemIcon>
-                <DeleteIcon fontSize="small" color={permanentDeleteConfirm ? "inherit" : "error"} />
-              </ListItemIcon>
-              <ListItemText>{permanentDeleteConfirm ? t('notes.confirmDelete') : t('notes.permanentDelete')}</ListItemText>
-            </MenuItem>
-          ]
-        ) : (
-          [
-            <MenuItem key="pin" onClick={handleTogglePin}>
-              <ListItemIcon>
-                {selectedNote?.is_pinned ? (
-                  <PinOutlinedIcon fontSize="small" />
-                ) : (
-                  <PinIcon fontSize="small" />
-                )}
-              </ListItemIcon>
-              <ListItemText>
-                {selectedNote?.is_pinned ? t('notes.unpinNote') : t('notes.pinNote')}
-              </ListItemText>
-            </MenuItem>,
-            <MenuItem key="standalone" onClick={handleOpenStandalone}>
-              <ListItemIcon>
-                <OpenInNewIcon fontSize="small" />
-              </ListItemIcon>
-              <ListItemText>{t('notes.openInNewWindow')}</ListItemText>
-            </MenuItem>,
-            <MenuItem key="convert" onClick={handleConvertToTodo}>
-              <ListItemIcon>
-                <TodoIcon fontSize="small" />
-              </ListItemIcon>
-              <ListItemText>{t('notes.convertToTodo')}</ListItemText>
-            </MenuItem>,
-            <Divider key="divider" />,
-            <MenuItem key="delete" onClick={handleDelete}>
-              <ListItemIcon>
-                <DeleteIcon fontSize="small" />
-              </ListItemIcon>
-              <ListItemText>{t('notes.deleteNote')}</ListItemText>
-            </MenuItem>
-          ]
-        )}
-      </Menu>
-    </Box>
+        {
+          showDeleted ? (
+            [
+              <MenuItem key="restore" onClick={handleRestore} >
+                <ListItemIcon>
+                  <RestoreIcon fontSize="small" />
+                </ListItemIcon>
+                <ListItemText>{t('notes.restoreNote')}</ListItemText>
+              </MenuItem>,
+              <MenuItem
+                key="permanent-delete"
+                onClick={handlePermanentDelete}
+                sx={permanentDeleteConfirm ? {
+                  backgroundColor: 'error.main',
+                  color: 'error.contrastText',
+                  '&:hover': {
+                    backgroundColor: 'error.dark'
+                  }
+                } : {}}
+              >
+                <ListItemIcon>
+                  <DeleteIcon fontSize="small" color={permanentDeleteConfirm ? "inherit" : "error"} />
+                </ListItemIcon>
+                <ListItemText>{permanentDeleteConfirm ? t('notes.confirmDelete') : t('notes.permanentDelete')}</ListItemText>
+              </MenuItem>
+            ]
+          ) : (
+            [
+              <MenuItem key="pin" onClick={handleTogglePin}>
+                <ListItemIcon>
+                  {selectedNote?.is_pinned ? (
+                    <PinOutlinedIcon fontSize="small" />
+                  ) : (
+                    <PinIcon fontSize="small" />
+                  )}
+                </ListItemIcon>
+                <ListItemText>
+                  {selectedNote?.is_pinned ? t('notes.unpinNote') : t('notes.pinNote')}
+                </ListItemText>
+              </MenuItem>,
+              <MenuItem key="standalone" onClick={handleOpenStandalone}>
+                <ListItemIcon>
+                  <OpenInNewIcon fontSize="small" />
+                </ListItemIcon>
+                <ListItemText>{t('notes.openInNewWindow')}</ListItemText>
+              </MenuItem>,
+              <MenuItem key="convert" onClick={handleConvertToTodo}>
+                <ListItemIcon>
+                  <TodoIcon fontSize="small" />
+                </ListItemIcon>
+                <ListItemText>{t('notes.convertToTodo')}</ListItemText>
+              </MenuItem>,
+              <Divider key="divider" />,
+              <MenuItem key="delete" onClick={handleDelete}>
+                <ListItemIcon>
+                  <DeleteIcon fontSize="small" />
+                </ListItemIcon>
+                <ListItemText>{t('notes.deleteNote')}</ListItemText>
+              </MenuItem>
+            ]
+          )}
+      </Menu >
+    </Box >
   )
 }
 

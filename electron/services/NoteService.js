@@ -76,8 +76,9 @@ class NoteService extends EventEmitter {
 
   /**
    * 更新笔记
+   * @param {boolean} silent - 是否静默更新（不触发事件）
    */
-  async updateNote(id, noteData) {
+  async updateNote(id, noteData, silent = false) {
     try {
       // 清除自动保存定时器
       this.clearAutoSaveTimer(id);
@@ -100,7 +101,10 @@ class NoteService extends EventEmitter {
         };
       }
       
-      this.emit('note-updated', note);
+      // 只在非静默模式下触发事件
+      if (!silent) {
+        this.emit('note-updated', note);
+      }
       return {
         success: true,
         data: note

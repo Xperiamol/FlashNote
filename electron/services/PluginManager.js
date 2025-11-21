@@ -1170,26 +1170,24 @@ class PluginManager extends EventEmitter {
 						}
 					} else if (action === 'update') {
 						this.assertPermission(pluginId, 'notes:write')
-						const noteDAO = this.services.noteDAO
-						if (!noteDAO) {
-							throw new Error('NoteDAO 服务不可用')
+						const noteService = this.services.noteService
+						if (!noteService) {
+							throw new Error('NoteService 服务不可用')
 						}
 						
 						this.logger.info('[PluginManager] 收到更新笔记请求', { id: payload?.id, data: payload?.data })
 						
-						const updateData = {}
-						if (payload.data.title !== undefined) updateData.title = payload.data.title
-						if (payload.data.content !== undefined) updateData.content = payload.data.content
-						if (payload.data.category !== undefined) updateData.category = payload.data.category
-						if (payload.data.tags !== undefined) updateData.tags = payload.data.tags
-						if (payload.data.note_type !== undefined) updateData.note_type = payload.data.note_type
+						// 使用 NoteService 但设置为静默模式，避免触发前端事件导致循环保存
+						// 插件更新笔记后会通过返回值通知调用者，不需要额外的事件广播
+						const updateResult = await noteService.updateNote(payload?.id, payload?.data, true)
 						
-						noteDAO.update(payload?.id, updateData)
-						const note = noteDAO.findById(payload?.id)
+						if (!updateResult.success) {
+							throw new Error(updateResult.error || '更新笔记失败')
+						}
 						
 						result = {
 							success: true,
-							data: note ? this.sanitizeNote(note, pluginId) : null
+							data: updateResult.data ? this.sanitizeNote(updateResult.data, pluginId) : null
 						}
 					} else if (action === 'delete') {
 						this.assertPermission(pluginId, 'notes:write')

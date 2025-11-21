@@ -147,7 +147,7 @@ import { injectUIBridge } from './utils/pluginUIBridge'
 import themeManager from './utils/pluginThemeManager'
 
 function App() {
-  const { theme, setTheme, primaryColor, loadNotes, currentView, initializeSettings, setCurrentView, createNote, batchDeleteNotes, batchDeleteTodos, batchCompleteTodos, batchRestoreNotes, batchPermanentDeleteNotes, getAllTags, batchSetTags, setSelectedNoteId } = useStore()
+  const { theme, setTheme, primaryColor, loadNotes, currentView, initializeSettings, setCurrentView, createNote, batchDeleteNotes, batchDeleteTodos, batchCompleteTodos, batchRestoreNotes, batchPermanentDeleteNotes, getAllTags, batchSetTags, setSelectedNoteId, updateNoteInList } = useStore()
   const refreshPluginCommands = useStore((state) => state.refreshPluginCommands)
   const addPluginCommand = useStore((state) => state.addPluginCommand)
   const removePluginCommand = useStore((state) => state.removePluginCommand)
@@ -277,8 +277,10 @@ function App() {
 
     const handleNoteUpdate = (updatedNote) => {
       console.log('接收到笔记更新事件:', updatedNote)
-      // 重新加载笔记列表以获取最新数据
-      loadNotes()
+      // 使用局部更新而不是重新加载整个列表，避免不必要的排序
+      if (updatedNote && updatedNote.id) {
+        updateNoteInList(updatedNote)
+      }
     }
 
     const unsubscribe = window.electronAPI.notes.onNoteUpdated(handleNoteUpdate)
@@ -288,11 +290,19 @@ function App() {
         unsubscribe()
       }
     }
-  }, [loadNotes])
+  }, [updateNoteInList])
 
   useEffect(() => {
     refreshPluginCommands()
   }, [refreshPluginCommands])
+
+  // 监听视图切换，只在切换到笔记视图时重新加载并排序笔记列表
+  useEffect(() => {
+    if (currentView === 'notes') {
+      console.log('[App] 切换到笔记视图，重新加载笔记列表');
+      loadNotes();
+    }
+  }, [currentView, loadNotes]);
 
   // 监听命令面板快捷键 (Ctrl+Shift+P / Cmd+Shift+P)
   useEffect(() => {
@@ -513,8 +523,21 @@ function App() {
 
     handleTrayEvents()
 
+    // 监听插件更新笔记事件，刷新笔记数据
+    const handlePluginNoteUpdate = async (event) => {
+      const { noteId, result } = event.detail || {};
+      if (noteId && result?.data) {
+        console.log('[App] 检测到插件更新笔记，局部更新:', noteId);
+        // 使用局部更新而不是重新加载整个列表，避免重新排序
+        updateNoteInList(result.data);
+      }
+    };
+    
+    window.addEventListener('plugin-note-updated', handlePluginNoteUpdate);
+
     // 清理事件监听器
     return () => {
+      window.removeEventListener('plugin-note-updated', handlePluginNoteUpdate);
       if (window.electronAPI && window.electronAPI.ipcRenderer) {
         window.electronAPI.ipcRenderer.removeAllListeners('create-new-note')
         window.electronAPI.ipcRenderer.removeAllListeners('create-new-todo')
@@ -522,7 +545,7 @@ function App() {
         window.electronAPI.ipcRenderer.removeAllListeners('quick-input')
       }
     }
-  }, [createNote])
+  }, [createNote, loadNotes])
 
   useEffect(() => {
     const unsubscribe = subscribePluginUiRequests((payload) => {

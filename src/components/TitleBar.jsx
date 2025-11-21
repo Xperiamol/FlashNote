@@ -8,7 +8,7 @@ import SyncStatusIndicator from './SyncStatusIndicator';
 const TitleBar = () => {
   const theme = useTheme();
   const { currentView, titleBarStyle } = useStore();
-  
+
   // 根据当前视图获取对应的标题
   const getViewTitle = () => {
     switch (currentView) {
@@ -50,20 +50,22 @@ const TitleBar = () => {
   return (
     <Box
       sx={{
-        height: '28px',
-        backgroundColor: theme.palette.mode === 'dark' ? '#2c2c2c' : '#f6f6f6',
-        borderBottom: `1px solid ${theme.palette.divider}`,
+        width: '100%',
+        height: '32px',
+        backgroundColor: 'transparent',
         display: 'flex',
         alignItems: 'center',
         justifyContent: 'center',
-        padding: '0 16px',
         WebkitAppRegion: 'drag',
         userSelect: 'none',
         position: 'relative',
         zIndex: 1000,
-        background: theme.palette.mode === 'dark' 
-          ? 'linear-gradient(180deg, #2c2c2c 0%, #262626 100%)'
-          : 'linear-gradient(180deg, #f6f6f6 0%, #ebebeb 100%)',
+        background: theme.palette.mode === 'dark'
+          ? 'rgba(30, 41, 59, 0.6)'
+          : 'rgba(255, 255, 255, 0.6)',
+        backdropFilter: 'blur(30px) saturate(180%)',
+        WebkitBackdropFilter: 'blur(30px) saturate(180%)',
+        borderBottom: `1px solid ${theme.palette.mode === 'dark' ? 'rgba(255,255,255,0.05)' : 'rgba(0,0,0,0.03)'}`,
       }}
     >
       {titleBarStyle === 'mac' ? (
@@ -100,7 +102,7 @@ const TitleBar = () => {
               },
             }}
           />
-          
+
           {/* 最小化按钮 - 黄色 */}
           <Box
             onClick={handleMinimize}
@@ -123,7 +125,7 @@ const TitleBar = () => {
               },
             }}
           />
-          
+
           {/* 最大化按钮 - 绿色 */}
           <Box
             onClick={handleMaximize}
@@ -181,12 +183,12 @@ const TitleBar = () => {
             <Box
               sx={{
                 width: '10px',
-                height: '1px',
-                backgroundColor: theme.palette.text.primary,
+                height: '2px',
+                backgroundColor: theme.palette.mode === 'dark' ? '#ffffff' : '#1a1a1a',
               }}
             />
           </Box>
-          
+
           {/* 最大化按钮 */}
           <Box
             onClick={handleMaximize}
@@ -210,12 +212,12 @@ const TitleBar = () => {
               sx={{
                 width: '9px',
                 height: '9px',
-                border: `1px solid ${theme.palette.text.primary}`,
+                border: `2px solid ${theme.palette.mode === 'dark' ? '#ffffff' : '#1a1a1a'}`,
                 borderRadius: '1px',
               }}
             />
           </Box>
-          
+
           {/* 关闭按钮 */}
           <Box
             onClick={handleClose}
@@ -226,21 +228,46 @@ const TitleBar = () => {
               alignItems: 'center',
               justifyContent: 'center',
               cursor: 'pointer',
+              position: 'relative',
+              zIndex: 10000,
               transition: createTransitionString(ANIMATIONS.button),
               '&:hover': {
                 backgroundColor: '#e81123',
-                '& > svg': {
-                  color: '#fff',
-                },
+                '& .close-icon': {
+                  backgroundColor: '#fff !important',
+                }
               },
               '&:active': {
                 backgroundColor: '#c50d1d',
               },
             }}
           >
-            <svg width="10" height="10" viewBox="0 0 10 10" style={{ color: theme.palette.text.primary }}>
-              <path d="M0.5 0.5 L9.5 9.5 M9.5 0.5 L0.5 9.5" stroke="currentColor" strokeWidth="1" />
-            </svg>
+            <Box sx={{ position: 'relative', width: '14px', height: '14px' }}>
+              <Box
+                className="close-icon"
+                sx={{
+                  position: 'absolute',
+                  width: '14px',
+                  height: '2px',
+                  backgroundColor: '#e81123',
+                  top: '6px',
+                  left: '0',
+                  transform: 'rotate(45deg)',
+                }}
+              />
+              <Box
+                className="close-icon"
+                sx={{
+                  position: 'absolute',
+                  width: '14px',
+                  height: '2px',
+                  backgroundColor: '#e81123',
+                  top: '6px',
+                  left: '0',
+                  transform: 'rotate(-45deg)',
+                }}
+              />
+            </Box>
           </Box>
         </Box>
       )}

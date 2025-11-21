@@ -21,11 +21,11 @@ import {
 import { useTheme } from '@mui/material/styles';
 import { format } from 'date-fns';
 import { zhCN } from 'date-fns/locale';
-import { 
-  getPriorityFromQuadrant, 
-  getPriorityIcon, 
-  getPriorityColor, 
-  getPriorityText 
+import {
+  getPriorityFromQuadrant,
+  getPriorityIcon,
+  getPriorityColor,
+  getPriorityText
 } from '../utils/priorityUtils';
 import { ANIMATIONS, createAnimationString, createTransitionString, GREEN_SWEEP_KEYFRAMES } from '../utils/animationConfig';
 import { t } from '../utils/i18n';
@@ -86,10 +86,10 @@ const TodoItem = ({
   onDragEnd
 }) => {
   const theme = useTheme();
-  
+
   // 根据不同变体确定是否已完成
   const isCompleted = todo.completed || todo.is_completed;
-  
+
   // 优先级信息
   const priority = getPriorityLabel(todo);
   const dueTime = formatTime(todo.due_date);
@@ -101,8 +101,13 @@ const TodoItem = ({
       px: 2,
       position: 'relative',
       overflow: 'hidden',
+      borderRadius: '12px', // Consistent border radius
+      transition: 'all 0.2s cubic-bezier(0.4, 0, 0.2, 1)',
       '&:hover': {
-        backgroundColor: theme.palette.action.hover
+        backgroundColor: theme.palette.action.hover,
+        transform: 'translateY(-2px)',
+        boxShadow: '0 4px 12px rgba(0,0,0,0.08)',
+        zIndex: 1,
       },
       opacity: isCompleted ? 0.6 : 1
     };
@@ -153,7 +158,7 @@ const TodoItem = ({
     }
 
     const icon = isCompleted ? <CheckCircle /> : <Circle />;
-    
+
     return (
       <Tooltip title={isCompleted ? t('todos.uncompleteTodo') : t('todos.completeTodo')}>
         <IconButton {...iconProps}>
@@ -187,18 +192,18 @@ const TodoItem = ({
         {isCompleted ? (
           <CheckCircleIcon sx={{ color: 'success.main' }} />
         ) : pendingComplete.has(todo.id) ? (
-          <RadioButtonUncheckedIcon 
-            sx={{ 
+          <RadioButtonUncheckedIcon
+            sx={{
               color: 'warning.main',
               animation: createAnimationString(ANIMATIONS.pulse)
-            }} 
+            }}
           />
         ) : celebratingTodos.has(todo.id) ? (
-          <CheckCircleIcon 
-            sx={{ 
+          <CheckCircleIcon
+            sx={{
               color: 'success.main',
               filter: 'drop-shadow(0 0 8px rgba(76, 175, 80, 0.6))'
-            }} 
+            }}
           />
         ) : (
           <RadioButtonUncheckedIcon sx={{ color: 'text.secondary' }} />
@@ -229,7 +234,7 @@ const TodoItem = ({
             >
               {todo.content}
             </Typography>
-            
+
             {showSecondaryInfo && (
               <Chip
                 size="small"
@@ -342,7 +347,7 @@ const TodoItem = ({
             >
               {todo.content}
             </Typography>
-            
+
             {showSecondaryInfo && (
               <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, flexWrap: 'wrap' }}>
                 <Chip

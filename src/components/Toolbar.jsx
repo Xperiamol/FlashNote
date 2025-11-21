@@ -35,10 +35,10 @@ import { getPluginCommandIcon } from '../utils/pluginCommandUtils.jsx'
 import { createTransitionString, ANIMATIONS } from '../utils/animationConfig'
 import { t } from '../utils/i18n'
 
-const Toolbar = ({ 
-  onToggleSidebar, 
-  sidebarOpen, 
-  showDeleted, 
+const Toolbar = ({
+  onToggleSidebar,
+  sidebarOpen,
+  showDeleted,
   onToggleDeleted,
   currentView,
   todoViewMode,
@@ -145,10 +145,10 @@ const Toolbar = ({
   const handleCreateEvent = async () => {
     console.log('handleCreateEvent被调用了');
     console.log('selectedDate:', selectedDate);
-    
+
     // 创建日历事件，预设选中的日期
     const initialData = {}
-    
+
     // 如果有选中的日期，预设截止日期
     if (selectedDate) {
       // 格式化日期为 YYYY-MM-DD 格式
@@ -158,7 +158,7 @@ const Toolbar = ({
       initialData.due_date = `${year}-${month}-${day}`
       console.log('设置初始日期:', initialData.due_date);
     }
-    
+
     console.log('调用onCreateTodo，参数:', initialData);
     if (onCreateTodo) {
       onCreateTodo(initialData)
@@ -308,218 +308,220 @@ const Toolbar = ({
 
   return (
     <MuiToolbar
+      disableGutters
       sx={{
         borderBottom: 1,
         borderColor: 'divider',
         backgroundColor: 'background.paper',
-        minHeight: '64px !important'
+        minHeight: '64px !important',
+        px: 2
       }}
     >
-        {/* 左侧按钮组 */}
-        <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-          {viewConfig.showSidebarToggle && (
-            <Tooltip title={sidebarOpen ? t('common.close') : t('common.open')}>
-              <IconButton onClick={onToggleSidebar}>
-                {sidebarOpen ? <CloseIcon /> : <MenuIcon />}
-              </IconButton>
-            </Tooltip>
-          )}
+      {/* 左侧按钮组 */}
+      <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+        {viewConfig.showSidebarToggle && (
+          <Tooltip title={sidebarOpen ? t('common.close') : t('common.open')}>
+            <IconButton onClick={onToggleSidebar}>
+              {sidebarOpen ? <CloseIcon /> : <MenuIcon />}
+            </IconButton>
+          </Tooltip>
+        )}
 
-      {/* 通用新建按钮 */}
-      {viewConfig.createButtonText && (
-        <Tooltip title={viewConfig.createButtonText}>
-          <Button
-            variant="contained"
-            startIcon={<AddIcon />}
-            onClick={viewConfig.createAction}
-            sx={{
-              ml: 1,
-              height: '40px',
-              minHeight: '40px'
-            }}
-          >
-            {viewConfig.createButtonText}
-          </Button>
-        </Tooltip>
-      )}
-      
-      {/* 快速输入按钮（仅笔记视图） */}
-      {viewConfig.quickInputButton && (
-        <Tooltip title={t('toolbar.newNote')}>
-          <Button
-            variant="outlined"
-            startIcon={<EditNoteIcon />}
-            onClick={handleQuickInput}
-            sx={{
-              ml: 1,
-              height: '40px',
-              minHeight: '40px'
-            }}
-          >
-            {t('toolbar.newNote')}
-          </Button>
-        </Tooltip>
-      )}
-      
-      {/* 左侧区域的复选框（待办/日历视图） */}
+        {/* 通用新建按钮 */}
+        {viewConfig.createButtonText && (
+          <Tooltip title={viewConfig.createButtonText}>
+            <Button
+              variant="contained"
+              startIcon={<AddIcon />}
+              onClick={viewConfig.createAction}
+              sx={{
+                ml: 1,
+                height: '40px',
+                minHeight: '40px'
+              }}
+            >
+              {viewConfig.createButtonText}
+            </Button>
+          </Tooltip>
+        )}
+
+        {/* 快速输入按钮（仅笔记视图） */}
+        {viewConfig.quickInputButton && (
+          <Tooltip title={t('toolbar.newNote')}>
+            <Button
+              variant="outlined"
+              startIcon={<EditNoteIcon />}
+              onClick={handleQuickInput}
+              sx={{
+                ml: 1,
+                height: '40px',
+                minHeight: '40px'
+              }}
+            >
+              {t('toolbar.newNote')}
+            </Button>
+          </Tooltip>
+        )}
+
+        {/* 左侧区域的复选框（待办/日历视图） */}
+        {viewConfig.customButtons && (
+          <Box sx={{ display: 'flex', alignItems: 'center', gap: 2, ml: 2 }}>
+            {viewConfig.customButtons
+              .filter(button => button.position === 'left' || (button.type === 'checkbox' && currentView === 'calendar'))
+              .map((button, index) => {
+                if (button.type === 'checkbox') {
+                  const isCalendarView = currentView === 'calendar';
+                  const checked = isCalendarView ? calendarShowCompleted : todoShowCompleted;
+                  const onChange = isCalendarView ? onCalendarShowCompletedChange : onTodoShowCompletedChange;
+
+                  return (
+                    <FormControlLabel
+                      key={index}
+                      control={
+                        <Checkbox
+                          checked={checked || false}
+                          onChange={(e) => onChange && onChange(e.target.checked)}
+                          size="small"
+                        />
+                      }
+                      label={button.label}
+                      sx={{ '& .MuiFormControlLabel-label': { fontSize: '0.875rem' } }}
+                    />
+                  );
+                }
+                return null;
+              })}
+          </Box>
+        )}
+      </Box>
+
+      {/* 居中区域 - 日历导航和待办视图切换 */}
       {viewConfig.customButtons && (
-        <Box sx={{ display: 'flex', alignItems: 'center', gap: 2, ml: 2 }}>
+        <Box sx={{ display: 'flex', alignItems: 'center', gap: 2, position: 'absolute', left: '50%', transform: 'translateX(-50%)' }}>
           {viewConfig.customButtons
-            .filter(button => button.position === 'left' || (button.type === 'checkbox' && currentView === 'calendar'))
+            .filter(button =>
+              button.type === 'calendarNavigation' ||
+              (button.type === 'viewToggle' && button.position === 'center')
+            )
             .map((button, index) => {
-              if (button.type === 'checkbox') {
-                const isCalendarView = currentView === 'calendar';
-                const checked = isCalendarView ? calendarShowCompleted : todoShowCompleted;
-                const onChange = isCalendarView ? onCalendarShowCompletedChange : onTodoShowCompletedChange;
-                
+              if (button.type === 'viewToggle') {
                 return (
-                  <FormControlLabel
-                    key={index}
-                    control={
-                      <Checkbox
-                        checked={checked || false}
-                        onChange={(e) => onChange && onChange(e.target.checked)}
+                  <ButtonGroup key={index} size="small" variant="outlined">
+                    {button.options.map((option) => (
+                      <Button
+                        key={option.value}
+                        variant={todoViewMode === option.value ? 'contained' : 'outlined'}
+                        onClick={() => onTodoViewModeChange && onTodoViewModeChange(option.value)}
+                        sx={{
+                          px: 2,
+                          ...(todoViewMode === option.value && {
+                            backgroundColor: 'primary.main',
+                            color: 'primary.contrastText',
+                            '&:hover': {
+                              backgroundColor: 'primary.dark'
+                            }
+                          })
+                        }}
+                      >
+                        {option.label}
+                      </Button>
+                    ))}
+                  </ButtonGroup>
+                );
+              } else if (button.type === 'calendarNavigation') {
+                return (
+                  <Box key={index} sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+                    <Tooltip title={t('common.previous')}>
+                      <IconButton
+                        onClick={goToPreviousMonth}
                         size="small"
-                      />
-                    }
-                    label={button.label}
-                    sx={{ '& .MuiFormControlLabel-label': { fontSize: '0.875rem' } }}
-                  />
+                        sx={{
+                          backgroundColor: 'background.paper',
+                          border: 1,
+                          borderColor: 'divider',
+                          '&:hover': {
+                            backgroundColor: 'primary.main',
+                            color: 'primary.contrastText',
+                            transform: 'scale(1.05)'
+                          },
+                          transition: createTransitionString(ANIMATIONS.button)
+                        }}
+                      >
+                        <ChevronLeft />
+                      </IconButton>
+                    </Tooltip>
+
+                    <Box
+                      sx={{
+                        minWidth: '140px',
+                        textAlign: 'center',
+                        px: 2,
+                        py: 0.5,
+                        borderRadius: 1,
+                        backgroundColor: 'primary.main',
+                        color: 'primary.contrastText'
+                      }}
+                    >
+                      <Typography
+                        variant="body2"
+                        sx={{
+                          fontWeight: 600,
+                          fontSize: '0.875rem'
+                        }}
+                      >
+                        {button.currentDate ?
+                          `${button.currentDate.getFullYear()}年${button.currentDate.getMonth() + 1}月` :
+                          t('sidebar.calendar')
+                        }
+                      </Typography>
+                    </Box>
+
+                    <Tooltip title={t('common.next')}>
+                      <IconButton
+                        onClick={goToNextMonth}
+                        size="small"
+                        sx={{
+                          backgroundColor: 'background.paper',
+                          border: 1,
+                          borderColor: 'divider',
+                          '&:hover': {
+                            backgroundColor: 'primary.main',
+                            color: 'primary.contrastText',
+                            transform: 'scale(1.05)'
+                          },
+                          transition: createTransitionString(ANIMATIONS.button)
+                        }}
+                      >
+                        <ChevronRight />
+                      </IconButton>
+                    </Tooltip>
+
+                    <Tooltip title={t('common.today')}>
+                      <IconButton
+                        onClick={goToToday}
+                        size="small"
+                        color="primary"
+                        sx={{
+                          backgroundColor: 'primary.main',
+                          color: 'primary.contrastText',
+                          '&:hover': {
+                            backgroundColor: 'primary.dark',
+                            transform: 'scale(1.1)'
+                          },
+                          transition: createTransitionString(ANIMATIONS.button),
+                          ml: 1
+                        }}
+                      >
+                        <Today />
+                      </IconButton>
+                    </Tooltip>
+                  </Box>
                 );
               }
               return null;
             })}
         </Box>
       )}
-    </Box>
-
-    {/* 居中区域 - 日历导航和待办视图切换 */}
-    {viewConfig.customButtons && (
-      <Box sx={{ display: 'flex', alignItems: 'center', gap: 2, position: 'absolute', left: '50%', transform: 'translateX(-50%)' }}>
-        {viewConfig.customButtons
-          .filter(button =>
-            button.type === 'calendarNavigation' ||
-            (button.type === 'viewToggle' && button.position === 'center')
-          )
-          .map((button, index) => {
-          if (button.type === 'viewToggle') {
-            return (
-              <ButtonGroup key={index} size="small" variant="outlined">
-                {button.options.map((option) => (
-                  <Button
-                    key={option.value}
-                    variant={todoViewMode === option.value ? 'contained' : 'outlined'}
-                    onClick={() => onTodoViewModeChange && onTodoViewModeChange(option.value)}
-                    sx={{
-                      px: 2,
-                      ...(todoViewMode === option.value && {
-                        backgroundColor: 'primary.main',
-                        color: 'primary.contrastText',
-                        '&:hover': {
-                          backgroundColor: 'primary.dark'
-                        }
-                      })
-                    }}
-                  >
-                    {option.label}
-                  </Button>
-                ))}
-              </ButtonGroup>
-            );
-          } else if (button.type === 'calendarNavigation') {
-            return (
-              <Box key={index} sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-                <Tooltip title={t('common.previous')}>
-                  <IconButton 
-                    onClick={goToPreviousMonth} 
-                    size="small"
-                    sx={{
-                      backgroundColor: 'background.paper',
-                      border: 1,
-                      borderColor: 'divider',
-                      '&:hover': {
-                        backgroundColor: 'primary.main',
-                        color: 'primary.contrastText',
-                        transform: 'scale(1.05)'
-                      },
-                      transition: createTransitionString(ANIMATIONS.button)
-                    }}
-                  >
-                    <ChevronLeft />
-                  </IconButton>
-                </Tooltip>
-                
-                <Box
-                  sx={{
-                    minWidth: '140px',
-                    textAlign: 'center',
-                    px: 2,
-                    py: 0.5,
-                    borderRadius: 1,
-                    backgroundColor: 'primary.main',
-                    color: 'primary.contrastText'
-                  }}
-                >
-                  <Typography 
-                    variant="body2" 
-                    sx={{ 
-                      fontWeight: 600,
-                      fontSize: '0.875rem'
-                    }}
-                  >
-                    {button.currentDate ? 
-                      `${button.currentDate.getFullYear()}年${button.currentDate.getMonth() + 1}月` : 
-                      t('sidebar.calendar')
-                    }
-                  </Typography>
-                </Box>
-                
-                <Tooltip title={t('common.next')}>
-                  <IconButton 
-                    onClick={goToNextMonth} 
-                    size="small"
-                    sx={{
-                      backgroundColor: 'background.paper',
-                      border: 1,
-                      borderColor: 'divider',
-                      '&:hover': {
-                        backgroundColor: 'primary.main',
-                        color: 'primary.contrastText',
-                        transform: 'scale(1.05)'
-                      },
-                      transition: createTransitionString(ANIMATIONS.button)
-                    }}
-                  >
-                    <ChevronRight />
-                  </IconButton>
-                </Tooltip>
-                
-                <Tooltip title={t('common.today')}>
-                  <IconButton 
-                    onClick={goToToday} 
-                    size="small"
-                    color="primary"
-                    sx={{
-                      backgroundColor: 'primary.main',
-                      color: 'primary.contrastText',
-                      '&:hover': {
-                        backgroundColor: 'primary.dark',
-                        transform: 'scale(1.1)'
-                      },
-                      transition: createTransitionString(ANIMATIONS.button),
-                      ml: 1
-                    }}
-                  >
-                    <Today />
-                  </IconButton>
-                </Tooltip>
-              </Box>
-            );
-          }
-          return null;
-        })}
-      </Box>
-    )}
 
       {/* 动态标题已移除 */}
 
@@ -629,7 +631,7 @@ const Toolbar = ({
             })}
           </Box>
         )}
-        
+
         {/* 回收站按钮 - 仅在笔记视图显示 */}
         {viewConfig.showDeletedButton && (
           <Tooltip title={showDeleted ? t('common.restore') : t('common.delete')}>

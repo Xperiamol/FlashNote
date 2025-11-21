@@ -68,7 +68,7 @@ const TodoView = ({ viewMode, showCompleted, onViewModeChange, onShowCompletedCh
   const [sortBy, setSortBy] = useState('quadrant');
   const [filterBy, setFilterBy] = useState('all'); // 'all', 'pending', 'completed', 'overdue', 'today'
   const [stats, setStats] = useState({ total: 0, completed: 0, pending: 0, overdue: 0 });
-  
+
   // 双击完成相关状态
   const [pendingComplete, setPendingComplete] = useState(new Set());
   const [celebratingTodos, setCelebratingTodos] = useState(new Set());
@@ -124,7 +124,7 @@ const TodoView = ({ viewMode, showCompleted, onViewModeChange, onShowCompletedCh
           statsSource = Array.isArray(nextTodos) ? nextTodos : [];
         }
       }
-      
+
       setTodos(nextTodos);
       setStats(computeStatsFromList(statsSource));
     } catch (error) {
@@ -155,14 +155,14 @@ const TodoView = ({ viewMode, showCompleted, onViewModeChange, onShowCompletedCh
       }
       return;
     }
-    
+
     // 未完成的任务需要双击
     if (pendingComplete.has(todo.id)) {
       // 第二次点击，执行完成操作
       try {
         // 先显示庆祝动画
         setCelebratingTodos(prev => new Set([...prev, todo.id]));
-        
+
         // 延迟执行完成操作，让动画播放
         setTimeout(async () => {
           try {
@@ -174,7 +174,7 @@ const TodoView = ({ viewMode, showCompleted, onViewModeChange, onShowCompletedCh
           } catch (err) {
             console.error('更新待办事项失败:', err);
           }
-          
+
           // 清除庆祝状态
           setTimeout(() => {
             setCelebratingTodos(prev => {
@@ -184,7 +184,7 @@ const TodoView = ({ viewMode, showCompleted, onViewModeChange, onShowCompletedCh
             });
           }, 1000);
         }, 150);
-        
+
         // 清除待完成状态
         setPendingComplete(prev => {
           const newSet = new Set(prev);
@@ -197,7 +197,7 @@ const TodoView = ({ viewMode, showCompleted, onViewModeChange, onShowCompletedCh
     } else {
       // 第一次点击，标记为待完成
       setPendingComplete(prev => new Set([...prev, todo.id]));
-      
+
       // 3秒后自动清除待完成状态
       setTimeout(() => {
         setPendingComplete(prev => {
@@ -269,8 +269,8 @@ const TodoView = ({ viewMode, showCompleted, onViewModeChange, onShowCompletedCh
           ...todo,
           completed: todo.is_completed,
           quadrant: todo.is_important && todo.is_urgent ? 1 :
-                    todo.is_important ? 2 :
-                    todo.is_urgent ? 3 : 4
+            todo.is_important ? 2 :
+              todo.is_urgent ? 3 : 4
         }}
         onToggleComplete={() => handleToggleTodo(todo)}
         variant="quadrant"
@@ -287,7 +287,7 @@ const TodoView = ({ viewMode, showCompleted, onViewModeChange, onShowCompletedCh
   // 渲染四象限视图 - 重新设计为2x2布局
   const renderQuadrantView = () => {
     if (!todos || typeof todos !== 'object') return null;
-    
+
     const quadrants = [
       {
         key: 'urgent_important',
@@ -345,8 +345,8 @@ const TodoView = ({ viewMode, showCompleted, onViewModeChange, onShowCompletedCh
 
     return (
       <Box sx={{ width: '100%', maxWidth: '1200px', mx: 'auto' }}>
-        <Box 
-          sx={{ 
+        <Box
+          sx={{
             display: 'flex',
             flexWrap: 'wrap',
             gap: 3,
@@ -369,25 +369,29 @@ const TodoView = ({ viewMode, showCompleted, onViewModeChange, onShowCompletedCh
               })}
             >
               <Card
-                elevation={3}
+                elevation={0}
                 sx={{
                   height: '400px',
                   display: 'flex',
                   flexDirection: 'column',
                   borderRadius: 3,
-                  background: quadrant.bgGradient,
-                  border: `2px solid ${quadrant.color}20`,
+                  background: 'transparent',
+                  backdropFilter: 'blur(10px)',
+                  backgroundColor: theme.palette.mode === 'dark'
+                    ? 'rgba(255, 255, 255, 0.02)'
+                    : 'rgba(255, 255, 255, 0.3)',
+                  border: `1px solid ${quadrant.color}30`,
                   transition: createTransitionString(ANIMATIONS.hover),
                   '&:hover': {
-                    boxShadow: `0 12px 40px ${quadrant.color}40`,
-                    backdropFilter: 'blur(8px)',
+                    boxShadow: `0 12px 40px ${quadrant.color}30`,
                     backgroundColor: theme.palette.mode === 'dark'
-                      ? 'rgba(255, 255, 255, 0.05)'
-                      : 'rgba(255, 255, 255, 0.8)'
+                      ? 'rgba(255, 255, 255, 0.04)'
+                      : 'rgba(255, 255, 255, 0.5)',
+                    borderColor: `${quadrant.color}50`
                   },
                   ...(isDragOver(quadrant.key) && {
-                    border: `3px solid ${quadrant.color}`,
-                    boxShadow: `0 12px 40px ${quadrant.color}60`,
+                    border: `2px solid ${quadrant.color}`,
+                    boxShadow: `0 12px 40px ${quadrant.color}50`,
                     transform: 'scale(1.02)'
                   })
                 }}
@@ -421,7 +425,7 @@ const TodoView = ({ viewMode, showCompleted, onViewModeChange, onShowCompletedCh
                     }
                   }}
                 />
-                
+
                 <CardContent sx={{ flex: 1, pt: 0, overflow: 'hidden', display: 'flex', flexDirection: 'column' }}>
                   {quadrant.todos.length === 0 ? (
                     <Box
@@ -451,11 +455,11 @@ const TodoView = ({ viewMode, showCompleted, onViewModeChange, onShowCompletedCh
                     </Box>
                   )}
                 </CardContent>
-                </Card>
-              </Box>
-            ))}
-          </Box>
+              </Card>
+            </Box>
+          ))}
         </Box>
+      </Box>
     );
   };
 
@@ -496,10 +500,10 @@ const TodoView = ({ viewMode, showCompleted, onViewModeChange, onShowCompletedCh
   }
 
   return (
-    <Box sx={{ height: '100%', display: 'flex', flexDirection: 'column', backgroundColor: theme.palette.mode === 'dark' ? '#121212' : 'grey.50' }}>
+    <Box sx={{ height: '100%', display: 'flex', flexDirection: 'column' }}>
       {/* 主内容区域 */}
       <Box sx={{ flex: 1, p: 3, overflow: 'auto' }}>
-  {effectiveViewMode === 'quadrant' ? renderQuadrantView() : renderFocusView()}
+        {effectiveViewMode === 'quadrant' ? renderQuadrantView() : renderFocusView()}
       </Box>
     </Box>
   );

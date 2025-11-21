@@ -49,7 +49,7 @@ onActivate(() => {
     },
     async (payload) => {
       try {
-        logger.info('[自动标签创建器] AI 标签建议')
+        logger.info('[自动标签创建器] AI 标签建议，收到 payload:', payload)
 
         // 检查 AI 是否可用
         const aiAvailable = await ai.isAvailable()
@@ -62,8 +62,10 @@ onActivate(() => {
           return { success: false, error: 'AI 不可用' }
         }
 
-        // 从 payload 获取笔记内容
-        const { noteTitle, noteContent } = payload || {}
+        // 从 payload 获取笔记内容和ID
+        const { noteTitle, noteContent, noteId } = payload || {}
+        
+        logger.info('[自动标签创建器] 解析参数:', { noteTitle, noteContent: noteContent?.substring(0, 50), noteId })
 
         if (!noteTitle && !noteContent) {
           await notifications.show({
@@ -74,15 +76,15 @@ onActivate(() => {
           return { success: false, error: '无笔记内容' }
         }
 
-        // 使用 AI 分析笔记内容并生成标签
+        // 使用 AI 分析笔记内容并生成标签和分类
         const response = await ai.chat([
           {
             role: 'system',
-            content: '你是一个标签生成助手。根据笔记内容生成3-5个简短的中文标签。只返回JSON数组格式：["标签1", "标签2", "标签3"]'
+            content: '你是一个标签和分类生成助手。根据笔记内容生成最多3个简短的中文标签，以及1个分类。只返回JSON格式：{"tags": ["标签1", "标签2", "标签3"], "category": "分类名称"}'
           },
           {
             role: 'user',
-            content: `请为以下笔记生成标签：\n\n标题：${noteTitle || '无标题'}\n\n内容：${noteContent || ''}`
+            content: `请为以下笔记生成标签和分类：\n\n标题：${noteTitle || '无标题'}\n\n内容：${noteContent || ''}`
           }
         ], {
           temperature: 0.7,
@@ -104,33 +106,41 @@ onActivate(() => {
         const aiContent = response.data.content
         logger.info('[AI 内容]', aiContent)
 
-        // 解析 AI 返回的标签
+        // 解析 AI 返回的标签和分类
         let suggestedTags = []
+        let suggestedCategory = ''
         try {
           // 尝试直接解析 JSON
-          suggestedTags = JSON.parse(aiContent)
+          const parsed = JSON.parse(aiContent)
+          suggestedTags = parsed.tags || []
+          suggestedCategory = parsed.category || ''
         } catch (e) {
-          // 如果不是纯 JSON，尝试提取 JSON 数组
-          const match = aiContent.match(/\[.*?\]/s)
+          // 如果不是纯 JSON，尝试提取 JSON 对象
+          const match = aiContent.match(/\{.*?\}/s)
           if (match) {
-            suggestedTags = JSON.parse(match[0])
+            const parsed = JSON.parse(match[0])
+            suggestedTags = parsed.tags || []
+            suggestedCategory = parsed.category || ''
           } else {
-            // 按逗号分割
+            // 降级：按逗号分割标签
             suggestedTags = aiContent
               .split(/[,，、]/)
               .map(t => t.trim().replace(/["'\[\]]/g, ''))
               .filter(t => t.length > 0 && t.length < 20)
-              .slice(0, 5)
+              .slice(0, 3)
           }
         }
 
-        if (suggestedTags.length === 0) {
+        // 限制最多3个标签
+        suggestedTags = suggestedTags.slice(0, 3)
+
+        if (suggestedTags.length === 0 && !suggestedCategory) {
           await notifications.show({
             title: 'AI 分析失败',
-            body: '未能生成标签建议',
+            body: '未能生成标签和分类建议',
             type: 'warning'
           })
-          return { success: false, tags: [] }
+          return { success: false, tags: [], category: '' }
         }
 
         // 获取现有标签
@@ -148,17 +158,62 @@ onActivate(() => {
           }
         }
 
+        // 如果提供了笔记ID，自动应用标签和分类到笔记
+        let noteUpdated = false
+        if (noteId) {
+          try {
+            logger.info('[自动标签创建器] 准备更新笔记:', { noteId, suggestedTags, suggestedCategory })
+            
+            const updateData = {}
+            
+            // 添加标签
+            if (suggestedTags.length > 0) {
+              updateData.tags = suggestedTags.join(',')
+            }
+            
+            // 添加分类
+            if (suggestedCategory) {
+              updateData.category = suggestedCategory
+            }
+            
+            if (Object.keys(updateData).length > 0) {
+              logger.info('[自动标签创建器] 调用 notes.update:', { id: noteId, data: updateData })
+              
+              const updateResult = await notes.update(noteId, updateData)
+              
+              logger.info('[自动标签创建器] 更新结果:', updateResult)
+              
+              noteUpdated = updateResult?.success !== false
+              
+              if (noteUpdated) {
+                logger.info(`已自动应用标签和分类到笔记 ${noteId}`)
+              } else {
+                logger.warn(`更新笔记失败:`, updateResult)
+              }
+            }
+          } catch (error) {
+            logger.error('自动应用标签和分类失败:', error)
+            // 继续执行，即使应用失败也要显示通知
+          }
+        } else {
+          logger.warn('[自动标签创建器] 未提供 noteId，无法自动应用')
+        }
+
+        const categoryInfo = suggestedCategory ? `\n分类：${suggestedCategory}` : ''
+        const appliedInfo = noteUpdated ? '\n✓ 已自动应用到笔记' : (noteId ? '\n⚠ 应用失败' : '')
         await notifications.show({
           title: 'AI 标签建议完成',
-          body: `建议标签：${suggestedTags.join(', ')}\n新创建：${newTagsCreated.length} 个`,
+          body: `建议标签：${suggestedTags.join(', ')}${categoryInfo}\n新创建：${newTagsCreated.length} 个${appliedInfo}`,
           type: 'success'
         })
 
         return {
           success: true,
           suggestedTags,
+          suggestedCategory,
           newTagsCreated,
-          allTags: suggestedTags
+          allTags: suggestedTags,
+          applied: noteUpdated
         }
 
       } catch (error) {

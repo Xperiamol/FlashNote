@@ -88,23 +88,24 @@ const Sidebar = ({ open = true, onClose }) => {
   return (
     <Box
       sx={{
-        width: '60px',
-        minWidth: '60px',
-        maxWidth: '60px',
+        width: '68px', // Slightly wider for better touch target
+        minWidth: '68px',
+        maxWidth: '68px',
         height: '100%',
-        backgroundColor: theme.palette.mode === 'dark' ? '#1e1e1e' : '#f0f0f0',
-        borderRight: `1px solid ${theme.palette.divider}`,
+        backgroundColor: 'transparent', // Let glass handle it
+        borderRight: `1px solid ${theme.palette.mode === 'dark' ? 'rgba(255,255,255,0.08)' : 'rgba(0,0,0,0.06)'}`,
         display: 'flex',
         flexDirection: 'column',
         alignItems: 'center',
-        paddingTop: '8px',
-        paddingBottom: '8px',
+        paddingTop: '16px',
+        paddingBottom: '16px',
         position: 'relative',
         zIndex: 100,
         background: theme.palette.mode === 'dark'
-          ? 'linear-gradient(180deg, #1e1e1e 0%, #181818 100%)'
-          : 'linear-gradient(180deg, #f0f0f0 0%, #e8e8e8 100%)',
-        boxShadow: '2px 0 8px rgba(0,0,0,0.1)',
+          ? 'rgba(30, 41, 59, 0.7)' // Slate 800 with opacity
+          : 'rgba(255, 255, 255, 0.7)',
+        backdropFilter: 'blur(20px)',
+        boxShadow: 'none',
         overflow: 'visible',
         minHeight: 0,
         flexShrink: 0
