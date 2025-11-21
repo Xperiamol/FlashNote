@@ -11,7 +11,7 @@ The old 1.x version has been phased out. Welcome to the new version that is more
 
 ### 📝 Smart Note Editing
 - **Rich Text Editor**: Supports Markdown syntax with real-time preview
-- **Whiteboard Editor**: Excalidraw as the whiteboard engine, supporting whiteboard, drawing, and more
+- **Whiteboard Editor**: Excalidraw as the whiteboard engine, supporting drawing, annotations, and more
 - **Quick Formatting**: One-click application of bold, italic, underline, and other formats
 - **Rich MD Formats**: Wiki links, tags, colored text, Callout, etc.
 - **Auto-save**: Real-time saving, never lose content
@@ -39,7 +39,7 @@ The old 1.x version has been phased out. Welcome to the new version that is more
 - **CalDAV Protocol**: Supports standard CalDAV services like iCloud, Nextcloud
 - **Google Calendar**: OAuth 2.0 secure authorization, no password required
 - **Two-way Sync**: Todo items and calendar events sync automatically
-- **Multi-device Collaboration**: Achieve multi-device data sync through calendar services
+- **Multi-device Synchronization**: Achieve multi-device data sync through calendar services
 
 ### 🎤 Speech-to-Text (v2.2.2+)
 - **Multiple Service Support**: OpenAI Whisper, Alibaba Cloud speech recognition, etc.
@@ -181,7 +181,7 @@ We welcome all forms of contributions! Please submit issues directly. The plugin
 
 ## 🙏 Acknowledgments
 
-Thanks to all users who have used this project demo! We are committed to creating a note-taking app with minimal interaction for recording and purposeful friction.
+Thanks to all users who have used this project demo! We are committed to creating a note-taking app with minimal interaction for recording and intentional design focus.
 
 ---
 
