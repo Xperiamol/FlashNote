@@ -29,7 +29,7 @@ const zhCN = {
     }
   },
   toolbar: {
-    newNote: '新建笔记',
+    newNote: '随记',
     newTodo: '新建待办',
     search: '搜索',
     filter: '筛选',
@@ -213,7 +213,7 @@ const zhCN = {
     neitherUrgentNorImportant: '不紧急不重要'
   },
   notes: {
-    newNote: '新建笔记',
+    newNote: '随记',
     editNote: '编辑笔记',
     deleteNote: '删除笔记',
     restoreNote: '恢复笔记',
@@ -556,9 +556,9 @@ const zhCN = {
     ]
   },
   about: {
-    appName: 'FlashNote 2.2.2',
+    appName: 'FlashNote 2.2.2 Epsilon',
     description: '一个简洁高效的笔记应用',
-    version: '版本 2.2.2',
+    version: '版本 2.2.2 Epsilon',
     githubRepo: 'GitHub 仓库',
     copyright: '© 2025 FlashNote. All rights reserved.'
   },

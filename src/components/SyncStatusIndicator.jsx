@@ -323,6 +323,9 @@ const SyncStatusIndicator = () => {
                     color={syncStatus.isEnabled ? 'success' : 'default'}
                   />
                 }
+                secondaryTypographyProps={{
+                  component: 'div'
+                }}
               />
             </ListItem>
 
@@ -341,6 +344,9 @@ const SyncStatusIndicator = () => {
                         '空闲'
                       )
                     }
+                    secondaryTypographyProps={{
+                      component: 'div'
+                    }}
                   />
                 </ListItem>
 
@@ -380,6 +386,9 @@ const SyncStatusIndicator = () => {
                     color={calendarStatus.isEnabled ? 'success' : 'default'}
                   />
                 }
+                secondaryTypographyProps={{
+                  component: 'div'
+                }}
               />
             </ListItem>
 
@@ -398,6 +407,9 @@ const SyncStatusIndicator = () => {
                         '空闲'
                       )
                     }
+                    secondaryTypographyProps={{
+                      component: 'div'
+                    }}
                   />
                 </ListItem>
 

@@ -374,25 +374,24 @@ const TodoView = ({ viewMode, showCompleted, onViewModeChange, onShowCompletedCh
                   height: '400px',
                   display: 'flex',
                   flexDirection: 'column',
-                  borderRadius: 3,
+                  borderRadius: 1,
                   background: 'transparent',
                   backdropFilter: 'blur(10px)',
                   backgroundColor: theme.palette.mode === 'dark'
-                    ? 'rgba(255, 255, 255, 0.02)'
-                    : 'rgba(255, 255, 255, 0.3)',
+                    ? 'rgba(255, 255, 255, 0.05)'
+                    : 'rgba(255, 255, 255, 0.4)',
                   border: `1px solid ${quadrant.color}30`,
                   transition: createTransitionString(ANIMATIONS.hover),
                   '&:hover': {
                     boxShadow: `0 12px 40px ${quadrant.color}30`,
                     backgroundColor: theme.palette.mode === 'dark'
-                      ? 'rgba(255, 255, 255, 0.04)'
-                      : 'rgba(255, 255, 255, 0.5)',
+                      ? 'rgba(255, 255, 255, 0.08)'
+                      : 'rgba(255, 255, 255, 0.6)',
                     borderColor: `${quadrant.color}50`
                   },
                   ...(isDragOver(quadrant.key) && {
                     border: `2px solid ${quadrant.color}`,
-                    boxShadow: `0 12px 40px ${quadrant.color}50`,
-                    transform: 'scale(1.02)'
+                    boxShadow: `0 12px 40px ${quadrant.color}50`
                   })
                 }}
               >

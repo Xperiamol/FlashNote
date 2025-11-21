@@ -560,37 +560,40 @@ const NoteList = ({ showDeleted = false, onMultiSelectChange, onMultiSelectRefCh
                   <React.Fragment key={note.id}>
                     <ListItem
                       disablePadding
-                      sx={{ mb: 1 }}
-                      secondaryAction={
-                        !multiSelect.isMultiSelectMode && (
-                          <IconButton
-                            edge="end"
-                            onClick={(e) => handleMenuClick(e, note)}
-                            size="small"
-                            sx={{
-                              opacity: 0,
-                              transition: 'opacity 0.2s',
-                              '.MuiListItemButton-root:hover &': {
-                                opacity: 1
-                              }
-                            }}
-                          >
-                            <MoreVertIcon fontSize="small" />
-                          </IconButton>
-                        )
-                      }
+                      sx={{
+                        mb: 0.5,
+                        position: 'relative',
+                        '&:hover .note-menu-button': {
+                          opacity: 1
+                        }
+                      }}
                     >
                       <ListItemButton
                         selected={!multiSelect.isMultiSelectMode && selectedNoteId === note.id}
-                        onClick={(e) => multiSelect.handleClick(e, note.id, handleNoteClick)}
+                        onClick={(e) => {
+                          // 检查是否点击了菜单按钮或其子元素
+                          if (e.target.closest('.note-menu-button')) {
+                            e.preventDefault();
+                            e.stopPropagation();
+                            return;
+                          }
+                          multiSelect.handleClick(e, note.id, handleNoteClick)
+                        }}
                         onContextMenu={(e) => multiSelect.handleContextMenu(e, note.id, multiSelect.isMultiSelectMode)}
                         onMouseDown={(e) => {
+                          // 检查是否点击了菜单按钮
+                          if (e.target.closest('.note-menu-button')) {
+                            e.preventDefault();
+                            e.stopPropagation();
+                            return;
+                          }
                           // 只在非多选模式下启用拖拽
                           if (!multiSelect.isMultiSelectMode && e.button === 0) {
                             dragHandler.handleDragStart(e, note)
                           }
                         }}
                         sx={{
+                          position: 'relative',
                           borderRadius: '12px',
                           border: '1px solid',
                           borderColor: 'transparent',
@@ -600,7 +603,6 @@ const NoteList = ({ showDeleted = false, onMultiSelectChange, onMultiSelectRefCh
                           pr: multiSelect.isMultiSelectMode ? 2 : 6,
                           '&:hover': {
                             backgroundColor: theme.palette.action.hover,
-                            transform: 'translateY(-2px)',
                             boxShadow: '0 4px 12px rgba(0,0,0,0.08)',
                             borderColor: theme.palette.divider,
                             zIndex: 1,
@@ -687,6 +689,37 @@ const NoteList = ({ showDeleted = false, onMultiSelectChange, onMultiSelectRefCh
                             </Box>
                           }
                         />
+                        {/* 菜单按钮 - 绝对定位在右上角 */}
+                        {!multiSelect.isMultiSelectMode && (
+                          <IconButton
+                            onClick={(e) => {
+                              e.preventDefault();
+                              e.stopPropagation();
+                              handleMenuClick(e, note);
+                            }}
+                            onMouseDown={(e) => {
+                              e.preventDefault();
+                              e.stopPropagation();
+                            }}
+                            size="small"
+                            className="note-menu-button"
+                            sx={{
+                              position: 'absolute',
+                              right: 8,
+                              top: '50%',
+                              transform: 'translateY(-50%)',
+                              opacity: 0.3,
+                              transition: 'opacity 0.2s',
+                              zIndex: 10,
+                              backgroundColor: theme.palette.background.paper,
+                              '&:hover': {
+                                backgroundColor: theme.palette.action.hover
+                              }
+                            }}
+                          >
+                            <MoreVertIcon fontSize="small" />
+                          </IconButton>
+                        )}
                       </ListItemButton>
                     </ListItem>
                   </React.Fragment>
@@ -698,12 +731,20 @@ const NoteList = ({ showDeleted = false, onMultiSelectChange, onMultiSelectRefCh
       </Box >
 
       {/* 右键菜单 */}
-      < Menu
+      <Menu
         anchorEl={anchorEl}
         open={Boolean(anchorEl)}
         onClose={handleMenuClose}
         transformOrigin={{ horizontal: 'right', vertical: 'top' }}
         anchorOrigin={{ horizontal: 'right', vertical: 'bottom' }}
+        PaperProps={{
+          sx: (theme) => ({
+            backdropFilter: theme?.custom?.glass?.backdropFilter || 'blur(6px)',
+            backgroundColor: theme?.custom?.glass?.background || (theme.palette.mode === 'dark' ? 'rgba(255,255,255,0.05)' : 'rgba(255,255,255,0.4)'),
+            border: theme?.custom?.glass?.border || `1px solid ${theme.palette.divider}`,
+            borderRadius: 1
+          })
+        }}
       >
         {
           showDeleted ? (

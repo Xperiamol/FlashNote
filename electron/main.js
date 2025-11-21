@@ -212,7 +212,7 @@ function createTray() {
     tray = new Tray(trayIcon)
     
     // 设置托盘提示文本
-    tray.setToolTip('FlashNote 2.2.2 - 快速笔记应用')
+    tray.setToolTip('FlashNote 2.2.2 Epsilon - 快速笔记应用')
     
     // 创建托盘菜单
     const contextMenu = Menu.buildFromTemplate([
@@ -482,7 +482,7 @@ async function initializeServices() {
       if (notesResult.success && notesResult.data && notesResult.data.notes && notesResult.data.notes.length === 0) {
         console.log('检测到首次启动，创建示例笔记')
         const welcomeNote = {
-          title: '欢迎使用 FlashNote 2.2.2！',
+          title: '欢迎使用 FlashNote 2.2.2 Epsilon！',
           content: `# 欢迎使用 FlashNote 2.3！ 🎉
 
 恭喜你成功安装了 FlashNote，这是一个现代化的本地笔记应用。

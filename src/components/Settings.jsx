@@ -93,7 +93,7 @@ const Settings = () => {
         autoLaunch: false,
         userAvatar: '',
         userName: '',
-        titleBarStyle: 'mac',
+        titleBarStyle: 'windows',
         language: 'zh-CN'
     });
     const [shortcuts, setShortcuts] = useState(DEFAULT_SHORTCUTS);

@@ -32,6 +32,7 @@ import { fetchTodoStats } from '../api/todoAPI';
 import { fetchInstalledPlugins } from '../api/pluginAPI';
 import { createTransitionString, ANIMATIONS } from '../utils/animationConfig';
 import { useTranslation } from '../utils/i18n';
+import TimeZoneUtils from '../utils/timeZoneUtils';
 
 const Profile = () => {
   const { t } = useTranslation();
@@ -459,6 +460,59 @@ const Profile = () => {
               <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                 <Typography variant="body2">进行中</Typography>
                 <Chip label={todoStatsDisplay.pending} size="small" color="warning" />
+              </Box>
+            </Stack>
+          </CardContent>
+        </Card>
+
+        {/* 待办专注时长卡片 */}
+        <Card sx={{
+          transition: createTransitionString(ANIMATIONS.card),
+          '&:hover': {
+            transform: 'translateY(-4px)',
+            boxShadow: 4
+          }
+        }}>
+          <CardContent>
+            <Box sx={{ display: 'flex', alignItems: 'center', mb: 2 }}>
+              <TrendingUpIcon sx={{ fontSize: 32, color: 'primary.main', mr: 2 }} />
+              <Typography variant="h6" sx={{ fontWeight: 600 }}>
+                专注时长
+              </Typography>
+            </Box>
+            <Typography variant="h3" sx={{ mb: 2, fontWeight: 600, color: 'primary.main' }}>
+              {TimeZoneUtils.formatSeconds(todoStatsDisplay.totalFocusTime || 0)}
+            </Typography>
+            <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
+              累计专注时间
+            </Typography>
+            <Stack spacing={1}>
+              <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                <Typography variant="body2">今日专注</Typography>
+                <Chip
+                  label={TimeZoneUtils.formatSeconds(todoStatsDisplay.todayFocusTime || 0)}
+                  size="small"
+                  color="primary"
+                  variant={(todoStatsDisplay.todayFocusTime || 0) > 0 ? "filled" : "outlined"}
+                />
+              </Box>
+              <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                <Typography variant="body2">本周专注</Typography>
+                <Chip
+                  label={TimeZoneUtils.formatSeconds(todoStatsDisplay.weekFocusTime || 0)}
+                  size="small"
+                  color="info"
+                  variant={(todoStatsDisplay.weekFocusTime || 0) > 0 ? "filled" : "outlined"}
+                />
+              </Box>
+              <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                <Typography variant="body2">本月专注</Typography>
+                <Chip
+                  label={TimeZoneUtils.formatSeconds(todoStatsDisplay.monthFocusTime || 0)}
+                  size="small"
+                  color="secondary"
+                  variant={(todoStatsDisplay.monthFocusTime || 0) > 0 ? "filled" : "outlined"}
+                />
               </Box>
             </Stack>
           </CardContent>

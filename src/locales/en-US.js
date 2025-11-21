@@ -29,7 +29,7 @@ const enUS = {
     }
   },
   toolbar: {
-    newNote: 'New Note',
+    newNote: 'Jot',
     newTodo: 'New Todo',
     search: 'Search',
     filter: 'Filter',
@@ -212,7 +212,7 @@ const enUS = {
     neitherUrgentNorImportant: 'Neither Urgent nor Important'
   },
   notes: {
-    newNote: 'New Note',
+    newNote: 'Jot',
     editNote: 'Edit Note',
     deleteNote: 'Delete Note',
     restoreNote: 'Restore Note',
@@ -543,9 +543,9 @@ const enUS = {
     ]
   },
   about: {
-    appName: 'FlashNote 2.2.2',
+    appName: 'FlashNote 2.2.2 Epsilon',
     description: 'A simple and efficient note-taking app',
-    version: 'Version 2.2.2',
+    version: 'Version 2.2.2 Epsilon',
     githubRepo: 'GitHub Repository',
     copyright: '© 2025 FlashNote. All rights reserved.'
   },

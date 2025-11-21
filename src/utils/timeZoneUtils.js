@@ -238,33 +238,18 @@ class TimeZoneUtils {
   }
 
   /**
-   * 调试用：打印时间信息
-   * @param {string} label - 标签
-   * @param {string} utcISOString - UTC ISO字符串
+   * 格式化秒数为时分秒格式
+   * @param {number} seconds - 秒数
+   * @returns {string} 格式化后的时间字符串，如 "01:23:45" 或 "12:34"
    */
-  static debug(label, utcISOString) {
-    if (!utcISOString) {
-      console.log(`[Frontend TimeZone Debug] ${label}: null/empty`);
-      return;
-    }
-    
-    try {
-      const utcDate = new Date(utcISOString);
-      const { date, time } = this.fromUTC(utcISOString);
-      
-      console.log(`[Frontend TimeZone Debug] ${label}:`);
-      console.log(`  - UTC ISO: ${utcISOString}`);
-      console.log(`  - UTC Date: ${utcDate.toUTCString()}`);
-      console.log(`  - Local Date: ${utcDate.toString()}`);
-      console.log(`  - Parsed Date: ${date}`);
-      console.log(`  - Parsed Time: ${time}`);
-      console.log(`  - Is Today: ${this.isToday(utcISOString)}`);
-      console.log(`  - Is Overdue: ${this.isOverdue(utcISOString)}`);
-      console.log(`  - Has Time: ${this.hasTime(utcISOString)}`);
-      console.log(`  - Display: ${this.formatForDisplay(utcISOString)}`);
-    } catch (error) {
-      console.error(`[Frontend TimeZone Debug] ${label} - Error:`, error);
-    }
+  static formatSeconds(seconds) {
+    const total = Math.max(0, Math.floor(seconds));
+    const hrs = Math.floor(total / 3600);
+    const mins = Math.floor((total % 3600) / 60);
+    const secs = total % 60;
+
+    const hh = hrs > 0 ? `${String(hrs).padStart(2, '0')}:` : '';
+    return `${hh}${String(mins).padStart(2, '0')}:${String(secs).padStart(2, '0')}`;
   }
 }
 

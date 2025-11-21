@@ -31,6 +31,9 @@ const useStore = create(
                 selectedNoteId: null,
                 searchQuery: '',
 
+                // 白板元素数量实时状态（用于预览更新）
+                whiteboardElementCounts: {}, // noteId -> elementCount
+
                 // UI 相关状态
                 isLoading: false,
                 sidebarOpen: true,
@@ -196,7 +199,26 @@ const useStore = create(
                             ...n,
                             tags: normalizeTags(n.tags)
                         }))
-                        set({ notes: normalized, isLoading: false })
+
+                        // 每次都用数据库内容重建白板元素数量缓存，确保预览与实际一致
+                        const elementCounts = {}
+                        normalized.forEach(note => {
+                            if (note.note_type === 'whiteboard' && note.content) {
+                                try {
+                                    const whiteboardData = JSON.parse(note.content)
+                                    elementCounts[note.id] = whiteboardData.elements?.length || 0
+                                } catch (error) {
+                                    console.warn('Failed to parse whiteboard content for element count:', error)
+                                    elementCounts[note.id] = 0
+                                }
+                            }
+                        })
+
+                        set({
+                            notes: normalized,
+                            whiteboardElementCounts: elementCounts,
+                            isLoading: false
+                        })
                     } catch (error) {
                         console.error('Failed to load notes:', error)
                         set({ isLoading: false })
@@ -235,11 +257,41 @@ const useStore = create(
                                     ? result.tags.split(',')
                                     : []
                             const updatedNote = { ...result, tags }
+
+                            // 准备更新状态
+                            const stateUpdate = {
+                                notes: null, // 将在下面设置
+                            }
+
+                            // 如果是白板笔记，从传入的updates或返回的result中更新元素数量缓存
+                            if (updatedNote.note_type === 'whiteboard') {
+                                // 优先使用传入的content（这是最新保存的内容）
+                                const contentToUse = updates.content || updatedNote.content
+                                if (contentToUse) {
+                                    try {
+                                        const whiteboardData = JSON.parse(contentToUse)
+                                        const elementCount = whiteboardData.elements?.length || 0
+                                        stateUpdate.whiteboardElementCounts = elementCount
+                                        console.log(`[Store] 更新白板元素数量缓存: noteId=${id}, count=${elementCount}`)
+                                    } catch (error) {
+                                        console.warn('Failed to parse whiteboard content for element count:', error)
+                                    }
+                                }
+                            }
+
+                            // 一次性更新状态
                             set((state) => ({
                                 notes: state.notes.map(note =>
                                     note.id === id ? updatedNote : note
-                                )
+                                ),
+                                ...(stateUpdate.whiteboardElementCounts !== undefined && {
+                                    whiteboardElementCounts: {
+                                        ...state.whiteboardElementCounts,
+                                        [id]: stateUpdate.whiteboardElementCounts
+                                    }
+                                })
                             }))
+                            
                             return { success: true, data: updatedNote }
                         }
                         return { success: false, error: 'Failed to update note' }
@@ -255,7 +307,8 @@ const useStore = create(
                         if (result?.success) {
                             set((state) => ({
                                 notes: state.notes.filter(note => note.id !== id),
-                                selectedNoteId: state.selectedNoteId === id ? null : state.selectedNoteId
+                                selectedNoteId: state.selectedNoteId === id ? null : state.selectedNoteId,
+                                whiteboardElementCounts: { ...state.whiteboardElementCounts, [id]: undefined }
                             }))
                             return { success: true }
                         }
@@ -286,7 +339,8 @@ const useStore = create(
                         if (result?.success || result === true) {
                             set((state) => ({
                                 notes: state.notes.filter(note => note.id !== id),
-                                selectedNoteId: state.selectedNoteId === id ? null : state.selectedNoteId
+                                selectedNoteId: state.selectedNoteId === id ? null : state.selectedNoteId,
+                                whiteboardElementCounts: { ...state.whiteboardElementCounts, [id]: undefined }
                             }))
                             return { success: true }
                         }

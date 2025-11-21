@@ -17,14 +17,15 @@ export const createAppTheme = (mode = 'light', primaryColor = '#1976d2') => {
     const backgroundDefault = isDark ? '#0f172a' : '#f0f4f8';
     const backgroundPaper = isDark ? '#1e293b' : '#ffffff';
 
-    // Glassmorphism tokens
+    // Glassmorphism tokens (subtle / refined)
+    // Make frosted effect more delicate: smaller blur and lower white overlay
     const glassBackground = isDark
-        ? alpha('#1e293b', 0.7)
-        : alpha('#ffffff', 0.7);
+        ? alpha('#1e293b', 0.45)
+        : alpha('#ffffff', 0.85); // Increased opacity for better visibility in light mode
     const glassBorder = isDark
-        ? '1px solid rgba(255, 255, 255, 0.08)'
-        : '1px solid rgba(255, 255, 255, 0.4)';
-    const glassBlur = 'blur(12px)';
+        ? '1px solid rgba(255, 255, 255, 0.06)'
+        : '1px solid rgba(0, 0, 0, 0.08)'; // Darker border for light mode
+    const glassBlur = 'blur(6px)';
 
     return createTheme({
         palette: {
@@ -148,6 +149,17 @@ export const createAppTheme = (mode = 'light', primaryColor = '#1976d2') => {
                         backgroundColor: glassBackground,
                         border: glassBorder,
                         boxShadow: '0 40px 80px -12px rgba(0, 0, 0, 0.3)', // Deep shadow for dialogs
+                    }
+                }
+            },
+            MuiMenu: {
+                styleOverrides: {
+                    paper: {
+                        backdropFilter: glassBlur,
+                        backgroundColor: glassBackground,
+                        border: glassBorder,
+                        borderRadius: 8,
+                        boxShadow: '0 8px 30px rgba(0,0,0,0.12)'
                     }
                 }
             },

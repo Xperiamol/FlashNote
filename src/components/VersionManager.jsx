@@ -371,6 +371,14 @@ const VersionManager = ({ open, onClose }) => {
         anchorEl={anchorEl}
         open={Boolean(anchorEl)}
         onClose={handleMenuClose}
+        PaperProps={{
+          sx: (theme) => ({
+            backdropFilter: theme?.custom?.glass?.backdropFilter || 'blur(6px)',
+            backgroundColor: theme?.custom?.glass?.background || (theme.palette.mode === 'dark' ? 'rgba(255,255,255,0.05)' : 'rgba(255,255,255,0.4)'),
+            border: theme?.custom?.glass?.border || `1px solid ${theme.palette.divider}`,
+            borderRadius: 1
+          })
+        }}
       >
         <MenuItem
           onClick={() => restoreVersion(selectedVersion?.fileName)}

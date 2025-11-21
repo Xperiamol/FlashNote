@@ -105,7 +105,6 @@ const TodoItem = ({
       transition: 'all 0.2s cubic-bezier(0.4, 0, 0.2, 1)',
       '&:hover': {
         backgroundColor: theme.palette.action.hover,
-        transform: 'translateY(-2px)',
         boxShadow: '0 4px 12px rgba(0,0,0,0.08)',
         zIndex: 1,
       },

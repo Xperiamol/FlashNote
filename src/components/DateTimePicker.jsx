@@ -105,7 +105,7 @@ const CustomDatePicker = ({ value, onChange, onClose, anchorEl }) => {
         sx={{
           p: 2,
           minWidth: 320,
-          borderRadius: 2,
+          borderRadius: 1, // Match theme's borderRadius
           boxShadow: theme.shadows[8],
         }}
       >
@@ -115,7 +115,7 @@ const CustomDatePicker = ({ value, onChange, onClose, anchorEl }) => {
             onClick={handlePrevMonth}
             size="small"
             sx={{
-              borderRadius: 1,
+              borderRadius: 1, // Match smaller button radius
               '&:hover': {
                 backgroundColor: theme.palette.action.hover,
               }
@@ -130,7 +130,7 @@ const CustomDatePicker = ({ value, onChange, onClose, anchorEl }) => {
             onClick={handleNextMonth}
             size="small"
             sx={{
-              borderRadius: 1,
+              borderRadius: 1, // Match smaller button radius
               '&:hover': {
                 backgroundColor: theme.palette.action.hover,
               }
@@ -175,7 +175,7 @@ const CustomDatePicker = ({ value, onChange, onClose, anchorEl }) => {
                   minWidth: 0,
                   width: '100%',
                   height: 36,
-                  borderRadius: 1,
+                  borderRadius: 8, // Smaller radius for date buttons
                   fontSize: '0.875rem',
                   backgroundColor: isSelected ? theme.palette.primary.main : 'transparent',
                   color: isSelected ? theme.palette.primary.contrastText : 
@@ -201,7 +201,7 @@ const CustomDatePicker = ({ value, onChange, onClose, anchorEl }) => {
             onClick={handleClear}
             size="small"
             sx={{
-              borderRadius: 1,
+              borderRadius: 8, // Match smaller button radius
               textTransform: 'none',
               color: theme.palette.text.secondary,
             }}
@@ -213,7 +213,7 @@ const CustomDatePicker = ({ value, onChange, onClose, anchorEl }) => {
             size="small"
             variant="outlined"
             sx={{
-              borderRadius: 1,
+              borderRadius: 8, // Match smaller button radius
               textTransform: 'none',
             }}
           >
@@ -274,7 +274,7 @@ const CustomTimePicker = ({ value, onChange, onClose, anchorEl }) => {
         sx={{
           p: 3,
           minWidth: 280,
-          borderRadius: 2,
+          borderRadius: 1, // Match theme's borderRadius
           boxShadow: theme.shadows[8],
         }}
       >
@@ -303,7 +303,7 @@ const CustomTimePicker = ({ value, onChange, onClose, anchorEl }) => {
               sx={{
                 width: 80,
                 '& .MuiOutlinedInput-root': {
-                  borderRadius: 2,
+                  borderRadius: 1, // Match theme's borderRadius
                 },
               }}
             />
@@ -334,7 +334,7 @@ const CustomTimePicker = ({ value, onChange, onClose, anchorEl }) => {
               sx={{
                 width: 80,
                 '& .MuiOutlinedInput-root': {
-                  borderRadius: 2,
+                  borderRadius: 1, // Match theme's borderRadius
                 },
               }}
             />
@@ -358,7 +358,7 @@ const CustomTimePicker = ({ value, onChange, onClose, anchorEl }) => {
                 setMinutes(m);
               }}
               sx={{
-                borderRadius: 1,
+                borderRadius: 8, // Match smaller button radius
                 textTransform: 'none',
                 minWidth: 60,
               }}
@@ -376,7 +376,7 @@ const CustomTimePicker = ({ value, onChange, onClose, anchorEl }) => {
             onClick={handleClear}
             size="small"
             sx={{
-              borderRadius: 1,
+              borderRadius: 8, // Match smaller button radius
               textTransform: 'none',
               color: theme.palette.text.secondary,
             }}
@@ -388,7 +388,7 @@ const CustomTimePicker = ({ value, onChange, onClose, anchorEl }) => {
             size="small"
             variant="contained"
             sx={{
-              borderRadius: 1,
+              borderRadius: 8, // Match smaller button radius
               textTransform: 'none',
             }}
           >
@@ -470,7 +470,7 @@ const DateTimePicker = ({
               width: '100%',
               justifyContent: 'flex-start',
               textTransform: 'none',
-              borderRadius: 2,
+              borderRadius: 12, // Match theme's borderRadius
               py: 1.5,
               px: 2,
               pr: dateValue ? 6 : 2,
@@ -530,7 +530,7 @@ const DateTimePicker = ({
               width: '100%',
               justifyContent: 'flex-start',
               textTransform: 'none',
-              borderRadius: 2,
+              borderRadius: 12, // Match theme's borderRadius
               py: 1.5,
               px: 2,
               pr: timeValue ? 6 : 2,

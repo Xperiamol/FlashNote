@@ -490,13 +490,33 @@ class TodoDAO {
     `);
     const deletedStmt = db.prepare('SELECT COUNT(*) as count FROM todos WHERE is_deleted = 1');
     
+    // 获取专注时长统计
+    const totalFocusTimeStmt = db.prepare('SELECT COALESCE(SUM(focus_time_seconds), 0) as total FROM todos WHERE is_deleted = 0');
+    const todayFocusTimeStmt = db.prepare(`
+      SELECT COALESCE(SUM(focus_time_seconds), 0) as total FROM todos 
+      WHERE is_deleted = 0 AND DATE(updated_at) = DATE(?)
+    `);
+    const weekFocusTimeStmt = db.prepare(`
+      SELECT COALESCE(SUM(focus_time_seconds), 0) as total FROM todos 
+      WHERE is_deleted = 0 AND updated_at >= datetime(?, '-6 days')
+    `);
+    const monthFocusTimeStmt = db.prepare(`
+      SELECT COALESCE(SUM(focus_time_seconds), 0) as total FROM todos 
+      WHERE is_deleted = 0 AND updated_at >= datetime(?, '-29 days')
+    `);
+    
     return {
       total: totalStmt.get().count,
       completed: completedStmt.get().count,
       pending: pendingStmt.get().count,
       overdue: overdueStmt.get(nowUTC).count,
       dueToday: dueTodayStmt.get(todayStart.toISOString(), todayEnd.toISOString()).count,
-      deleted: deletedStmt.get().count
+      deleted: deletedStmt.get().count,
+      // 专注时长统计（秒）
+      totalFocusTime: totalFocusTimeStmt.get().total,
+      todayFocusTime: todayFocusTimeStmt.get(nowUTC).total,
+      weekFocusTime: weekFocusTimeStmt.get(nowUTC).total,
+      monthFocusTime: monthFocusTimeStmt.get(nowUTC).total
     };
   }
 

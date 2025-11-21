@@ -242,16 +242,16 @@ const TitleBar = () => {
               },
             }}
           >
-            <Box sx={{ position: 'relative', width: '14px', height: '14px' }}>
+            <Box sx={{ position: 'relative', width: '12px', height: '12px' }}>
               <Box
                 className="close-icon"
                 sx={{
                   position: 'absolute',
-                  width: '14px',
-                  height: '2px',
+                  width: '12px',
+                  height: '1.5px',
                   backgroundColor: '#e81123',
-                  top: '6px',
-                  left: '0',
+                  top: '5.25px',
+                  left: '-3px',
                   transform: 'rotate(45deg)',
                 }}
               />
@@ -259,11 +259,11 @@ const TitleBar = () => {
                 className="close-icon"
                 sx={{
                   position: 'absolute',
-                  width: '14px',
-                  height: '2px',
+                  width: '12px',
+                  height: '1.5px',
                   backgroundColor: '#e81123',
-                  top: '6px',
-                  left: '0',
+                  top: '5.25px',
+                  left: '-3px',
                   transform: 'rotate(-45deg)',
                 }}
               />

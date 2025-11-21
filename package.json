@@ -1,7 +1,7 @@
 {
   "name": "flashnote",
   "version": "2.2.2",
-  "description": "闪念速记 V2.2.2 - 现代化本地笔记应用",
+  "description": "闪念速记 V2.2.2 Epsilon - 现代化本地笔记应用",
   "main": "electron/main.js",
   "homepage": "./",
   "scripts": {
@@ -76,7 +76,7 @@
   },
   "build": {
     "appId": "com.flashnote.app",
-    "productName": "FlashNote 2.2.2",
+    "productName": "FlashNote 2.2.2 Epsilon",
     "directories": {
       "output": "dist-electron"
     },

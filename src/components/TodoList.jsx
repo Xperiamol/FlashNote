@@ -649,7 +649,7 @@ const TodoList = ({ onTodoSelect, onViewModeChange, onShowCompletedChange, viewM
                 <ListItem
                   disablePadding
                   sx={{
-                    mb: 1,
+                    mb: 0.1,
                     position: 'relative',
                     overflow: 'visible', // Allow hover effects to show
                     ...(celebratingTodos.has(todo.id) && {
@@ -683,7 +683,6 @@ const TodoList = ({ onTodoSelect, onViewModeChange, onShowCompletedChange, viewM
                       transition: 'all 0.2s cubic-bezier(0.4, 0, 0.2, 1)',
                       '&:hover': {
                         backgroundColor: (theme) => theme.palette.action.hover,
-                        transform: 'translateY(-2px)',
                         boxShadow: '0 4px 12px rgba(0,0,0,0.08)',
                         borderColor: (theme) => theme.palette.divider,
                         zIndex: 1,
@@ -838,6 +837,14 @@ const TodoList = ({ onTodoSelect, onViewModeChange, onShowCompletedChange, viewM
         transformOrigin={{
           vertical: 'top',
           horizontal: 'right',
+        }}
+        PaperProps={{
+          sx: (theme) => ({
+            backdropFilter: theme?.custom?.glass?.backdropFilter || 'blur(6px)',
+            backgroundColor: theme?.custom?.glass?.background || (theme.palette.mode === 'dark' ? 'rgba(255,255,255,0.05)' : 'rgba(255,255,255,0.4)'),
+            border: theme?.custom?.glass?.border || `1px solid ${theme.palette.divider}`,
+            borderRadius: 1
+          })
         }}
       >
         <MenuItem onClick={handleEdit}>

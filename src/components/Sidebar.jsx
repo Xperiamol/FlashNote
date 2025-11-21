@@ -202,7 +202,7 @@ const Sidebar = ({ open = true, onClose }) => {
       {/* 分隔线 */}
       <Box
         sx={{
-          width: '32px',
+          width: '44px',
           height: '1px',
           backgroundColor: theme.palette.divider,
           marginBottom: '8px',
@@ -279,7 +279,7 @@ const Sidebar = ({ open = true, onClose }) => {
       >
         <Box
           sx={{
-            width: '32px',
+            width: '44px',
             height: '1px',
             backgroundColor: theme.palette.divider,
             marginBottom: '8px',
