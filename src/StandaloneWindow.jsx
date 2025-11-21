@@ -51,7 +51,7 @@ function StandaloneContent({ windowType }) {
             onViewModeChange={() => {}} 
             onShowCompletedChange={() => {}} 
             viewMode="list" 
-            showCompleted={true} 
+            showCompleted={false}
             onMultiSelectChange={() => {}} 
             onMultiSelectRefChange={() => {}} 
             refreshTrigger={0} 

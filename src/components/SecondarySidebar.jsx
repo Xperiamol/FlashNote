@@ -21,12 +21,14 @@ import {
   Psychology as AIIcon,
   Memory as MemoryIcon,
   Wifi as WifiIcon,
-  Info as InfoIcon
+  Info as InfoIcon,
+  RecordVoiceOver as STTIcon
 } from '@mui/icons-material';
 import { useStore } from '../store/useStore';
 import NoteList from './NoteList';
 import TodoList from './TodoList';
 import MyDayPanel from './MyDayPanel';
+import { t } from '../utils/i18n';
 
 const SecondarySidebar = ({ open, onClose, width = 320, onTodoSelect, onViewModeChange, onShowCompletedChange, viewMode, showCompleted, onMultiSelectChange, onMultiSelectRefChange, todoRefreshTrigger, todoSortBy, onTodoSortByChange, showDeleted, selectedDate, calendarRefreshTrigger, onTodoUpdated }) => {
   const theme = useTheme();
@@ -63,25 +65,25 @@ const SecondarySidebar = ({ open, onClose, width = 320, onTodoSelect, onViewMode
         return <MyDayPanel selectedDate={selectedDate} onTodoSelect={onTodoSelect} refreshToken={calendarRefreshTrigger} onTodoUpdated={onTodoUpdated} />;
       case 'plugins': {
         const categories = pluginStoreCategories && pluginStoreCategories.length > 0
-          ? [{ id: 'all', name: '全部插件' }, ...pluginStoreCategories]
+          ? [{ id: 'all', name: t('plugins.allPlugins') }, ...pluginStoreCategories]
           : [
-              { id: 'all', name: '全部插件' },
-              { id: 'featured', name: '精选推荐' },
-              { id: 'productivity', name: '效率工具' },
-              { id: 'integration', name: '服务集成' },
-              { id: 'insights', name: '知识与学习' }
+              { id: 'all', name: t('plugins.allPlugins') },
+              { id: 'featured', name: t('plugins.featured') },
+              { id: 'productivity', name: t('plugins.productivity') },
+              { id: 'integration', name: t('plugins.integration') },
+              { id: 'insights', name: t('plugins.insights') }
             ]
 
         const tabs = [
-          { id: 'market', label: '插件市场' },
-          { id: 'installed', label: '已安装' },
-          { id: 'local', label: '本地开发' }
+          { id: 'market', label: t('plugins.market') },
+          { id: 'installed', label: t('plugins.installed') },
+          { id: 'local', label: t('plugins.local') }
         ]
 
         return (
           <Box sx={{ p: 2, display: 'flex', flexDirection: 'column', height: '100%' }}>
             <Typography variant="h6" sx={{ mb: 2 }}>
-              插件浏览
+              {t('sidebar.notes')}
             </Typography>
 
             <Stack direction="row" spacing={1} sx={{ mb: 3 }}>
@@ -98,7 +100,7 @@ const SecondarySidebar = ({ open, onClose, width = 320, onTodoSelect, onViewMode
             </Stack>
 
             <Typography variant="subtitle2" sx={{ mb: 1, color: 'text.secondary' }}>
-              分类
+              {t('plugins.categories')}
             </Typography>
 
             <List dense disablePadding sx={{ overflowY: 'auto' }}>
@@ -127,21 +129,22 @@ const SecondarySidebar = ({ open, onClose, width = 320, onTodoSelect, onViewMode
       }
       case 'settings': {
         const settingsCategories = [
-          { id: 0, name: '通用设置', icon: <SettingsIcon /> },
-          { id: 1, name: '外观设置', icon: <PaletteIcon /> },
-          { id: 2, name: '快捷键设置', icon: <KeyboardIcon /> },
-          { id: 3, name: 'AI 功能', icon: <AIIcon /> },
-          { id: 4, name: 'MemoryEngine', icon: <MemoryIcon /> },
-          { id: 5, name: '云同步', icon: <CloudIcon /> },
-          { id: 6, name: '网络代理', icon: <WifiIcon /> },
-          { id: 7, name: '数据管理', icon: <ImportIcon /> },
-          { id: 8, name: '关于', icon: <InfoIcon /> }
+          { id: 0, name: t('settings.general'), icon: <SettingsIcon /> },
+          { id: 1, name: t('settings.appearance'), icon: <PaletteIcon /> },
+          { id: 2, name: t('settings.shortcuts'), icon: <KeyboardIcon /> },
+          { id: 3, name: t('settings.ai'), icon: <AIIcon /> },
+          { id: 4, name: t('settings.stt'), icon: <STTIcon /> },
+          { id: 5, name: t('settings.memory'), icon: <MemoryIcon /> },
+          { id: 6, name: t('settings.cloud'), icon: <CloudIcon /> },
+          { id: 7, name: t('settings.proxy'), icon: <WifiIcon /> },
+          { id: 8, name: t('settings.data'), icon: <ImportIcon /> },
+          { id: 9, name: t('settings.about'), icon: <InfoIcon /> }
         ]
 
         return (
           <Box sx={{ p: 2, display: 'flex', flexDirection: 'column', height: '100%' }}>
             <Typography variant="h6" sx={{ mb: 2 }}>
-              设置
+              {t('settings.settings')}
             </Typography>
 
             <List dense disablePadding sx={{ overflowY: 'auto' }}>

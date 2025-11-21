@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import { useTranslation } from '../utils/i18n';
 import {
   Box,
   Typography,
@@ -72,6 +73,7 @@ const rotate = keyframes`
 `;
 
 const CloudSyncSettings = () => {
+  const { t } = useTranslation();
   const [services, setServices] = useState([]);
   const [syncStatus, setSyncStatus] = useState({});
   const [selectedService, setSelectedService] = useState('');
@@ -123,7 +125,7 @@ const CloudSyncSettings = () => {
       }
     } catch (error) {
       console.error('加载云同步数据失败:', error);
-      setMessage({ type: 'error', text: '加载数据失败' });
+      setMessage({ type: 'error', text: t('cloudSync.loadDataFailed') });
     }
   };
 
@@ -169,12 +171,12 @@ const CloudSyncSettings = () => {
       const result = await testConnection(selectedService, config);
       
       if (result.success) {
-        setMessage({ type: 'success', text: '连接测试成功' });
+        setMessage({ type: 'success', text: t('cloudSync.connectionTestSuccess') });
       } else {
-        setMessage({ type: 'error', text: result.message || '连接测试失败' });
+        setMessage({ type: 'error', text: result.message || t('cloudSync.connectionTestFailed') });
       }
     } catch (error) {
-      setMessage({ type: 'error', text: error.message || '连接测试失败' });
+      setMessage({ type: 'error', text: error.message || t('cloudSync.connectionTestFailed') });
     } finally {
       setTesting(false);
     }
@@ -190,13 +192,13 @@ const CloudSyncSettings = () => {
       const result = await switchService(selectedService, config);
       
       if (result.success) {
-        setMessage({ type: 'success', text: '云同步已启用' });
+        setMessage({ type: 'success', text: t('cloudSync.cloudSyncEnabled') });
         await loadSyncStatus();
       } else {
-        setMessage({ type: 'error', text: result.message || '启用云同步失败' });
+        setMessage({ type: 'error', text: result.message || t('cloudSync.enableCloudSyncFailed') });
       }
     } catch (error) {
-      setMessage({ type: 'error', text: error.message || '启用云同步失败' });
+      setMessage({ type: 'error', text: error.message || t('cloudSync.enableCloudSyncFailed') });
     } finally {
       setLoading(false);
     }
@@ -210,13 +212,13 @@ const CloudSyncSettings = () => {
       const result = await disableSync();
       
       if (result.success) {
-        setMessage({ type: 'success', text: '云同步已禁用' });
+        setMessage({ type: 'success', text: t('cloudSync.cloudSyncDisabled') });
         await loadSyncStatus();
       } else {
-        setMessage({ type: 'error', text: result.message || '禁用云同步失败' });
+        setMessage({ type: 'error', text: result.message || t('cloudSync.disableCloudSyncFailed') });
       }
     } catch (error) {
-      setMessage({ type: 'error', text: error.message || '禁用云同步失败' });
+      setMessage({ type: 'error', text: error.message || t('cloudSync.disableCloudSyncFailed') });
     } finally {
       setLoading(false);
     }
@@ -236,10 +238,10 @@ const CloudSyncSettings = () => {
         });
         await loadSyncStatus();
       } else {
-        setMessage({ type: 'error', text: result.message || '手动同步失败' });
+        setMessage({ type: 'error', text: result.message || t('cloudSync.manualSyncFailed') });
       }
     } catch (error) {
-      setMessage({ type: 'error', text: error.message || '手动同步失败' });
+      setMessage({ type: 'error', text: error.message || t('cloudSync.manualSyncFailed') });
     } finally {
       setSyncing(false);
     }
@@ -248,10 +250,10 @@ const CloudSyncSettings = () => {
   const handleForceStop = async () => {
     try {
       await forceStopSync();
-      setMessage({ type: 'info', text: '同步已强制停止' });
+      setMessage({ type: 'info', text: t('cloudSync.syncForceStopped') });
       await loadSyncStatus();
     } catch (error) {
-      setMessage({ type: 'error', text: '强制停止失败' });
+      setMessage({ type: 'error', text: t('cloudSync.forceStopFailed') });
     }
   };
 
@@ -262,7 +264,7 @@ const CloudSyncSettings = () => {
     
     if (!window.electronAPI?.sync?.cleanupUnusedImages) {
       console.log('[前端] 清理功能不可用');
-      setMessage({ type: 'error', text: '清理功能不可用，请确保应用已重启' });
+      setMessage({ type: 'error', text: t('cloudSync.cleanupUnavailable') });
       return;
     }
 
@@ -317,10 +319,10 @@ const CloudSyncSettings = () => {
         const sizeMB = (totalSize / 1024 / 1024).toFixed(2);
         setMessage({ 
           type: 'success', 
-          text: `成功清理 ${deletedCount} 个图片，释放 ${sizeMB} MB 空间` 
+          text: t('cloudSync.cleanupSuccess', { deletedCount, sizeMB })
         });
       } else {
-        setMessage({ type: 'error', text: result.error || '清理失败' });
+        setMessage({ type: 'error', text: result.error || t('cloudSync.cleanupFailed') });
       }
     } catch (error) {
       console.error('清理图片失败:', error);
@@ -337,15 +339,15 @@ const CloudSyncSettings = () => {
       const result = await resolveConflict(selectedConflict.id, resolution);
       
       if (result.success) {
-        setMessage({ type: 'success', text: '冲突已解决' });
+        setMessage({ type: 'success', text: t('cloudSync.conflictResolved') });
         setShowConflictDialog(false);
         setSelectedConflict(null);
         await loadSyncStatus();
       } else {
-        setMessage({ type: 'error', text: result.message || '解决冲突失败' });
+        setMessage({ type: 'error', text: result.message || t('cloudSync.resolveConflictFailed') });
       }
     } catch (error) {
-      setMessage({ type: 'error', text: error.message || '解决冲突失败' });
+      setMessage({ type: 'error', text: error.message || t('cloudSync.resolveConflictFailed') });
     }
   };
 
@@ -358,21 +360,21 @@ const CloudSyncSettings = () => {
           <Box sx={{ mt: 2 }}>
             <TextField
               fullWidth
-              label="坚果云用户名"
+              label={t('cloudSync.nutcloudUsername')}
               value={config.username || ''}
               onChange={(e) => handleConfigChange('username', e.target.value)}
               sx={{ mb: 2 }}
-              placeholder="输入坚果云邮箱地址"
+              placeholder={t('cloudSync.nutcloudUsernamePlaceholder')}
             />
             <TextField
               fullWidth
-              label="应用密码"
+              label={t('cloudSync.appPassword')}
               type="password"
               value={config.password || ''}
               onChange={(e) => handleConfigChange('password', e.target.value)}
               sx={{ mb: 2 }}
-              placeholder="输入坚果云应用密码"
-              helperText="请在坚果云网页版'账户信息'>'安全选项'中生成应用密码"
+              placeholder={t('cloudSync.appPasswordPlaceholder')}
+              helperText={t('cloudSync.appPasswordHelp')}
             />
           </Box>
         );
@@ -381,7 +383,7 @@ const CloudSyncSettings = () => {
         return (
           <Box sx={{ mt: 2 }}>
             <Alert severity="info">
-              OneDrive 使用 OAuth 认证，点击"测试连接"将会打开浏览器进行授权
+              {t('cloudSync.onedriveOAuth')}
             </Alert>
           </Box>
         );
@@ -411,23 +413,23 @@ const CloudSyncSettings = () => {
 
   const getStatusText = () => {
     if (!syncStatus.hasActiveService) {
-      return '未启用云同步';
+      return t('cloudSync.notEnabled');
     }
     
     if (syncStatus.status?.isSyncing) {
-      return '正在同步...';
+      return t('cloudSync.syncing');
     }
     
     if (syncStatus.status?.isEnabled && syncStatus.status?.isAuthenticated) {
-      return `已连接到 ${syncStatus.activeServiceDisplayName}`;
+      return t('cloudSync.connectedTo', { serviceName: syncStatus.activeServiceDisplayName });
     }
     
-    return '连接失败';
+    return t('cloudSync.connectionFailed');
   };
 
   const getLastSyncText = () => {
     if (!syncStatus.status?.lastSyncTime) {
-      return '从未同步';
+      return t('cloudSync.neverSynced');
     }
     
     const lastSync = new Date(syncStatus.status.lastSyncTime);
@@ -435,12 +437,12 @@ const CloudSyncSettings = () => {
     const diffMinutes = Math.floor((now - lastSync) / (1000 * 60));
     
     if (diffMinutes < 1) {
-      return '刚刚同步';
+      return t('cloudSync.justSynced');
     } else if (diffMinutes < 60) {
-      return `${diffMinutes} 分钟前同步`;
+      return t('cloudSync.syncedMinutesAgo', { minutes: diffMinutes });
     } else {
       const diffHours = Math.floor(diffMinutes / 60);
-      return `${diffHours} 小时前同步`;
+      return t('cloudSync.syncedHoursAgo', { hours: diffHours });
     }
   };
 
@@ -449,8 +451,8 @@ const CloudSyncSettings = () => {
       {/* 标签页切换 */}
       <Box sx={{ borderBottom: 1, borderColor: 'divider', mb: 3 }}>
         <Tabs value={tabValue} onChange={(e, newValue) => setTabValue(newValue)}>
-          <Tab icon={<CloudIcon />} label="云存储同步" />
-          <Tab icon={<CalendarIcon />} label="日历同步" />
+          <Tab icon={<CloudIcon />} label={t('cloudSync.cloudStorageSync')} />
+          <Tab icon={<CalendarIcon />} label={t('cloudSync.calendarSync')} />
         </Tabs>
       </Box>
 
@@ -474,7 +476,7 @@ const CloudSyncSettings = () => {
             
             {syncStatus.status?.autoSync && (
               <Chip 
-                label="自动同步已启用" 
+                label={t('cloudSync.autoSyncEnabled')} 
                 size="small" 
                 color="primary" 
                 sx={{ mt: 1 }}
@@ -486,13 +488,13 @@ const CloudSyncSettings = () => {
         {/* 冲突提示 */}
         {conflicts.length > 0 && (
           <Alert severity="warning" sx={{ mt: 2 }}>
-            检测到 {conflicts.length} 个同步冲突，需要手动解决
+            {t('cloudSync.conflictsDetected', { count: conflicts.length })}
             <Button 
               size="small" 
               onClick={() => setShowConflictDialog(true)}
               sx={{ ml: 1 }}
             >
-              查看冲突
+              {t('cloudSync.viewConflicts')}
             </Button>
           </Alert>
         )}
@@ -512,7 +514,7 @@ const CloudSyncSettings = () => {
       {/* 服务选择 */}
       <Box sx={{ mb: 3 }}>
         <Typography variant="h6" gutterBottom>
-          选择云存储服务
+          {t('cloudSync.selectCloudService')}
         </Typography>
         
         <FormControl component="fieldset">
@@ -550,7 +552,7 @@ const CloudSyncSettings = () => {
             disabled={!selectedService || testing}
             startIcon={testing ? <CircularProgress size={16} /> : <SettingsIcon />}
           >
-            {testing ? '测试中...' : '测试连接'}
+            {testing ? t('cloudSync.testing') : t('cloudSync.testConnection')}
           </Button>
           
           {!syncStatus.hasActiveService ? (
@@ -560,7 +562,7 @@ const CloudSyncSettings = () => {
               disabled={!selectedService || loading}
               startIcon={loading ? <CircularProgress size={16} /> : <CloudIcon />}
             >
-              {loading ? '启用中...' : '启用云同步'}
+              {loading ? t('cloudSync.enabling') : t('cloudSync.enableCloudSync')}
             </Button>
           ) : (
             <Button
@@ -570,7 +572,7 @@ const CloudSyncSettings = () => {
               disabled={loading}
               startIcon={loading ? <CircularProgress size={16} /> : <CloudOffIcon />}
             >
-              {loading ? '禁用中...' : '禁用云同步'}
+              {loading ? t('cloudSync.disabling') : t('cloudSync.disableCloudSync')}
             </Button>
           )}
         </Box>
@@ -580,7 +582,7 @@ const CloudSyncSettings = () => {
       {syncStatus.hasActiveService && (
         <Box sx={{ mb: 3 }}>
           <Typography variant="h6" gutterBottom>
-            同步操作
+            {t('cloudSync.syncOperations')}
           </Typography>
           
           {/* 图片同步开关 */}
@@ -643,13 +645,13 @@ const CloudSyncSettings = () => {
                     <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
                       <ImageIcon fontSize="small" />
                       <Typography variant="subtitle2">
-                        同步图片
+                        {t('cloudSync.syncImages')}
                       </Typography>
-                      <Chip label="实验性" size="small" color="warning" />
+                      <Chip label={t('cloudSync.experimental')} size="small" color="warning" />
                       {savingConfig && <CircularProgress size={12} sx={{ ml: 1 }} />}
                     </Box>
                     <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mt: 0.5 }}>
-                      自动同步笔记中的图片到云端。注意：坚果云服务器可能繁忙，如遇503错误会自动重试。
+                      {t('cloudSync.syncImagesDesc')}
                     </Typography>
                   </Box>
                 }
@@ -664,7 +666,7 @@ const CloudSyncSettings = () => {
               disabled={syncing || syncStatus.status?.isSyncing}
               startIcon={syncing ? <CircularProgress size={16} /> : <RefreshIcon />}
             >
-              {syncing ? '同步中...' : '立即同步'}
+              {syncing ? t('cloudSync.syncingNow') : t('cloudSync.manualSync')}
             </Button>
             
             <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
@@ -687,7 +689,7 @@ const CloudSyncSettings = () => {
                 disabled={syncing || cleaningImages}
                 startIcon={cleaningImages ? <CircularProgress size={16} /> : <DeleteIcon />}
               >
-                {cleaningImages ? '清理中...' : '清理未引用图片'}
+                {cleaningImages ? t('cloudSync.cleaning') : t('cloudSync.cleanupUnusedImages')}
               </Button>
             </Box>
             
@@ -696,7 +698,7 @@ const CloudSyncSettings = () => {
               onClick={() => setShowVersionManager(true)}
               startIcon={<HistoryIcon />}
             >
-              版本管理
+              {t('cloudSync.versionManagement')}
             </Button>
             
             {syncStatus.status?.isSyncing && (
@@ -706,7 +708,7 @@ const CloudSyncSettings = () => {
                 onClick={handleForceStop}
                 startIcon={<StopIcon />}
               >
-                强制停止
+                {t('cloudSync.forceStop')}
               </Button>
             )}
           </Box>
@@ -720,17 +722,17 @@ const CloudSyncSettings = () => {
         maxWidth="md"
         fullWidth
       >
-        <DialogTitle>同步冲突</DialogTitle>
+        <DialogTitle>{t('cloudSync.syncConflicts')}</DialogTitle>
         <DialogContent>
           <List>
             {conflicts.map((conflict, index) => (
               <ListItem key={index}>
                 <ListItemText
                   primary={`${conflict.table}: ${conflict.local.content || conflict.local.title}`}
-                  secondary={`本地修改时间: ${conflict.local.updated_at} | 远程修改时间: ${conflict.remote.updated_at}`}
+                  secondary={`${t('cloudSync.localModifiedTime')}: ${conflict.local.updated_at} | ${t('cloudSync.remoteModifiedTime')}: ${conflict.remote.updated_at}`}
                 />
                 <ListItemSecondaryAction>
-                  <Tooltip title="使用本地版本">
+                  <Tooltip title={t('cloudSync.useLocalVersion')}>
                     <IconButton 
                       onClick={() => {
                         setSelectedConflict(conflict);
@@ -740,7 +742,7 @@ const CloudSyncSettings = () => {
                       <DownloadIcon />
                     </IconButton>
                   </Tooltip>
-                  <Tooltip title="使用远程版本">
+                  <Tooltip title={t('cloudSync.useRemoteVersion')}>
                     <IconButton 
                       onClick={() => {
                         setSelectedConflict(conflict);
@@ -750,7 +752,7 @@ const CloudSyncSettings = () => {
                       <UploadIcon />
                     </IconButton>
                   </Tooltip>
-                  <Tooltip title="智能合并">
+                  <Tooltip title={t('cloudSync.smartMerge')}>
                     <IconButton 
                       onClick={() => {
                         setSelectedConflict(conflict);
@@ -767,29 +769,32 @@ const CloudSyncSettings = () => {
         </DialogContent>
         <DialogActions>
           <Button onClick={() => setShowConflictDialog(false)}>
-            关闭
+            {t('cloudSync.close')}
           </Button>
         </DialogActions>
       </Dialog>
 
       {/* 清理图片确认对话框 */}
       <Dialog open={showCleanupDialog} onClose={() => setShowCleanupDialog(false)}>
-        <DialogTitle>清理未引用的图片</DialogTitle>
+        <DialogTitle>{t('cloudSync.cleanupUnusedImagesTitle')}</DialogTitle>
         <DialogContent>
           <Typography>
-            发现 <strong>{cleanupStats.orphanedCount}</strong> 个未引用的图片
-            （<strong>{cleanupStats.totalSizeMB} MB</strong>）{retentionDays > 0 ? `，这些图片超过 ${retentionDays} 天未被使用` : ''}。
+            {t('cloudSync.orphanedImagesFound', { 
+              count: cleanupStats.orphanedCount, 
+              sizeMB: cleanupStats.totalSizeMB,
+              retentionText: retentionDays > 0 ? `，这些图片超过 ${retentionDays} 天未被使用` : ''
+            })}
           </Typography>
           <Typography variant="body2" color="text.secondary" sx={{ mt: 2 }}>
-            注意：此操作将永久删除这些图片文件。回收站中笔记的图片会保留，只清理已彻底删除笔记的图片。
+            {t('cloudSync.cleanupWarning')}
           </Typography>
         </DialogContent>
         <DialogActions>
           <Button onClick={() => setShowCleanupDialog(false)}>
-            取消
+            {t('common.cancel')}
           </Button>
           <Button onClick={handleConfirmCleanup} variant="contained" color="error">
-            确认删除
+            {t('cloudSync.confirmDelete')}
           </Button>
         </DialogActions>
       </Dialog>

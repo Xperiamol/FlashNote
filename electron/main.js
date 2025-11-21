@@ -1,7 +1,7 @@
 // 加载环境变量
 require('dotenv').config()
 
-const { app, BrowserWindow, ipcMain, dialog, clipboard, Notification, shell, Tray, Menu, nativeImage, protocol } = require('electron')
+const { app, BrowserWindow, ipcMain, dialog, clipboard, Notification, shell, Tray, Menu, nativeImage, protocol, nativeTheme } = require('electron')
 const path = require('path')
 const fs = require('fs')
 const isDev = process.env.NODE_ENV === 'development' || !app.isPackaged
@@ -34,6 +34,7 @@ const ImageService = require('./services/ImageService')
 const { getInstance: getImageStorageInstance } = require('./services/ImageStorageService')
 const PluginManager = require('./services/PluginManager')
 const AIService = require('./services/AIService')
+const STTService = require('./services/STTService')
 const Mem0Service = require('./services/Mem0Service')
 const HistoricalDataMigrationService = require('./services/HistoricalDataMigrationService')
 const IpcHandlerFactory = require('./utils/ipcHandlerFactory')
@@ -354,6 +355,10 @@ async function initializeServices() {
     const settingDAO = new SettingDAO()
     services.aiService = new AIService(settingDAO)
     await services.aiService.initialize()
+    
+    // 初始化STT服务
+    services.sttService = new STTService(settingDAO)
+    await services.sttService.initialize()
     
     // 初始化 Mem0 服务 - 使用正确的数据库路径
     const dbPath = path.join(app.getPath('userData'), 'database', 'flashnote.db')
@@ -676,6 +681,21 @@ if (!gotTheLock) {
   
   createWindow()
   createTray()
+  
+  // 监听系统主题变化
+  nativeTheme.on('updated', () => {
+    console.log('[Main] 系统主题变化，当前主题:', nativeTheme.shouldUseDarkColors ? 'dark' : 'light')
+    
+    // 通知所有窗口主题变化
+    BrowserWindow.getAllWindows().forEach(win => {
+      if (win && !win.isDestroyed()) {
+        win.webContents.send('system-theme-changed', {
+          shouldUseDarkColors: nativeTheme.shouldUseDarkColors,
+          themeSource: nativeTheme.themeSource
+        })
+      }
+    })
+  })
   
   // 初始化开机自启状态
   try {
@@ -1283,6 +1303,52 @@ ipcMain.handle('ai:chat', async (event, messages, options) => {
     return await services.aiService.chat(messages, options)
   } catch (error) {
     console.error('AI聊天失败:', error)
+    return { success: false, error: error.message }
+  }
+})
+
+// STT (Speech-to-Text) 相关 IPC 处理
+ipcMain.handle('stt:get-config', async (event) => {
+  try {
+    return await services.sttService.getConfig()
+  } catch (error) {
+    console.error('获取STT配置失败:', error)
+    return { success: false, error: error.message }
+  }
+})
+
+ipcMain.handle('stt:save-config', async (event, config) => {
+  try {
+    return await services.sttService.saveConfig(config)
+  } catch (error) {
+    console.error('保存STT配置失败:', error)
+    return { success: false, error: error.message }
+  }
+})
+
+ipcMain.handle('stt:test-connection', async (event, config) => {
+  try {
+    return await services.sttService.testConnection(config)
+  } catch (error) {
+    console.error('测试STT连接失败:', error)
+    return { success: false, error: error.message }
+  }
+})
+
+ipcMain.handle('stt:get-providers', async (event) => {
+  try {
+    return services.sttService.getProviders()
+  } catch (error) {
+    console.error('获取STT提供商列表失败:', error)
+    return { success: false, error: error.message }
+  }
+})
+
+ipcMain.handle('stt:transcribe', async (event, { audioFile, options }) => {
+  try {
+    return await services.sttService.transcribe(audioFile, options)
+  } catch (error) {
+    console.error('语音转文字失败:', error)
     return { success: false, error: error.message }
   }
 })

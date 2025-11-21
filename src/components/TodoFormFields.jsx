@@ -39,8 +39,11 @@ const TodoFormFields = ({
   };
 
   const handleTagChange = (tags) => {
+    console.log('[TodoFormFields] handleTagChange 被调用，参数:', tags);
     const nextValue = { ...value, tags };
+    console.log('[TodoFormFields] 新的 todo 值:', nextValue);
     emitChange(nextValue, ['tags']);
+    console.log('[TodoFormFields] emitChange 调用完成');
   };
 
   const handleRepeatSettingsChange = (repeatSettings) => {
@@ -120,6 +123,8 @@ const TodoFormFields = ({
         placeholder={fields.tagsPlaceholder}
         error={Boolean(errors.tags)}
         helperText={errors.tags}
+        noteContent={`${value.content || ''}\n${value.description || ''}`.trim()}
+        noteId={value.id || null}
         sx={{ mb: 2 }}
       />
 

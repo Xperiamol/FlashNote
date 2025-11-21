@@ -1,6 +1,6 @@
 {
 	"id": "random-note",
-	"name": "随机笔记",
+	"name": "Random Note (Built-in)",
 	"version": "1.0.0",
 	"description": "一键抽取一篇早已遗忘的笔记，并自动在主编辑器中打开，适合做周期复盘或灵感唤醒。可结合番茄工作法、复习计划使用，及时捕捉旧笔记里的宝藏。",
 	"author": {
@@ -11,8 +11,14 @@
 	"homepage": "https://github.com/Xperiamol",
 	"repository": "https://github.com/Xperiamol/flashnote",
 	"license": "MIT",
-	"categories": ["效率", "回顾"],
-	"tags": ["notes", "productivity"],
+	"categories": [
+		"效率",
+		"回顾"
+	],
+	"tags": [
+		"notes",
+		"productivity"
+	],
 	"icon": null,
 	"entry": "index.js",
 	"permissions": {
@@ -25,8 +31,10 @@
 				"id": "random-note.open",
 				"title": "随机打开一篇笔记",
 				"description": "快速打开一篇随机笔记，激发新的灵感",
-				"surfaces": ["toolbar:notes"],
-			"icon": "shuffle",
+				"surfaces": [
+					"toolbar:notes"
+				],
+				"icon": "shuffle",
 				"shortcut": {
 					"default": "Ctrl+Alt+R",
 					"description": "在任意视图抽取一篇随机笔记"

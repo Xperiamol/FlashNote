@@ -58,6 +58,7 @@ import FilterContainer from './FilterContainer';
 import FilterToggleButton from './FilterToggleButton';
 import DropdownMenu from './DropdownMenu';
 import zhCN from '../locales/zh-CN';
+import { t } from '../utils/i18n';
 
 const {
   filters: { placeholder }
@@ -119,7 +120,7 @@ const TodoList = ({ onTodoSelect, onViewModeChange, onShowCompletedChange, viewM
   // 使用多选管理hook
   const multiSelect = useMultiSelectManager({
     items: todos,
-    itemType: '待办事项',
+    itemType: t('todos.newTodo'),
     onMultiSelectChange,
     onMultiSelectRefChange
   })
@@ -423,13 +424,13 @@ const TodoList = ({ onTodoSelect, onViewModeChange, onShowCompletedChange, viewM
       
       // 根据重要紧急程度显示优先级
       if (selectedTodo.is_important && selectedTodo.is_urgent) {
-        noteContent += `- 优先级：重要且紧急\n`;
+        noteContent += `- ${t('todos.urgentAndImportant')}\n`;
       } else if (selectedTodo.is_important) {
-        noteContent += `- 优先级：重要但不紧急\n`;
+        noteContent += `- ${t('todos.importantNotUrgent')}\n`;
       } else if (selectedTodo.is_urgent) {
-        noteContent += `- 优先级：紧急但不重要\n`;
+        noteContent += `- ${t('todos.urgentNotImportant')}\n`;
       } else {
-        noteContent += `- 优先级：不重要不紧急\n`;
+        noteContent += `- ${t('todos.neitherUrgentNorImportant')}\n`;
       }
       
       if (selectedTodo.due_date) {
@@ -476,7 +477,7 @@ const TodoList = ({ onTodoSelect, onViewModeChange, onShowCompletedChange, viewM
     try {
       const date = parseISO(dateString);
       if (isToday(date)) {
-        return '今天';
+        return t('common.today');
       }
       return format(date, 'MM月dd日', { locale: dateFnsZhCN });
     } catch (error) {
@@ -518,11 +519,11 @@ const TodoList = ({ onTodoSelect, onViewModeChange, onShowCompletedChange, viewM
     }}>
       <ScheduleIcon sx={{ fontSize: 48, mb: 2, opacity: 0.5 }} />
       <Typography variant="body2">
-        {localSearchQuery ? '没有找到匹配的待办事项' : '暂无待办事项'}
+        {localSearchQuery ? t('common.noResults') : t('todos.noTodos')}
       </Typography>
       {!localSearchQuery && (
         <Typography variant="body2" sx={{ mt: 1, opacity: 0.7 }}>
-          感受宁静
+          {t('todos.noTodosDesc')}
         </Typography>
       )}
     </Box>
@@ -565,11 +566,11 @@ const TodoList = ({ onTodoSelect, onViewModeChange, onShowCompletedChange, viewM
         {/* 排序按钮 */}
         <DropdownMenu
           icon={<SortIcon />}
-          tooltip="排序"
+          tooltip={t('common.sort')}
           options={[
-            { value: 'priority', label: '按优先级', icon: FlagIcon },
-            { value: 'dueDate', label: '按截止时间', icon: ScheduleIcon },
-            { value: 'createdAt', label: '按创建时间', icon: AccessTimeIcon }
+            { value: 'priority', label: t('todos.sortByPriority'), icon: FlagIcon },
+            { value: 'dueDate', label: t('todos.sortByDueDate'), icon: ScheduleIcon },
+            { value: 'createdAt', label: t('todos.sortByCreated'), icon: AccessTimeIcon }
           ]}
           selectedValue={sortBy}
           onSelect={onSortByChange}
@@ -831,20 +832,20 @@ const TodoList = ({ onTodoSelect, onViewModeChange, onShowCompletedChange, viewM
           <ListItemIcon>
             <EditIcon fontSize="small" />
           </ListItemIcon>
-          <ListItemText>编辑</ListItemText>
+          <ListItemText>{t('common.edit')}</ListItemText>
         </MenuItem>
         <MenuItem onClick={handleConvertToNote}>
           <ListItemIcon>
             <NoteIcon fontSize="small" />
           </ListItemIcon>
-          <ListItemText>转换为笔记</ListItemText>
+          <ListItemText>{t('todos.convertToNote')}</ListItemText>
         </MenuItem>
         <Divider />
         <MenuItem onClick={handleDelete}>
           <ListItemIcon>
             <DeleteIcon fontSize="small" />
           </ListItemIcon>
-          <ListItemText>删除</ListItemText>
+          <ListItemText>{t('common.delete')}</ListItemText>
         </MenuItem>
       </Menu>
     </Box>

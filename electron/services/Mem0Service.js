@@ -71,7 +71,7 @@ class Mem0Service extends EventEmitter {
   async initDatabase() {
     try {
       const Database = require('better-sqlite3');
-      
+
       // 复用现有的数据库文件
       if (!fs.existsSync(this.databasePath)) {
         throw new Error(`Database not found: ${this.databasePath}`);
@@ -115,18 +115,36 @@ class Mem0Service extends EventEmitter {
   async initEmbedder() {
     try {
       console.log('[Mem0] Loading embedding model...');
-      
+
       // 动态导入 transformers.js
       const { pipeline, env } = require('@xenova/transformers');
+      const { app } = require('electron');
 
-      // 设置模型缓存路径 - 使用 env 对象而不是环境变量
-      const modelsPath = path.join(this.appDataPath, 'models');
+      // 设置模型缓存路径
+      // 打包后：使用 process.resourcesPath/models（预下载的模型）
+      // 开发环境：使用 appDataPath/models（允许下载）
+      let modelsPath;
+      let localFilesOnly = false;
+
+      if (app.isPackaged) {
+        // 生产环境：使用打包的模型
+        modelsPath = path.join(process.resourcesPath, 'models');
+        localFilesOnly = true; // 禁止下载，只使用本地文件
+        console.log('[Mem0] Using bundled models (production mode)');
+      } else {
+        // 开发环境：允许下载模型
+        modelsPath = path.join(this.appDataPath, 'models');
+        localFilesOnly = false; // 允许下载
+        console.log('[Mem0] Using cache directory (development mode)');
+      }
+
       env.cacheDir = modelsPath;
       env.localModelPath = modelsPath;
-      env.allowRemoteModels = true;  // 允许下载（如果本地没有）
-      env.allowLocalModels = true;   // 优先使用本地模型
+      env.allowRemoteModels = !localFilesOnly;  // 开发环境允许下载
+      env.allowLocalModels = true;
 
-      console.log(`[Mem0] Models cache directory: ${modelsPath}`);
+      console.log(`[Mem0] Models directory: ${modelsPath}`);
+      console.log(`[Mem0] Local files only: ${localFilesOnly}`);
 
       // 初始化嵌入管道（使用轻量级模型）
       // all-MiniLM-L6-v2: 22MB, 384维, 适合语义搜索
@@ -134,16 +152,21 @@ class Mem0Service extends EventEmitter {
         'feature-extraction',
         'Xenova/all-MiniLM-L6-v2',
         {
-          // 强制指定本地路径（可选）
-          local_files_only: false  // 先尝试本地，本地没有才下载
+          local_files_only: localFilesOnly
         }
       );
 
-      console.log('[Mem0] Embedding model loaded');
+      console.log('[Mem0] Embedding model loaded successfully');
 
     } catch (error) {
       console.error('[Mem0] Failed to load embedding model:', error);
-      console.log('[Mem0] Please install: npm install @xenova/transformers');
+
+      if (error.message && error.message.includes('local_files_only')) {
+        console.error('[Mem0] Model not found in bundled resources. Please run: npm run pre-build');
+      } else {
+        console.log('[Mem0] Please install: npm install @xenova/transformers');
+      }
+
       throw error;
     }
   }
@@ -317,7 +340,7 @@ class Mem0Service extends EventEmitter {
 
       console.log('[Mem0] Search results:', scored.length, 'matches');
       if (scored.length > 0) {
-        console.log('[Mem0] Top match:', { 
+        console.log('[Mem0] Top match:', {
           score: (scored[0].score * 100).toFixed(1) + '%',
           preview: scored[0].content.substring(0, 50) + '...'
         })

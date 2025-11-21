@@ -105,7 +105,8 @@ const PluginCard = ({
 	if (!plugin) return null
 
 	const categories = getDisplayCategories(plugin)
-	const description = plugin.shortDescription || plugin.description || '暂未提供描述'
+	// 统一描述字段优先级：shortDescription > description > manifest.description
+	const description = plugin.shortDescription || plugin.description || plugin.manifest?.description || '暂未提供描述'
 
 	return (
 		<Card
@@ -148,8 +149,8 @@ const PluginCard = ({
 							{plugin.sourceType && (
 								<Chip
 									size="small"
-									label={plugin.sourceType === 'development' ? 
-										(plugin.sourceLabel === 'examples' ? '示例' : '本地') : 
+									label={plugin.sourceType === 'development' ?
+										(plugin.sourceLabel === 'examples' ? '示例' : '本地') :
 										'已安装'
 									}
 									color={plugin.sourceType === 'development' ? 'secondary' : 'default'}
@@ -344,7 +345,7 @@ const PluginDetailDrawer = ({
 				</Stack>
 
 				<Typography variant="body1" color="text.secondary">
-					{plugin.manifest?.description || plugin.description || plugin.shortDescription || '暂无详细描述'}
+					{plugin.shortDescription || plugin.description || plugin.manifest?.description || '暂无详细描述'}
 				</Typography>
 
 				<Stack direction="row" spacing={1} sx={{ flexWrap: 'wrap', gap: 1 }}>
@@ -750,19 +751,19 @@ const PluginStore = () => {
 
 	const selectedPlugin = useMemo(() => {
 		if (!pluginStoreSelectedPluginId) return null
-		
+
 		// 从可用列表查找（包含完整的市场信息，如 icon、description 等）
 		const available = availablePlugins.find((plugin) => plugin.id === pluginStoreSelectedPluginId)
-		
+
 		// 从本地插件列表查找
 		const local = localPlugins.find((plugin) => plugin.id === pluginStoreSelectedPluginId)
-		
+
 		// 从已安装列表查找（包含运行时状态）
 		const installed = installedPlugins.find((plugin) => plugin.id === pluginStoreSelectedPluginId)
-		
+
 		// 如果都不存在，返回 null
 		if (!available && !local && !installed) return null
-		
+
 		// 优先使用本地插件信息（本地开发模式）
 		if (local) {
 			return {
@@ -776,7 +777,7 @@ const PluginStore = () => {
 				})
 			}
 		}
-		
+
 		// 如果已安装，合并市场信息和安装状态
 		if (installed && available) {
 			return {
@@ -789,7 +790,7 @@ const PluginStore = () => {
 				manifest: installed.manifest || available.manifest
 			}
 		}
-		
+
 		// 只在已安装列表中（不在市场列表，可能是本地插件）
 		if (installed) {
 			return {
@@ -799,7 +800,7 @@ const PluginStore = () => {
 				installed: true
 			}
 		}
-		
+
 		// 只在市场列表中（未安装）
 		return {
 			...available,
@@ -843,40 +844,40 @@ const PluginStore = () => {
 				</Typography>
 				<List dense>
 					<ListItem>
-						<ListItemText 
-							primary="开发环境插件" 
+						<ListItemText
+							primary="开发环境插件"
 							secondary="plugins/examples 和 plugins/local 目录（用于开发和测试）"
 						/>
 					</ListItem>
 					<ListItem>
-						<ListItemText 
-							primary="用户安装插件" 
+						<ListItemText
+							primary="用户安装插件"
 							secondary="用户数据目录的插件文件夹（手动安装的插件）"
 						/>
 					</ListItem>
 					<ListItem>
-						<ListItemText 
-							primary="使用方法" 
+						<ListItemText
+							primary="使用方法"
 							secondary="创建插件目录，编写 manifest.json 和入口文件，然后点击刷新"
 						/>
 					</ListItem>
 				</List>
-			<Stack direction="row" spacing={2} sx={{ mt: 2 }}>
-				<Button
-					variant="outlined"
-					onClick={() => handleRefresh()}
-					startIcon={<RefreshRounded />}
-				>
-					刷新本地插件
-				</Button>
-				<Button
-					variant="outlined"
-					onClick={() => handleOpenPluginsDirectory()}
-					startIcon={<FolderOpenRounded />}
-				>
-					打开插件目录
-				</Button>
-			</Stack>
+				<Stack direction="row" spacing={2} sx={{ mt: 2 }}>
+					<Button
+						variant="outlined"
+						onClick={() => handleRefresh()}
+						startIcon={<RefreshRounded />}
+					>
+						刷新本地插件
+					</Button>
+					<Button
+						variant="outlined"
+						onClick={() => handleOpenPluginsDirectory()}
+						startIcon={<FolderOpenRounded />}
+					>
+						打开插件目录
+					</Button>
+				</Stack>
 			</Box>
 
 			{/* 本地插件加载状态 */}

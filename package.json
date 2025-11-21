@@ -10,7 +10,8 @@
     "preview": "vite preview",
     "electron": "electron .",
     "electron-dev": "concurrently \"npm run dev\" \"wait-on http://localhost:5174 && cross-env NODE_ENV=development electron .\"",
-    "electron-build": "npm run build && electron-builder",
+    "pre-build": "node scripts/pre-download-models.js",
+    "electron-build": "npm run pre-build && npm run build && electron-builder",
     "repair-db": "node scripts/repair-database.js",
     "check-db": "node scripts/check-database.js",
     "test": "echo \"Error: no test specified\" && exit 1"
@@ -42,6 +43,7 @@
     "dotenv": "^17.2.3",
     "googleapis": "^165.0.0",
     "https-proxy-agent": "^7.0.6",
+    "i18next": "^25.6.3",
     "ical.js": "^2.2.1",
     "lucide-react": "^0.542.0",
     "markdown-it": "^14.1.0",
@@ -50,6 +52,7 @@
     "markdown-it-mark": "^4.0.0",
     "react": "^19.1.1",
     "react-dom": "^19.1.1",
+    "react-i18next": "^16.3.5",
     "react-markdown": "^10.1.0",
     "react-window": "^1.8.10",
     "rehype-highlight": "^7.0.2",
@@ -104,8 +107,8 @@
         "to": "plugins/registry.json"
       },
       {
-        "from": "node_modules/@xenova/transformers/dist/",
-        "to": "models/transformers/",
+        "from": "models/",
+        "to": "models/",
         "filter": [
           "**/*"
         ]

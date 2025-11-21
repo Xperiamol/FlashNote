@@ -415,6 +415,24 @@ contextBridge.exposeInMainWorld('electronAPI', {
     chat: (messages, options) => ipcRenderer.invoke('ai:chat', messages, options)
   },
 
+  // STT (Speech-to-Text) 相关 API
+  stt: {
+    // 获取STT配置
+    getConfig: () => ipcRenderer.invoke('stt:get-config'),
+    
+    // 保存STT配置
+    saveConfig: (config) => ipcRenderer.invoke('stt:save-config', config),
+    
+    // 测试连接
+    testConnection: (config) => ipcRenderer.invoke('stt:test-connection', config),
+    
+    // 获取支持的提供商列表
+    getProviders: () => ipcRenderer.invoke('stt:get-providers'),
+    
+    // 语音转文字
+    transcribe: (audioFile, options) => ipcRenderer.invoke('stt:transcribe', { audioFile, options })
+  },
+
   // 插件商店与插件运行时 API
   pluginStore: {
     listAvailable: () => ipcRenderer.invoke('plugin-store:list-available'),

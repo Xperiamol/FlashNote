@@ -1,6 +1,6 @@
 {
   "id": "pattern-theme",
-  "name": "花纹主题",
+  "name": "Pattern Theme (Built-in)",
   "version": "1.0.0",
   "description": "为 FlashNote 添加炫酷的几何花纹背景主题，支持多种花纹样式切换",
   "author": {
@@ -13,6 +13,7 @@
   "entry": "index.js",
   "permissions": [
     "ui:theme",
+    "ui:open-window",
     "storage:read",
     "storage:write",
     "notifications:show"
@@ -23,21 +24,27 @@
       "title": "切换花纹主题",
       "description": "启用或禁用背景花纹效果",
       "icon": "palette",
-      "surfaces": ["command-palette"]
+      "surfaces": [
+        "command-palette"
+      ]
     },
     {
       "id": "pattern-theme.next-style",
       "title": "下一个花纹样式",
       "description": "切换到下一个花纹样式",
       "icon": "navigate_next",
-      "surfaces": ["command-palette"]
+      "surfaces": [
+        "command-palette"
+      ]
     },
     {
       "id": "pattern-theme.settings",
       "title": "花纹主题设置",
       "description": "调整花纹的透明度和样式",
       "icon": "tune",
-      "surfaces": ["command-palette"]
+      "surfaces": [
+        "command-palette"
+      ]
     }
   ],
   "minAppVersion": "2.1.0"

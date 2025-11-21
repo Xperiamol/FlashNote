@@ -45,7 +45,8 @@ const ALLOWED_PERMISSIONS = new Set([
 	// 分析和扩展
 	'analytics:read',
 	'markdown:extend',
-	'ai:inference'
+	'ai:inference',
+	'stt:transcribe'
 ])
 
 const STATE_VERSION = 1
@@ -395,6 +396,16 @@ class PluginManager extends EventEmitter {
 			.filter((entry) => entry.isDirectory() && entry.name !== 'storage')
 			.map(async (entry) => {
 				const pluginPath = path.join(this.pluginsDir, entry.name)
+				
+				// 检查manifest.json是否存在
+				const manifestPath = path.join(pluginPath, 'manifest.json')
+				const manifestExists = await this.pathExists(manifestPath)
+				
+				if (!manifestExists) {
+					this.logger.warn(`[PluginManager] 跳过无效插件目录（缺少manifest.json）: ${entry.name}`)
+					return { manifest: null, pluginPath }
+				}
+				
 				const manifest = await this.readManifestFromPath(pluginPath)
 				return { manifest, pluginPath }
 			})
@@ -447,10 +458,18 @@ class PluginManager extends EventEmitter {
 			}
 		}
 
-		// 并行启动所有已启用的插件
+		// 清理不存在的插件状态
+		for (const [pluginId, state] of Array.from(this.pluginStates.entries())) {
+			if (!this.installedPlugins.has(pluginId)) {
+				this.logger.warn(`[PluginManager] 清理不存在的插件状态: ${pluginId}`)
+				this.pluginStates.delete(pluginId)
+			}
+		}
+
+		// 并行启动所有已启用且已安装的插件
 		const startTasks = []
 		for (const [pluginId, state] of this.pluginStates.entries()) {
-			if (state.enabled) {
+			if (state.enabled && this.installedPlugins.has(pluginId)) {
 				startTasks.push(
 					this.startPlugin(pluginId).catch((error) => {
 						this.logger.error(`[PluginManager] 启动插件 ${pluginId} 失败:`, error)
@@ -458,6 +477,10 @@ class PluginManager extends EventEmitter {
 						state.lastError = error.message
 					})
 				)
+			} else if (state.enabled && !this.installedPlugins.has(pluginId)) {
+				this.logger.warn(`[PluginManager] 插件 ${pluginId} 已启用但未安装，跳过启动`)
+				state.enabled = false
+				state.runtimeStatus = 'stopped'
 			}
 		}
 
@@ -1719,6 +1742,35 @@ class PluginManager extends EventEmitter {
 						result = { success: true, styleId }
 					} else {
 						throw new Error(`未知的主题 RPC 动作: ${action}`)
+					}
+					break
+				}
+				case 'stt': {
+					this.assertPermission(pluginId, 'stt:transcribe')
+					const sttService = this.services.sttService
+					if (!sttService) {
+						throw new Error('STT 服务不可用或未配置')
+					}
+					if (action === 'transcribe') {
+						const { audioFile, options } = payload || {}
+						if (!audioFile) {
+							throw new Error('audioFile 是必需的')
+						}
+						const response = await sttService.transcribe(audioFile, options)
+						result = response
+					} else if (action === 'isAvailable') {
+						const configResult = await sttService.getConfig()
+						if (!configResult.success) {
+							throw new Error(configResult.error || '获取 STT 配置失败')
+						}
+						const config = configResult.data
+						result = { 
+							available: Boolean(config.enabled && config.apiKey),
+							provider: config.provider || 'unknown',
+							model: config.model || 'unknown'
+						}
+					} else {
+						throw new Error(`未知的 STT RPC 动作: ${action}`)
 					}
 					break
 				}

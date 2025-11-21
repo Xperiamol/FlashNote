@@ -1,5 +1,6 @@
-import React from 'react';
-import { Box, IconButton, Tooltip } from '@mui/material';
+import React, { useState } from 'react';
+import { useTranslation } from '../utils/i18n';
+import { Box, IconButton, Tooltip, Typography, Zoom } from '@mui/material';
 import {
   StickyNote2,
   CheckBox,
@@ -8,15 +9,19 @@ import {
   Person,
   Folder,
   Store,
-  MenuBook
+  MenuBook,
+  WavingHand
 } from '@mui/icons-material';
 import { useTheme } from '@mui/material/styles';
 import { useStore } from '../store/useStore';
 import { createTransitionString, ANIMATIONS } from '../utils/animationConfig';
 
 const Sidebar = ({ open = true, onClose }) => {
+  const { t } = useTranslation();
   const theme = useTheme();
-  const { currentView, setCurrentView, userAvatar } = useStore();
+  const { currentView, setCurrentView, userAvatar, userName } = useStore();
+  const [showWelcome, setShowWelcome] = useState(false);
+  const [avatarHover, setAvatarHover] = useState(false);
 
   // 主侧边栏始终显示，不受open prop控制
 
@@ -24,38 +29,61 @@ const Sidebar = ({ open = true, onClose }) => {
     {
       id: 'notes',
       icon: <StickyNote2 />,
-      label: '笔记',
-      tooltip: '笔记管理'
+      label: t('common.notes'),
+      tooltip: t('sidebar.notesTooltip')
     },
     {
       id: 'todo',
       icon: <CheckBox />,
-      label: 'TODO',
-      tooltip: '待办事项'
+      label: t('common.todos'),
+      tooltip: t('sidebar.todosTooltip')
     },
     {
       id: 'calendar',
       icon: <CalendarToday />,
-      label: '日历',
-      tooltip: '日历视图'
+      label: t('common.calendar'),
+      tooltip: t('sidebar.calendarTooltip')
     },
     {
       id: 'plugins',
       icon: <Store />,
-      label: '插件商店',
-      tooltip: '插件商店'
+      label: t('common.plugins'),
+      tooltip: t('sidebar.pluginsTooltip')
     },
     {
       id: 'profile',
       icon: <Person />,
-      label: '个人',
-      tooltip: '个人中心'
+      label: t('sidebar.profile'),
+      tooltip: t('sidebar.profileTooltip')
     }
   ];
 
   const handleMenuClick = (itemId) => {
     setCurrentView(itemId);
   };
+
+  // 处理头像点击
+  const handleAvatarClick = () => {
+    setShowWelcome(true);
+    setTimeout(() => {
+      setShowWelcome(false);
+    }, 3000);
+  };
+
+  // 获取当前时间的问候语
+  const getGreeting = () => {
+    const hour = new Date().getHours();
+    if (hour < 6) return t('profile.greetingNight');
+    if (hour < 9) return t('profile.greetingMorning');
+    if (hour < 12) return t('profile.greetingMorning');
+    if (hour < 14) return t('profile.greetingNoon');
+    if (hour < 18) return t('profile.greetingNoon');
+    if (hour < 22) return t('profile.greetingEvening');
+    return t('profile.greetingNight');
+  };
+
+  // 获取显示名称
+  const displayName = userName || t('profile.defaultUser');
 
   return (
     <Box
@@ -85,34 +113,89 @@ const Sidebar = ({ open = true, onClose }) => {
       {/* 头像区域 */}
       <Box
         sx={{
-          width: '40px',
-          height: '40px',
-          borderRadius: '8px',
-          backgroundColor: userAvatar ? 'transparent' : theme.palette.primary.main,
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'center',
+          position: 'relative',
           marginBottom: '16px',
-          background: userAvatar ? 'none' : `linear-gradient(135deg, ${theme.palette.primary.main} 0%, ${theme.palette.primary.dark} 100%)`,
-          boxShadow: '0 2px 8px rgba(0,0,0,0.2)',
-          overflow: 'hidden',
         }}
       >
-        {userAvatar ? (
+        <Box
+          onClick={handleAvatarClick}
+          onMouseEnter={() => setAvatarHover(true)}
+          onMouseLeave={() => setAvatarHover(false)}
+          sx={{
+            width: '40px',
+            height: '40px',
+            borderRadius: '8px',
+            backgroundColor: userAvatar ? 'transparent' : theme.palette.primary.main,
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            background: userAvatar ? 'none' : `linear-gradient(135deg, ${theme.palette.primary.main} 0%, ${theme.palette.primary.dark} 100%)`,
+            boxShadow: avatarHover ? '0 4px 12px rgba(0,0,0,0.3)' : '0 2px 8px rgba(0,0,0,0.2)',
+            overflow: 'hidden',
+            cursor: 'pointer',
+            transition: createTransitionString(ANIMATIONS.button),
+            transform: avatarHover ? 'scale(1.1) rotate(5deg)' : 'scale(1)',
+            '&:active': {
+              transform: 'scale(0.95)',
+            },
+          }}
+        >
+          {userAvatar ? (
+            <Box
+              component="img"
+              src={userAvatar}
+              alt="用户头像"
+              sx={{
+                width: '100%',
+                height: '100%',
+                objectFit: 'cover',
+                borderRadius: '8px',
+              }}
+            />
+          ) : (
+            <Person sx={{ color: 'white', fontSize: '20px' }} />
+          )}
+        </Box>
+
+        {/* 欢迎消息气泡 */}
+        <Zoom in={showWelcome}>
           <Box
-            component="img"
-            src={userAvatar}
-            alt="用户头像"
             sx={{
-              width: '100%',
-              height: '100%',
-              objectFit: 'cover',
-              borderRadius: '8px',
+              position: 'absolute',
+              top: '0%',
+              left: '60px',
+              transform: 'translateY(-50%)',
+              bgcolor: theme.palette.mode === 'dark' ? '#2d2d2d' : '#fff',
+              color: theme.palette.mode === 'dark' ? '#fff' : '#000',
+              px: 2,
+              py: 1.5,
+              borderRadius: 2,
+              boxShadow: 3,
+              whiteSpace: 'nowrap',
+              border: `1px solid ${theme.palette.divider}`,
+              zIndex: 1000,
+              minWidth: '180px',
+              '&::before': {
+                content: '""',
+                position: 'absolute',
+                left: -8,
+                top: '12px',
+                width: 0,
+                height: 0,
+                borderTop: '8px solid transparent',
+                borderBottom: '8px solid transparent',
+                borderRight: `8px solid ${theme.palette.mode === 'dark' ? '#2d2d2d' : '#fff'}`,
+              },
             }}
-          />
-        ) : (
-          <Person sx={{ color: 'white', fontSize: '20px' }} />
-        )}
+          >
+            <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+              <WavingHand sx={{ fontSize: 18, color: theme.palette.primary.main }} />
+              <Typography variant="body2" sx={{ fontWeight: 600 }}>
+                {getGreeting()}，{displayName}！
+              </Typography>
+            </Box>
+          </Box>
+        </Zoom>
       </Box>
 
       {/* 分隔线 */}
@@ -202,7 +285,7 @@ const Sidebar = ({ open = true, onClose }) => {
             opacity: 0.5,
           }}
         />
-        <Tooltip title="应用设置" placement="right">
+        <Tooltip title={t('sidebar.settingsTooltip')} placement="right">
           <IconButton
             onClick={() => handleMenuClick('settings')}
             sx={{

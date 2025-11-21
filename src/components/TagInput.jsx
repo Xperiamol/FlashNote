@@ -239,14 +239,11 @@ const TagInput = ({
         noteId
       });
       
-      console.log('[TagInput] 插件返回结果:', result);
-      
       // 处理返回的标签
       if (result?.data?.allTags && Array.isArray(result.data.allTags)) {
         const suggestedTags = result.data.allTags;
         const allTags = [...new Set([...tags, ...suggestedTags])];
         const limitedTags = allTags.slice(0, maxTags);
-        console.log('[TagInput] 合并后的标签:', limitedTags);
         setTags(limitedTags);
         onChange?.(formatTags(limitedTags));
       }

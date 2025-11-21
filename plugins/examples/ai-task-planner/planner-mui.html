@@ -533,7 +533,7 @@
 			if (emotionCache && CacheProvider && emotionCache.sheet && emotionCache.registered) {
 				console.log('[Planner] ✅ 使用 CacheProvider 包裹应用，样式将注入到 iframe')
 				root.render(
-					React.createElement(CacheProvider, { cache: emotionCache },
+					React.createElement(CacheProvider, { value: emotionCache },
 						React.createElement(App)
 					)
 				)

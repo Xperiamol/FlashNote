@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useCallback } from 'react';
+import { useTranslation } from '../utils/i18n';
 import {
   Box,
   Typography,
@@ -59,6 +60,7 @@ const {
 } = appLocale;
 
 const TodoView = ({ viewMode, showCompleted, onViewModeChange, onShowCompletedChange, onRefresh, onTodoSelect }) => {
+  const { t } = useTranslation();
   const theme = useTheme();
   const effectiveViewMode = viewMode === 'list' ? 'focus' : viewMode;
   const [todos, setTodos] = useState([]);
@@ -289,8 +291,8 @@ const TodoView = ({ viewMode, showCompleted, onViewModeChange, onShowCompletedCh
     const quadrants = [
       {
         key: 'urgent_important',
-        title: '重要且紧急',
-        subtitle: '立即处理',
+        title: t('quadrant.urgentImportant'),
+        subtitle: t('quadrant.urgentImportantDesc'),
         color: '#f44336',
         bgGradient: theme.palette.mode === 'dark'
           ? 'linear-gradient(135deg, #2d1b1b 0%, #3d2626 100%)'
@@ -302,8 +304,8 @@ const TodoView = ({ viewMode, showCompleted, onViewModeChange, onShowCompletedCh
       },
       {
         key: 'not_urgent_important',
-        title: '重要不紧急',
-        subtitle: '计划安排',
+        title: t('quadrant.importantNotUrgent'),
+        subtitle: t('quadrant.importantNotUrgentDesc'),
         color: '#ff9800',
         bgGradient: theme.palette.mode === 'dark'
           ? 'linear-gradient(135deg, #2d2419 0%, #3d3122 100%)'
@@ -315,8 +317,8 @@ const TodoView = ({ viewMode, showCompleted, onViewModeChange, onShowCompletedCh
       },
       {
         key: 'urgent_not_important',
-        title: '紧急不重要',
-        subtitle: '委托他人',
+        title: t('quadrant.urgentNotImportant'),
+        subtitle: t('quadrant.urgentNotImportantDesc'),
         color: '#2196f3',
         bgGradient: theme.palette.mode === 'dark'
           ? 'linear-gradient(135deg, #1a2332 0%, #243242 100%)'
@@ -328,8 +330,8 @@ const TodoView = ({ viewMode, showCompleted, onViewModeChange, onShowCompletedCh
       },
       {
         key: 'not_urgent_not_important',
-        title: '不重要不紧急',
-        subtitle: '有空再做',
+        title: t('quadrant.neitherUrgentNorImportant'),
+        subtitle: t('quadrant.neitherUrgentNorImportantDesc'),
         color: '#9e9e9e',
         bgGradient: theme.palette.mode === 'dark'
           ? 'linear-gradient(135deg, #262626 0%, #333333 100%)'
@@ -409,7 +411,7 @@ const TodoView = ({ viewMode, showCompleted, onViewModeChange, onShowCompletedCh
                   }
                   subheader={
                     <Typography variant="body2" sx={{ color: 'text.secondary' }}>
-                      {quadrant.subtitle} • {quadrant.todos.length} 项
+                      {quadrant.subtitle} • {t('quadrant.itemsCount', { count: quadrant.todos.length })}
                     </Typography>
                   }
                   sx={{

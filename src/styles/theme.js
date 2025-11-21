@@ -1,178 +1,79 @@
-import { createTheme } from '@mui/material/styles'
+import { createTheme } from '@mui/material/styles';
 
-// 创建浅色主题
-export const createLightTheme = (primaryColor = '#1976d2') => createTheme({
-  palette: {
-    mode: 'light',
-    primary: {
-      main: primaryColor,
-    },
-    secondary: {
-      main: '#dc004e',
-    },
-    background: {
-      default: '#fafafa',
-      paper: '#ffffff',
-    },
-    text: {
-      primary: '#333333',
-      secondary: '#666666',
-    },
-  },
-  typography: {
-    fontFamily: [
-      '-apple-system',
-      'BlinkMacSystemFont',
-      '"Segoe UI"',
-      'Roboto',
-      '"Helvetica Neue"',
-      'Arial',
-      'sans-serif',
-      '"Apple Color Emoji"',
-      '"Segoe UI Emoji"',
-      '"Segoe UI Symbol"',
-    ].join(','),
-    h1: {
-      fontSize: '2.5rem',
-      fontWeight: 600,
-    },
-    h2: {
-      fontSize: '2rem',
-      fontWeight: 600,
-    },
-    h3: {
-      fontSize: '1.75rem',
-      fontWeight: 600,
-    },
-    h4: {
-      fontSize: '1.5rem',
-      fontWeight: 600,
-    },
-    h5: {
-      fontSize: '1.25rem',
-      fontWeight: 600,
-    },
-    h6: {
-      fontSize: '1rem',
-      fontWeight: 600,
-    },
-  },
-  components: {
-    MuiButton: {
-      styleOverrides: {
-        root: {
-          textTransform: 'none', // 禁用按钮文字大写转换
-          borderRadius: 8,
-        },
-      },
-    },
-    MuiPaper: {
-      styleOverrides: {
-        root: {
-          borderRadius: 12,
-        },
-      },
-    },
-    MuiCard: {
-      styleOverrides: {
-        root: {
-          borderRadius: 12,
-          boxShadow: '0 2px 8px rgba(0,0,0,0.1)',
-        },
-      },
-    },
-  },
-})
+/**
+ * Create the application theme based on mode and primary color
+ * @param {string} mode - 'light' or 'dark'
+ * @param {string} primaryColor - Hex color string
+ * @returns {object} MUI Theme object
+ */
+export const createAppTheme = (mode = 'light', primaryColor = '#1976d2') => {
+    // Ensure mode is valid
+    const validMode = mode === 'dark' ? 'dark' : 'light';
 
-// 创建深色主题
-export const createDarkTheme = (primaryColor = '#90caf9') => createTheme({
-  palette: {
-    mode: 'dark',
-    primary: {
-      main: primaryColor,
-    },
-    secondary: {
-      main: '#f48fb1',
-    },
-    background: {
-      default: '#121212',
-      paper: '#1e1e1e',
-    },
-    text: {
-      primary: '#ffffff',
-      secondary: '#b3b3b3',
-    },
-  },
-  typography: {
-    fontFamily: [
-      '-apple-system',
-      'BlinkMacSystemFont',
-      '"Segoe UI"',
-      'Roboto',
-      '"Helvetica Neue"',
-      'Arial',
-      'sans-serif',
-      '"Apple Color Emoji"',
-      '"Segoe UI Emoji"',
-      '"Segoe UI Symbol"',
-    ].join(','),
-    h1: {
-      fontSize: '2.5rem',
-      fontWeight: 600,
-    },
-    h2: {
-      fontSize: '2rem',
-      fontWeight: 600,
-    },
-    h3: {
-      fontSize: '1.75rem',
-      fontWeight: 600,
-    },
-    h4: {
-      fontSize: '1.5rem',
-      fontWeight: 600,
-    },
-    h5: {
-      fontSize: '1.25rem',
-      fontWeight: 600,
-    },
-    h6: {
-      fontSize: '1rem',
-      fontWeight: 600,
-    },
-  },
-  components: {
-    MuiButton: {
-      styleOverrides: {
-        root: {
-          textTransform: 'none',
-          borderRadius: 8,
+    return createTheme({
+        palette: {
+            mode: validMode,
+            primary: {
+                main: primaryColor,
+            },
+            background: {
+                default: validMode === 'dark' ? '#121212' : '#f5f5f5',
+                paper: validMode === 'dark' ? '#1e1e1e' : '#ffffff',
+            },
         },
-      },
-    },
-    MuiPaper: {
-      styleOverrides: {
-        root: {
-          borderRadius: 12,
-          backgroundImage: 'none', // 移除深色主题的默认渐变背景
+        typography: {
+            fontFamily: [
+                '-apple-system',
+                'BlinkMacSystemFont',
+                '"Segoe UI"',
+                'Roboto',
+                '"Helvetica Neue"',
+                'Arial',
+                'sans-serif',
+                '"Apple Color Emoji"',
+                '"Segoe UI Emoji"',
+                '"Segoe UI Symbol"',
+            ].join(','),
         },
-      },
-    },
-    MuiCard: {
-      styleOverrides: {
-        root: {
-          borderRadius: 12,
-          boxShadow: '0 2px 8px rgba(0,0,0,0.3)',
-          backgroundImage: 'none',
+        components: {
+            MuiCssBaseline: {
+                styleOverrides: {
+                    body: {
+                        scrollbarColor: validMode === 'dark' ? '#6b6b6b #2b2b2b' : '#959595 #f5f5f5',
+                        '&::-webkit-scrollbar, & *::-webkit-scrollbar': {
+                            backgroundColor: 'transparent',
+                            width: '8px',
+                            height: '8px',
+                        },
+                        '&::-webkit-scrollbar-thumb, & *::-webkit-scrollbar-thumb': {
+                            borderRadius: '8px',
+                            backgroundColor: validMode === 'dark' ? '#6b6b6b' : '#959595',
+                            minHeight: '24px',
+                            border: '2px solid transparent',
+                            backgroundClip: 'content-box',
+                        },
+                        '&::-webkit-scrollbar-thumb:focus, & *::-webkit-scrollbar-thumb:focus': {
+                            backgroundColor: validMode === 'dark' ? '#7b7b7b' : '#858585',
+                        },
+                        '&::-webkit-scrollbar-thumb:active, & *::-webkit-scrollbar-thumb:active': {
+                            backgroundColor: validMode === 'dark' ? '#8b8b8b' : '#757575',
+                        },
+                        '&::-webkit-scrollbar-thumb:hover, & *::-webkit-scrollbar-thumb:hover': {
+                            backgroundColor: validMode === 'dark' ? '#8b8b8b' : '#757575',
+                        },
+                        '&::-webkit-scrollbar-corner, & *::-webkit-scrollbar-corner': {
+                            backgroundColor: 'transparent',
+                        },
+                    },
+                },
+            },
+            MuiButton: {
+                styleOverrides: {
+                    root: {
+                        textTransform: 'none',
+                    },
+                },
+            },
         },
-      },
-    },
-  },
-})
-
-// 根据模式和主色调创建主题
-export const createAppTheme = (mode = 'light', primaryColor) => {
-  return mode === 'dark' 
-    ? createDarkTheme(primaryColor)
-    : createLightTheme(primaryColor)
-}
+    });
+};

@@ -17,8 +17,6 @@ import {
   Settings as SettingsIcon,
   Delete as DeleteIcon,
   Restore as RestoreIcon,
-  Brightness4 as DarkModeIcon,
-  Brightness7 as LightModeIcon,
   Menu as MenuIcon,
   Close as CloseIcon,
   Sort as SortIcon,
@@ -35,6 +33,7 @@ import DropdownMenu from './DropdownMenu'
 import { executePluginCommand } from '../api/pluginAPI'
 import { getPluginCommandIcon } from '../utils/pluginCommandUtils.jsx'
 import { createTransitionString, ANIMATIONS } from '../utils/animationConfig'
+import { t } from '../utils/i18n'
 
 const Toolbar = ({ 
   onToggleSidebar, 
@@ -60,8 +59,6 @@ const Toolbar = ({
   const {
     createNote,
     notes,
-    theme,
-    toggleTheme,
     setSelectedNoteId
   } = useStore()
   const pluginCommands = useStore((state) => state.pluginCommands)
@@ -88,7 +85,7 @@ const Toolbar = ({
   const handleCreateNote = async () => {
     try {
       const result = await createNote({
-        title: '新笔记',
+        title: t('notes.untitled'),
         content: '',
         category: '',
         tags: []
@@ -105,7 +102,7 @@ const Toolbar = ({
   const handleQuickInput = async () => {
     try {
       const result = await createNote({
-        title: '快速笔记',
+        title: t('notes.untitled'),
         content: '',
         category: '',
         tags: []
@@ -124,7 +121,7 @@ const Toolbar = ({
     options: [
       {
         value: 'preferences',
-        label: '偏好设置',
+        label: t('settings.general'),
         icon: SettingsIcon
       }
     ],
@@ -221,7 +218,7 @@ const Toolbar = ({
       case 'notes':
         return {
           title: 'FlashNote',
-          createButtonText: '新建',
+          createButtonText: t('common.new'),
           createAction: handleCreateNote,
           showDeletedButton: true,
           showSidebarToggle: true,
@@ -229,24 +226,24 @@ const Toolbar = ({
         };
       case 'todo':
         return {
-          title: '待办事项',
-          createButtonText: '新建',
+          title: t('sidebar.todos'),
+          createButtonText: t('common.new'),
           createAction: handleCreateTodo,
           showDeletedButton: false,
           showSidebarToggle: true,
           customButtons: [
             {
               type: 'viewToggle',
-              label: '视图切换',
+              label: t('toolbar.view'),
               position: 'center',
               options: [
-                { value: 'quadrant', label: '四象限' },
-                { value: 'focus', label: '专注' }
+                { value: 'quadrant', label: t('todos.quadrantView') },
+                { value: 'focus', label: t('todos.listView') }
               ]
             },
             {
               type: 'checkbox',
-              label: '显示已完成',
+              label: t('todos.showCompleted'),
               position: 'left',
               key: 'showCompleted'
             }
@@ -255,8 +252,8 @@ const Toolbar = ({
         };
       case 'calendar':
         return {
-          title: '日历',
-          createButtonText: '新建事件',
+          title: t('sidebar.calendar'),
+          createButtonText: t('common.new'),
           createAction: handleCreateEvent,
           showDeletedButton: false,
           showSidebarToggle: true,
@@ -267,14 +264,14 @@ const Toolbar = ({
             },
             {
               type: 'checkbox',
-              label: '显示已完成',
+              label: t('todos.showCompleted'),
               key: 'showCompleted'
             }
           ]
         };
       case 'settings':
         return {
-          title: '设置',
+          title: t('sidebar.settings'),
           createButtonText: null,
           createAction: null,
           showDeletedButton: false,
@@ -282,7 +279,7 @@ const Toolbar = ({
         };
       case 'plugins':
         return {
-          title: '插件',
+          title: t('sidebar.plugins'),
           createButtonText: null,
           createAction: null,
           showDeletedButton: false,
@@ -290,7 +287,7 @@ const Toolbar = ({
         };
       case 'profile':
         return {
-          title: '个人中心',
+          title: t('common.profile'),
           createButtonText: null,
           createAction: null,
           showDeletedButton: false,
@@ -299,7 +296,7 @@ const Toolbar = ({
       default:
         return {
           title: 'FlashNote',
-          createButtonText: '新建',
+          createButtonText: t('common.new'),
           createAction: handleCreateNote,
           showDeletedButton: false,
           showSidebarToggle: true
@@ -321,7 +318,7 @@ const Toolbar = ({
         {/* 左侧按钮组 */}
         <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
           {viewConfig.showSidebarToggle && (
-            <Tooltip title={sidebarOpen ? '隐藏侧边栏' : '显示侧边栏'}>
+            <Tooltip title={sidebarOpen ? t('common.close') : t('common.open')}>
               <IconButton onClick={onToggleSidebar}>
                 {sidebarOpen ? <CloseIcon /> : <MenuIcon />}
               </IconButton>
@@ -348,7 +345,7 @@ const Toolbar = ({
       
       {/* 快速输入按钮（仅笔记视图） */}
       {viewConfig.quickInputButton && (
-        <Tooltip title="快速输入 - 新建空白笔记并在独立窗口打开">
+        <Tooltip title={t('toolbar.newNote')}>
           <Button
             variant="outlined"
             startIcon={<EditNoteIcon />}
@@ -359,7 +356,7 @@ const Toolbar = ({
               minHeight: '40px'
             }}
           >
-            快速输入
+            {t('toolbar.newNote')}
           </Button>
         </Tooltip>
       )}
@@ -432,7 +429,7 @@ const Toolbar = ({
           } else if (button.type === 'calendarNavigation') {
             return (
               <Box key={index} sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-                <Tooltip title="上个月">
+                <Tooltip title={t('common.previous')}>
                   <IconButton 
                     onClick={goToPreviousMonth} 
                     size="small"
@@ -472,12 +469,12 @@ const Toolbar = ({
                   >
                     {button.currentDate ? 
                       `${button.currentDate.getFullYear()}年${button.currentDate.getMonth() + 1}月` : 
-                      '日历'
+                      t('sidebar.calendar')
                     }
                   </Typography>
                 </Box>
                 
-                <Tooltip title="下个月">
+                <Tooltip title={t('common.next')}>
                   <IconButton 
                     onClick={goToNextMonth} 
                     size="small"
@@ -497,7 +494,7 @@ const Toolbar = ({
                   </IconButton>
                 </Tooltip>
                 
-                <Tooltip title="回到今天">
+                <Tooltip title={t('common.today')}>
                   <IconButton 
                     onClick={goToToday} 
                     size="small"
@@ -635,7 +632,7 @@ const Toolbar = ({
         
         {/* 回收站按钮 - 仅在笔记视图显示 */}
         {viewConfig.showDeletedButton && (
-          <Tooltip title={showDeleted ? '显示正常笔记' : '显示回收站'}>
+          <Tooltip title={showDeleted ? t('common.restore') : t('common.delete')}>
             <IconButton onClick={onToggleDeleted}>
               <Badge badgeContent={deletedNotesCount} color="error">
                 {showDeleted ? <RestoreIcon /> : <DeleteIcon />}
@@ -643,12 +640,6 @@ const Toolbar = ({
             </IconButton>
           </Tooltip>
         )}
-
-        <Tooltip title={theme === 'dark' ? '切换到浅色模式' : '切换到深色模式'}>
-          <IconButton onClick={toggleTheme}>
-            {theme === 'dark' ? <LightModeIcon /> : <DarkModeIcon />}
-          </IconButton>
-        </Tooltip>
 
         {/* 暂时隐藏设置按钮 */}
         {/* <DropdownMenu

@@ -75,7 +75,7 @@ const TagManager = ({ open, onClose }) => {
       }
     } catch (error) {
       console.error('加载标签失败:', error);
-      showSnackbar('加载标签失败', 'error');
+      showSnackbar(t('settings.loadTagsFailed'), 'error');
     } finally {
       setIsLoading(false);
     }
@@ -106,14 +106,14 @@ const TagManager = ({ open, onClose }) => {
     try {
       const result = await window.electronAPI.tags.delete(tagName);
       if (result?.success) {
-        showSnackbar(`标签 "${tagName}" 已删除`, 'success');
+        showSnackbar(t('settings.tagDeleted', { name: tagName }), 'success');
         loadTags(); // 重新加载数据
       } else {
-        showSnackbar(result?.error || '删除标签失败', 'error');
+        showSnackbar(result?.error || t('settings.deleteTagFailed'), 'error');
       }
     } catch (error) {
       console.error('删除标签失败:', error);
-      showSnackbar('删除标签失败', 'error');
+      showSnackbar(t('settings.deleteTagFailed'), 'error');
     }
   };
 
@@ -126,15 +126,15 @@ const TagManager = ({ open, onClose }) => {
       const result = await window.electronAPI.tags.batchDelete(tagNames);
       
       if (result?.success) {
-        showSnackbar(`已删除 ${tagNames.length} 个标签`, 'success');
+        showSnackbar(t('settings.tagsDeleted', { count: tagNames.length }), 'success');
         setSelectedTags(new Set());
         loadTags(); // 重新加载数据
       } else {
-        showSnackbar(result?.error || '批量删除失败', 'error');
+        showSnackbar(result?.error || t('settings.batchDeleteFailed'), 'error');
       }
     } catch (error) {
       console.error('批量删除失败:', error);
-      showSnackbar('批量删除失败', 'error');
+      showSnackbar(t('settings.batchDeleteFailed'), 'error');
     }
   };
 
@@ -145,14 +145,14 @@ const TagManager = ({ open, onClose }) => {
     try {
       const result = await window.electronAPI.tags.cleanup();
       if (result?.success) {
-        showSnackbar(`已清理 ${result.data.deletedCount} 个未使用的标签`, 'success');
+        showSnackbar(t('settings.tagsCleaned', { count: result.data.deletedCount }), 'success');
         loadTags(); // 重新加载数据
       } else {
-        showSnackbar(result?.error || '清理失败', 'error');
+        showSnackbar(result?.error || t('settings.cleanupFailed'), 'error');
       }
     } catch (error) {
       console.error('清理标签失败:', error);
-      showSnackbar('清理标签失败', 'error');
+      showSnackbar(t('settings.cleanupTagsFailed'), 'error');
     }
   };
 

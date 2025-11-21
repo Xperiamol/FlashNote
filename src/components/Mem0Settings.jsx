@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import { useTranslation } from '../utils/i18n';
 import {
   Box,
   Typography,
@@ -33,6 +34,7 @@ import {
 } from '@mui/icons-material';
 
 const Mem0Settings = () => {
+  const { t } = useTranslation();
   const [available, setAvailable] = useState(false);
   const [loading, setLoading] = useState(true);
   const [stats, setStats] = useState(null);
@@ -70,13 +72,13 @@ const Mem0Settings = () => {
         } else {
           setMessage({ 
             type: 'warning', 
-            text: 'Mem0 服务未初始化。首次启动时模型需要下载约 22MB，请稍候...' 
+            text: t('mem0.serviceNotInitialized')
           });
         }
       }
     } catch (error) {
       console.error('检查 Mem0 可用性失败:', error);
-      setMessage({ type: 'error', text: '检查服务状态失败' });
+      setMessage({ type: 'error', text: t('mem0.checkServiceFailed') });
       setAvailable(false);
     }
     setLoading(false);
@@ -124,14 +126,14 @@ const Mem0Settings = () => {
       }
     } catch (error) {
       console.error('加载记忆列表失败:', error);
-      setMessage({ type: 'error', text: '加载记忆失败' });
+      setMessage({ type: 'error', text: t('mem0.loadMemoriesFailed') });
       setMemories([]);
     }
   };
 
   const handleSearch = async () => {
     if (!searchQuery.trim()) {
-      setMessage({ type: 'warning', text: '请输入搜索内容' });
+      setMessage({ type: 'warning', text: t('mem0.enterSearchContent') });
       return;
     }
 
@@ -154,12 +156,12 @@ const Mem0Settings = () => {
           });
         } else {
           setSearchResults([]);
-          setMessage({ type: 'info', text: '未找到相关记忆' });
+          setMessage({ type: 'info', text: t('mem0.noRelatedMemories') });
         }
       }
     } catch (error) {
       console.error('搜索失败:', error);
-      setMessage({ type: 'error', text: '搜索失败' });
+      setMessage({ type: 'error', text: t('mem0.searchFailed') });
       setSearchResults([]);
     }
     setSearching(false);
@@ -170,7 +172,7 @@ const Mem0Settings = () => {
       if (window.electronAPI?.invoke) {
         const result = await window.electronAPI.invoke('mem0:delete', { memoryId });
         if (result?.success) {
-          setMessage({ type: 'success', text: '记忆已删除' });
+          setMessage({ type: 'success', text: t('mem0.memoryDeleted') });
           await loadStats();
           await loadMemories();
           // 如果在搜索结果中，也更新搜索结果
@@ -181,7 +183,7 @@ const Mem0Settings = () => {
       }
     } catch (error) {
       console.error('删除记忆失败:', error);
-      setMessage({ type: 'error', text: '删除失败' });
+      setMessage({ type: 'error', text: t('mem0.deleteFailed') });
     }
   };
 
@@ -190,7 +192,7 @@ const Mem0Settings = () => {
       if (window.electronAPI?.invoke) {
         const result = await window.electronAPI.invoke('mem0:clear', { userId });
         if (result.success) {
-          setMessage({ type: 'success', text: '所有记忆已清除' });
+          setMessage({ type: 'success', text: t('mem0.allMemoriesCleared') });
           setMemories([]);
           setSearchResults([]);
           await loadStats();
@@ -199,7 +201,7 @@ const Mem0Settings = () => {
       }
     } catch (error) {
       console.error('清除记忆失败:', error);
-      setMessage({ type: 'error', text: '清除失败' });
+      setMessage({ type: 'error', text: t('mem0.clearFailed') });
     }
   };
 
@@ -209,7 +211,7 @@ const Mem0Settings = () => {
 
   const handleMigrateHistoricalData = async () => {
     setLoading(true);
-    setMessage({ type: 'info', text: '正在处理笔记和分析数据,请稍候...' });
+    setMessage({ type: 'info', text: t('mem0.processingNotes') });
 
     try {
       if (window.electronAPI?.invoke) {
@@ -224,7 +226,7 @@ const Mem0Settings = () => {
         } else {
           setMessage({
             type: 'error',
-            text: result?.error || '处理失败'
+            text: result?.error || t('mem0.processingFailed')
           });
         }
       }
@@ -271,11 +273,10 @@ const Mem0Settings = () => {
       {!available ? (
         <Alert severity="info" icon={<InfoIcon />}>
           <Typography variant="body2" gutterBottom>
-            <strong>Mem0 知识记忆功能</strong>
+            <strong>{t('mem0.featureTitle')}</strong>
           </Typography>
           <Typography variant="body2">
-            首次使用时需要下载语义模型（约 22MB），之后将缓存在本地。
-            该服务用于学习用户偏好，提供个性化的 AI 任务规划。
+            {t('mem0.featureDesc')}
           </Typography>
         </Alert>
       ) : (
@@ -283,12 +284,12 @@ const Mem0Settings = () => {
           {/* 系统状态 */}
           <ListItem>
             <ListItemText
-              primary="系统状态"
-              secondary="Mem0 智能记忆系统"
+              primary={t('mem0.systemStatus')}
+              secondary={t('mem0.systemStatusDesc')}
             />
             <ListItemSecondaryAction>
               <Chip
-                label={available ? '运行中' : '未就绪'}
+                label={available ? t('mem0.running') : t('mem0.notReady')}
                 color={available ? 'success' : 'default'}
                 size="small"
               />
@@ -301,14 +302,14 @@ const Mem0Settings = () => {
           {stats && (
             <>
               <ListItem>
-                <ListItemText primary="总记忆数" />
+                <ListItemText primary={t('mem0.totalMemories')} />
                 <ListItemSecondaryAction>
                   <Chip label={stats.total || 0} size="small" color="primary" />
                 </ListItemSecondaryAction>
               </ListItem>
               {stats.by_category && Object.keys(stats.by_category).length > 0 && (
                 <ListItem>
-                  <ListItemText primary="分类统计" />
+                  <ListItemText primary={t('mem0.categoryStats')} />
                   <ListItemSecondaryAction>
                     <Box sx={{ display: 'flex', gap: 0.5, flexWrap: 'wrap', justifyContent: 'flex-end', maxWidth: 400 }}>
                       {Object.entries(stats.by_category).map(([category, count]) => (
@@ -337,7 +338,7 @@ const Mem0Settings = () => {
                 onClick={handleRefresh}
                 disabled={loading}
               >
-                刷新
+                {t('mem0.refresh')}
               </Button>
               <Button
                 variant="outlined"
@@ -346,7 +347,7 @@ const Mem0Settings = () => {
                 onClick={() => setMigrateDialogOpen(true)}
                 disabled={loading}
               >
-                导入历史笔记
+                {t('mem0.importHistoricalNotes')}
               </Button>
             </Box>
           </ListItem>
@@ -357,13 +358,13 @@ const Mem0Settings = () => {
           <ListItem>
             <Box sx={{ width: '100%' }}>
               <Typography variant="subtitle2" gutterBottom>
-                语义搜索
+                {t('mem0.semanticSearch')}
               </Typography>
               <Box sx={{ display: 'flex', gap: 1, mb: 2 }}>
                 <TextField
                   fullWidth
                   size="small"
-                  placeholder="输入查询内容，例如：紧急任务的处理偏好"
+                  placeholder={t('mem0.searchPlaceholder')}
                   value={searchQuery}
                   onChange={(e) => setSearchQuery(e.target.value)}
                   onKeyPress={(e) => e.key === 'Enter' && handleSearch()}
@@ -375,7 +376,7 @@ const Mem0Settings = () => {
                   onClick={handleSearch}
                   disabled={searching}
                 >
-                  搜索
+                  {t('mem0.search')}
                 </Button>
               </Box>
               
@@ -425,21 +426,21 @@ const Mem0Settings = () => {
             <Box sx={{ width: '100%' }}>
               <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', mb: 2 }}>
                 <Typography variant="subtitle2">
-                  记忆列表 ({Array.isArray(memories) ? memories.length : 0})
+                  {t('mem0.memoryList')} ({Array.isArray(memories) ? memories.length : 0})
                 </Typography>
                 <Box sx={{ display: 'flex', gap: 1, alignItems: 'center' }}>
                   <FormControl size="small" sx={{ minWidth: 120 }}>
-                    <InputLabel>类别</InputLabel>
+                    <InputLabel>{t('mem0.category')}</InputLabel>
                     <Select
                       value={selectedCategory}
-                      label="类别"
+                      label={t('mem0.category')}
                       onChange={(e) => setSelectedCategory(e.target.value)}
                     >
-                      <MenuItem value="all">全部</MenuItem>
-                      <MenuItem value="knowledge">笔记知识</MenuItem>
-                      <MenuItem value="task_planning">任务规划</MenuItem>
-                      <MenuItem value="note_taking">笔记习惯</MenuItem>
-                      <MenuItem value="organization">组织管理</MenuItem>
+                      <MenuItem value="all">{t('mem0.all')}</MenuItem>
+                      <MenuItem value="knowledge">{t('mem0.knowledge')}</MenuItem>
+                      <MenuItem value="task_planning">{t('mem0.taskPlanning')}</MenuItem>
+                      <MenuItem value="note_taking">{t('mem0.noteTaking')}</MenuItem>
+                      <MenuItem value="organization">{t('mem0.organization')}</MenuItem>
                     </Select>
                   </FormControl>
                   <Button
@@ -450,14 +451,14 @@ const Mem0Settings = () => {
                     onClick={() => setClearDialogOpen(true)}
                     disabled={!Array.isArray(memories) || memories.length === 0}
                   >
-                    清空
+                    {t('mem0.clear')}
                   </Button>
                 </Box>
               </Box>
               
               {!Array.isArray(memories) || memories.length === 0 ? (
                 <Typography variant="body2" color="text.secondary" sx={{ py: 2, textAlign: 'center' }}>
-                  暂无记忆。使用 AI 任务规划插件时会自动学习您的偏好。
+                  {t('mem0.noMemories')}
                 </Typography>
               ) : (
                 <Box sx={{ maxHeight: 400, overflowY: 'auto', border: '1px solid', borderColor: 'divider', borderRadius: 1 }}>
@@ -478,7 +479,7 @@ const Mem0Settings = () => {
                           </Typography>
                         </Box>
                         <ListItemSecondaryAction>
-                          <Tooltip title="删除">
+                          <Tooltip title={t('mem0.delete')}>
                             <IconButton
                               size="small"
                               edge="end"
@@ -502,12 +503,10 @@ const Mem0Settings = () => {
           <ListItem>
             <Box>
               <Typography variant="subtitle2" gutterBottom color="text.secondary">
-                📖 技术说明
+                📖 {t('mem0.technicalInfo')}
               </Typography>
               <Typography variant="body2" color="text.secondary">
-                使用 all-MiniLM-L6-v2 模型进行语义编码（384维向量），
-                所有数据存储在本地 SQLite 数据库中。
-                查询速度：&lt;20ms（10k条记忆以内）
+                {t('mem0.technicalDesc')}
               </Typography>
             </Box>
           </ListItem>
@@ -521,19 +520,18 @@ const Mem0Settings = () => {
         maxWidth="sm"
         fullWidth
       >
-        <DialogTitle>确认清空所有记忆？</DialogTitle>
+        <DialogTitle>{t('mem0.confirmClearTitle')}</DialogTitle>
         <DialogContent>
           <DialogContentText>
-            此操作将删除所有学习的偏好记忆，无法恢复。
-            下次使用 AI 任务规划时将重新学习。
+            {t('mem0.confirmClearDesc')}
           </DialogContentText>
         </DialogContent>
         <DialogActions>
           <Button onClick={() => setClearDialogOpen(false)}>
-            取消
+            {t('mem0.cancel')}
           </Button>
           <Button onClick={handleClearAll} color="error" variant="contained">
-            确认清空
+            {t('mem0.confirmClear')}
           </Button>
         </DialogActions>
       </Dialog>
@@ -545,18 +543,18 @@ const Mem0Settings = () => {
         maxWidth="sm"
         fullWidth
       >
-        <DialogTitle>导入历史笔记</DialogTitle>
+        <DialogTitle>{t('mem0.importNotesTitle')}</DialogTitle>
         <DialogContent>
           <DialogContentText>
-            这将把你过去90天的所有笔记内容存储为记忆，同时分析待办事项模式。
+            {t('mem0.importNotesDesc')}
           </DialogContentText>
           <DialogContentText sx={{ mt: 2 }}>
-            每条笔记会创建一个独立记忆，用于语义搜索。此过程可能需要几分钟，确定继续吗？
+            {t('mem0.importNotesDetail')}
           </DialogContentText>
         </DialogContent>
         <DialogActions>
           <Button onClick={() => setMigrateDialogOpen(false)} disabled={loading}>
-            取消
+            {t('mem0.cancel')}
           </Button>
           <Button
             onClick={handleMigrateHistoricalData}
@@ -564,7 +562,7 @@ const Mem0Settings = () => {
             color="primary"
             disabled={loading}
           >
-            确认导入
+            {t('mem0.confirmImport')}
           </Button>
         </DialogActions>
       </Dialog>

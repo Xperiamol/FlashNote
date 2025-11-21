@@ -28,6 +28,7 @@ import {
   getPriorityText 
 } from '../utils/priorityUtils';
 import { ANIMATIONS, createAnimationString, createTransitionString, GREEN_SWEEP_KEYFRAMES } from '../utils/animationConfig';
+import { t } from '../utils/i18n';
 
 /**
  * 获取Todo优先级颜色
@@ -154,7 +155,7 @@ const TodoItem = ({
     const icon = isCompleted ? <CheckCircle /> : <Circle />;
     
     return (
-      <Tooltip title={isCompleted ? '标记为未完成' : '标记为完成'}>
+      <Tooltip title={isCompleted ? t('todos.uncompleteTodo') : t('todos.completeTodo')}>
         <IconButton {...iconProps}>
           {icon}
         </IconButton>

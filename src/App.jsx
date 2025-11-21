@@ -24,6 +24,7 @@ import {
 } from '@mui/icons-material'
 import { useStore } from './store/useStore'
 import { createAppTheme } from './styles/theme'
+import { initI18n } from './utils/i18n'
 import Toolbar from './components/Toolbar'
 import NoteList from './components/NoteList'
 import NoteEditor from './components/NoteEditor'
@@ -76,11 +77,11 @@ const syncIframeStyles = async (iframe) => {
   try {
     const iframeDoc = iframe.contentDocument || iframe.contentWindow.document
     const iframeHead = iframeDoc.head
-    
+
     // 移除旧的样式（避免重复）
     const oldStyles = iframeHead.querySelectorAll('style[data-emotion], style[data-inline-css], style[data-source], link[data-injected]')
     oldStyles.forEach(s => s.remove())
-    
+
     // 方案1：直接在 iframe 中添加 <link> 标签引用主应用的 CSS 文件
     const mainStyleLinks = document.querySelectorAll('link[rel="stylesheet"]')
     mainStyleLinks.forEach(link => {
@@ -90,16 +91,16 @@ const syncIframeStyles = async (iframe) => {
       clonedLink.setAttribute('data-injected', 'true')
       iframeHead.appendChild(clonedLink)
     })
-    
+
     // 方案2：复制所有 emotion 样式标签（Material-UI 的动态样式）
     // 这些样式会随着组件渲染动态增加，所以需要持续监听
     const copyEmotionStyles = () => {
       const emotionStyles = document.querySelectorAll('style[data-emotion]')
       const iframeEmotionStyles = iframeHead.querySelectorAll('style[data-emotion]')
-      
+
       // 移除 iframe 中旧的 emotion 样式
       iframeEmotionStyles.forEach(s => s.remove())
-      
+
       // 复制新的样式
       if (emotionStyles.length > 0) {
         let totalLength = 0
@@ -111,27 +112,27 @@ const syncIframeStyles = async (iframe) => {
         console.log(`[Plugin Window] ✅ 已同步 ${emotionStyles.length} 个 emotion 样式，总长度: ${totalLength} 字符`)
       }
     }
-    
+
     // 立即复制一次
     copyEmotionStyles()
-    
+
     // 持续监听主文档的样式变化，自动同步到 iframe
     const styleObserver = new MutationObserver(() => {
       copyEmotionStyles()
     })
-    
+
     styleObserver.observe(document.head, {
       childList: true,
       subtree: true,
       attributes: true,
       attributeFilter: ['data-emotion']
     })
-    
+
     // 将观察器保存到 iframe，以便后续清理
     if (!iframe.__styleObserver) {
       iframe.__styleObserver = styleObserver
     }
-    
+
     const totalStyles = iframeHead.querySelectorAll('style').length
     const totalLinks = iframeHead.querySelectorAll('link[rel="stylesheet"]').length
     console.log(`[Plugin Window] 样式初始化完成 - Style: ${totalStyles}, Link: ${totalLinks}`)
@@ -146,7 +147,7 @@ import { injectUIBridge } from './utils/pluginUIBridge'
 import themeManager from './utils/pluginThemeManager'
 
 function App() {
-  const { theme, primaryColor, loadNotes, currentView, initializeSettings, setCurrentView, createNote, batchDeleteNotes, batchDeleteTodos, batchCompleteTodos, batchRestoreNotes, batchPermanentDeleteNotes, getAllTags, batchSetTags, setSelectedNoteId } = useStore()
+  const { theme, setTheme, primaryColor, loadNotes, currentView, initializeSettings, setCurrentView, createNote, batchDeleteNotes, batchDeleteTodos, batchCompleteTodos, batchRestoreNotes, batchPermanentDeleteNotes, getAllTags, batchSetTags, setSelectedNoteId } = useStore()
   const refreshPluginCommands = useStore((state) => state.refreshPluginCommands)
   const addPluginCommand = useStore((state) => state.addPluginCommand)
   const removePluginCommand = useStore((state) => state.removePluginCommand)
@@ -154,7 +155,7 @@ function App() {
   const [secondarySidebarOpen, setSecondarySidebarOpen] = useState(true)
   const [showDeleted, setShowDeleted] = useState(false)
   const [commandPaletteOpen, setCommandPaletteOpen] = useState(false)
-  
+
   // TODO视图相关状态
   const [todoViewMode, setTodoViewMode] = useState('quadrant')
   const [todoShowCompleted, setTodoShowCompleted] = useState(false)
@@ -162,7 +163,7 @@ function App() {
   const [showTodoCreateForm, setShowTodoCreateForm] = useState(false)
   const [todoSortBy, setTodoSortBy] = useState('priority')
   const [initialTodoData, setInitialTodoData] = useState(null) // 用于预设初始todo数据
-  
+
   // 初始todo状态定义
   const initialTodoState = {
     content: '',
@@ -178,12 +179,12 @@ function App() {
   };
 
   const [newTodo, setNewTodo] = useState(initialTodoState);
-  
+
   // 日历视图相关状态
   const [calendarCurrentDate, setCalendarCurrentDate] = useState(new Date())
   const [selectedDate, setSelectedDate] = useState(null)
   const [calendarShowCompleted, setCalendarShowCompleted] = useState(false)
-  
+
   // 多选状态管理
   const [multiSelectState, setMultiSelectState] = useState({
     isActive: false,
@@ -192,13 +193,13 @@ function App() {
     totalCount: 0,
     itemType: ''
   })
-  
+
   // 插件窗口状态
   const [pluginWindow, setPluginWindow] = useState(null)
-  
+
   // 存储当前多选实例的引用
   const [currentMultiSelectRef, setCurrentMultiSelectRef] = useState(null)
-  
+
   // 待办事项刷新触发器
   const [todoRefreshTrigger, setTodoRefreshTrigger] = useState(0)
   const [calendarRefreshTrigger, setCalendarRefreshTrigger] = useState(0)
@@ -207,15 +208,15 @@ function App() {
     setTodoRefreshTrigger(prev => prev + 1)
     setCalendarRefreshTrigger(prev => prev + 1)
   }
-  
+
   // 永久删除确认状态
   const [permanentDeleteConfirm, setPermanentDeleteConfirm] = useState(false)
   const [todoPermanentDeleteConfirm, setTodoPermanentDeleteConfirm] = useState(false)
-  
+
   // 标签选择对话框状态
   const [tagSelectionDialogOpen, setTagSelectionDialogOpen] = useState(false)
   const [selectedNotesForTagging, setSelectedNotesForTagging] = useState([])
-  
+
   const appTheme = createAppTheme(theme, primaryColor)
   const isMobile = useMediaQuery(appTheme.breakpoints.down('md'))
 
@@ -240,12 +241,26 @@ function App() {
     }
   }, [primaryColor])
 
-  // 监听视图切换，自动退出多选模式
+  // 监听系统主题变化事件
   useEffect(() => {
-    if (currentMultiSelectRef && currentMultiSelectRef.isMultiSelectMode) {
-      currentMultiSelectRef.exitMultiSelectMode();
+    if (!window.electronAPI?.ipcRenderer) return
+
+    const handleSystemThemeChange = (event, data) => {
+      console.log('收到系统主题变化事件:', data)
+      // 只有当当前主题设置为'system'时才自动切换
+      if (theme === 'system') {
+        const newTheme = data.shouldUseDarkColors ? 'dark' : 'light'
+        console.log('系统主题变化，自动切换到:', newTheme)
+        setTheme(newTheme)
+      }
     }
-  }, [currentView]);
+
+    window.electronAPI.ipcRenderer.on('system-theme-changed', handleSystemThemeChange)
+
+    return () => {
+      window.electronAPI.ipcRenderer.removeAllListeners('system-theme-changed')
+    }
+  }, [theme, setTheme])
 
   // 处理初始todo数据变化
   useEffect(() => {
@@ -302,8 +317,8 @@ function App() {
       if (event.type === 'command-registered' && event.command && event.pluginId) {
         const surfaces = Array.isArray(event.command.surfaces)
           ? event.command.surfaces
-              .map((surface) => (typeof surface === 'string' ? surface.trim() : ''))
-              .filter(Boolean)
+            .map((surface) => (typeof surface === 'string' ? surface.trim() : ''))
+            .filter(Boolean)
           : []
 
         addPluginCommand({
@@ -356,7 +371,7 @@ function App() {
 
       if (['installed', 'uninstalled', 'enabled', 'disabled', 'ready', 'error', 'stopped'].includes(event.type)) {
         refreshPluginCommands()
-        
+
         // 插件卸载时清理其主题样式
         if (event.type === 'uninstalled' && event.pluginId) {
           themeManager.unregisterAllStyles(event.pluginId)
@@ -374,12 +389,12 @@ function App() {
     try {
       // 使用TimeZoneUtils转换日期时间为UTC
       const dueDateUTC = TimeZoneUtils.toUTC(newTodo.due_date, newTodo.due_time);
-      
+
       console.log('[App] 创建待办事项:');
       console.log('  - 本地日期:', newTodo.due_date);
       console.log('  - 本地时间:', newTodo.due_time);
       console.log('  - UTC时间:', dueDateUTC);
-      
+
       await createTodoAPI({
         content: newTodo.content,
         description: newTodo.description, // 添加 description 字段
@@ -391,15 +406,15 @@ function App() {
         repeat_interval: newTodo.repeat_interval,
         repeat_days: newTodo.repeat_days
       });
-      
+
       setNewTodo(initialTodoState);
       setShowTodoCreateForm(false);
       setInitialTodoData(null);
-      
+
       // 刷新相关数据
       setTodoRefreshTrigger(prev => prev + 1);
       setCalendarRefreshTrigger(prev => prev + 1);
-      
+
       console.log('[App] 待办事项创建成功');
     } catch (error) {
       console.error('创建待办事项失败:', error);
@@ -409,7 +424,7 @@ function App() {
   // 处理批量设置标签
   const handleBatchSetTags = async () => {
     if (multiSelectState.selectedIds.length === 0) return;
-    
+
     setSelectedNotesForTagging(multiSelectState.selectedIds);
     setTagSelectionDialogOpen(true);
   };
@@ -448,13 +463,21 @@ function App() {
     }
 
     testElectronAPI()
-    
+
     // 初始化设置
-    initializeSettings()
-    
+    const initApp = async () => {
+      await initializeSettings()
+
+      // 初始化i18n系统
+      const { language } = useStore.getState()
+      initI18n(language)
+    }
+
+    initApp()
+
     // 加载笔记数据
     loadNotes()
-    
+
     // 监听来自托盘菜单的事件
     const handleTrayEvents = () => {
       if (window.electronAPI && window.electronAPI.ipcRenderer) {
@@ -467,18 +490,18 @@ function App() {
             console.error('创建笔记失败:', error)
           }
         })
-        
+
         // 监听创建新待办事件
         window.electronAPI.ipcRenderer.on('create-new-todo', () => {
           setCurrentView('todo')
           setShowTodoCreateForm(true)
         })
-        
+
         // 监听打开设置事件
         window.electronAPI.ipcRenderer.on('open-settings', () => {
           setCurrentView('settings')
         })
-        
+
         // 监听快速输入事件
         window.electronAPI.ipcRenderer.on('quick-input', () => {
           // 切换到笔记视图并创建新笔记
@@ -487,9 +510,9 @@ function App() {
         })
       }
     }
-    
+
     handleTrayEvents()
-    
+
     // 清理事件监听器
     return () => {
       if (window.electronAPI && window.electronAPI.ipcRenderer) {
@@ -501,39 +524,39 @@ function App() {
     }
   }, [createNote])
 
-    useEffect(() => {
-      const unsubscribe = subscribePluginUiRequests((payload) => {
-        if (!payload?.noteId) return
-        setCurrentView('notes')
-        setSelectedNoteId(payload.noteId)
-      })
+  useEffect(() => {
+    const unsubscribe = subscribePluginUiRequests((payload) => {
+      if (!payload?.noteId) return
+      setCurrentView('notes')
+      setSelectedNoteId(payload.noteId)
+    })
 
-      return () => {
-        unsubscribe && unsubscribe()
-      }
-    }, [setCurrentView, setSelectedNoteId])
+    return () => {
+      unsubscribe && unsubscribe()
+    }
+  }, [setCurrentView, setSelectedNoteId])
 
   // 监听插件窗口打开请求
   useEffect(() => {
     const unsubscribe = subscribePluginWindowRequests(async (payload) => {
       if (!payload) return
-      
+
       console.log('插件请求打开窗口:', payload)
-      
+
       try {
         // 加载插件HTML文件内容
         const result = await loadPluginFile(payload.pluginId, payload.url)
-        
+
         if (!result.success) {
           console.error('加载插件文件失败:', result.error)
           return
         }
-        
+
         // 在 HTML 中注入 base 标签，设置资源基准 URL
         let htmlContent = result.content
         const baseUrl = window.location.origin + window.location.pathname.replace(/[^/]*$/, '')
         const baseTag = `<base href="${baseUrl}">`
-        
+
         // 在 head 标签后插入 base 标签
         if (htmlContent.includes('<head>')) {
           htmlContent = htmlContent.replace('<head>', `<head>\n${baseTag}`)
@@ -543,7 +566,7 @@ function App() {
           // 如果没有 head 标签，在 html 标签后添加
           htmlContent = htmlContent.replace(/<html[^>]*>/i, `$&\n<head>\n${baseTag}\n</head>`)
         }
-        
+
         // 设置窗口信息，包含修改后的HTML内容
         setPluginWindow({
           pluginId: payload.pluginId,
@@ -568,10 +591,10 @@ function App() {
   // 在插件窗口打开时注入 UI Bridge 和依赖
   useEffect(() => {
     if (!pluginWindow || !pluginWindow.htmlContent) return
-    
+
     let injected = false
     let styleObserver = null
-    
+
     // 尝试多次注入,确保成功
     const tryInject = () => {
       const iframe = document.querySelector('iframe[title="' + pluginWindow.title + '"]')
@@ -582,43 +605,58 @@ function App() {
             pluginId: pluginWindow.pluginId,
             commandExecutor: executePluginCommand
           })
-          
+
           // 为 iframe 创建独立的 emotion cache，让样式注入到 iframe 内部
           const iframeDoc = iframe.contentDocument || iframe.contentWindow.document
-          
-          // 确保 head 存在
-          if (!iframeDoc.head) {
-            console.error('[UI Bridge] iframe head 不存在')
+
+          // 确保 iframe document 已加载
+          if (!iframeDoc || !iframeDoc.head) {
+            console.error('[UI Bridge] iframe document not ready')
             return false
           }
-          
-          const iframeCache = createCache({
-            key: 'iframe-emotion',
-            container: iframeDoc.head,
-            prepend: true,
-            speedy: false  // 禁用 speedy mode 确保样式正确注入
-          })
-          
-          // 验证 cache 对象
-          if (!iframeCache || !iframeCache.sheet || !iframeCache.registered) {
-            console.error('[UI Bridge] emotion cache 创建失败', iframeCache)
-            return false
+
+          // 创建 emotion cache，添加错误处理
+          let iframeCache = null
+          try {
+            iframeCache = createCache({
+              key: 'iframe-emotion',
+              container: iframeDoc.head,
+              prepend: true,
+              speedy: false  // 禁用speedy模式，提高兼容性
+            })
+
+            // 验证cache对象完整性
+            if (!iframeCache || typeof iframeCache.registered !== 'object') {
+              console.warn('[UI Bridge] emotion cache not properly initialized')
+              iframeCache = null
+            }
+          } catch (error) {
+            console.error('[UI Bridge] Failed to create emotion cache:', error)
+            iframeCache = null
           }
-          
+
           // 暴露 React 和 Material-UI 依赖
           iframe.contentWindow.React = React
           iframe.contentWindow.ReactDOM = ReactDOM
           iframe.contentWindow.MaterialUI = MaterialUI
           iframe.contentWindow.MaterialIcons = MaterialIcons
           iframe.contentWindow.appTheme = appTheme
-          iframe.contentWindow.emotionCache = iframeCache  // 提供给插件使用
-          iframe.contentWindow.CacheProvider = CacheProvider  // 提供 CacheProvider
-          
+
+          // 只有在cache有效时才暴露
+          if (iframeCache) {
+            iframe.contentWindow.emotionCache = iframeCache  // 提供给插件使用
+            iframe.contentWindow.CacheProvider = CacheProvider  // 提供 CacheProvider
+          } else {
+            // 提供空的fallback，允许插件降级运行
+            iframe.contentWindow.emotionCache = null
+            iframe.contentWindow.CacheProvider = null
+          }
+
           injected = true
           console.log('[UI Bridge] 已注入插件窗口:', pluginWindow.title)
           console.log('[Dependencies] 已暴露: React, ReactDOM, MaterialUI, MaterialIcons, appTheme, emotionCache, CacheProvider')
           console.log('[UI Bridge] ✅ Emotion cache 已配置，样式将自动注入到 iframe')
-          
+
           return true
         } catch (error) {
           console.error('[UI Bridge] 注入失败:', error)
@@ -627,24 +665,24 @@ function App() {
       }
       return false
     }
-    
+
     // 立即尝试注入
     if (tryInject()) return
-    
+
     // 如果失败,使用定时器重试
     const timer = setTimeout(() => {
       if (!injected) {
         tryInject()
       }
     }, 50)
-    
+
     // 再设置一个备用定时器
     const timer2 = setTimeout(() => {
       if (!injected) {
         tryInject()
       }
     }, 200)
-    
+
     return () => {
       clearTimeout(timer)
       clearTimeout(timer2)
@@ -675,428 +713,416 @@ function App() {
     <ThemeProvider theme={appTheme}>
       <CssBaseline />
       <DragAnimationProvider>
-      <Box sx={{ display: 'flex', flexDirection: 'column', height: '100vh' }}>
-        {/* 自定义标题栏 */}
-        <TitleBar />
-        
-        {/* 主应用区域 */}
-        <Box sx={{ display: 'flex', flex: 1, minHeight: 0, overflow: 'hidden' }}>
-          {/* 主侧边栏 */}
-          <Sidebar open={sidebarOpen} onClose={() => setSidebarOpen(false)} />
-          
-          {/* 工具栏和内容区域 */}
-          <Box sx={{ display: 'flex', flexDirection: 'column', flex: 1, minHeight: 0 }}>
-            {/* 顶部工具栏 */}
-            <AppBar
-              position="static"
-              sx={{
-                backgroundColor: 'background.paper',
-                color: 'text.primary',
-                boxShadow: 1
-              }}
-            >
-              <Toolbar
-              onToggleSidebar={() => setSecondarySidebarOpen(!secondarySidebarOpen)}
-              sidebarOpen={secondarySidebarOpen}
-              showDeleted={showDeleted}
-              onToggleDeleted={() => {
-                const newShowDeleted = !showDeleted;
-                setShowDeleted(newShowDeleted);
-                // 根据新的状态重新加载笔记
-                loadNotes(newShowDeleted ? { deleted: true } : {});
-              }}
-              currentView={currentView}
-              todoViewMode={todoViewMode}
-              onTodoViewModeChange={setTodoViewMode}
-              todoShowCompleted={todoShowCompleted}
-              onTodoShowCompletedChange={setTodoShowCompleted}
-              onCreateTodo={handleOpenCreateTodo}
-              todoSortBy={todoSortBy}
-              onTodoSortByChange={setTodoSortBy}
-              calendarCurrentDate={calendarCurrentDate}
-              onCalendarDateChange={setCalendarCurrentDate}
-              calendarShowCompleted={calendarShowCompleted}
-              onCalendarShowCompletedChange={setCalendarShowCompleted}
-              onSelectedDateChange={setSelectedDate}
-              selectedDate={selectedDate}
-            />
-            </AppBar>
+        <Box sx={{ display: 'flex', flexDirection: 'column', height: '100vh' }}>
+          {/* 自定义标题栏 */}
+          <TitleBar />
 
-            {/* 多选工具栏 */}
-            {multiSelectState.isActive && (
-              <MultiSelectToolbar
-                visible={multiSelectState.isActive}
-                selectedCount={multiSelectState.selectedCount}
-                totalCount={multiSelectState.totalCount}
-                itemType={multiSelectState.itemType}
-                onSelectAll={() => {
-                  if (currentMultiSelectRef) {
-                    currentMultiSelectRef.selectAll();
-                  }
+          {/* 主应用区域 */}
+          <Box sx={{ display: 'flex', flex: 1, minHeight: 0, overflow: 'hidden' }}>
+            {/* 主侧边栏 */}
+            <Sidebar open={sidebarOpen} onClose={() => setSidebarOpen(false)} />
+
+            {/* 工具栏和内容区域 */}
+            <Box sx={{ display: 'flex', flexDirection: 'column', flex: 1, minHeight: 0 }}>
+              {/* 顶部工具栏 */}
+              <AppBar
+                position="static"
+                sx={{
+                  backgroundColor: 'background.paper',
+                  color: 'text.primary',
+                  boxShadow: 1
                 }}
-                onSelectNone={() => {
-                  if (currentMultiSelectRef) {
-                    currentMultiSelectRef.selectNone();
-                  }
-                }}
-                onDelete={showDeleted || multiSelectState.itemType !== '笔记' ? undefined : async () => {
-                  if (multiSelectState.selectedIds.length === 0) return;
-                  
-                  try {
-                    if (multiSelectState.itemType === '笔记') {
-                      const result = await batchDeleteNotes(multiSelectState.selectedIds);
-                      if (result.success) {
-                        console.log(`成功删除 ${multiSelectState.selectedIds.length} 个笔记`);
-                      } else {
-                        console.error('批量删除笔记失败:', result.error);
+              >
+                <Toolbar
+                  onToggleSidebar={() => setSecondarySidebarOpen(!secondarySidebarOpen)}
+                  sidebarOpen={secondarySidebarOpen}
+                  showDeleted={showDeleted}
+                  onToggleDeleted={() => {
+                    const newShowDeleted = !showDeleted;
+                    setShowDeleted(newShowDeleted);
+                    // 根据新的状态重新加载笔记
+                    loadNotes(newShowDeleted ? { deleted: true } : {});
+                  }}
+                  currentView={currentView}
+                  todoViewMode={todoViewMode}
+                  onTodoViewModeChange={setTodoViewMode}
+                  todoShowCompleted={todoShowCompleted}
+                  onTodoShowCompletedChange={setTodoShowCompleted}
+                  onCreateTodo={handleOpenCreateTodo}
+                  todoSortBy={todoSortBy}
+                  onTodoSortByChange={setTodoSortBy}
+                  calendarCurrentDate={calendarCurrentDate}
+                  onCalendarDateChange={setCalendarCurrentDate}
+                  calendarShowCompleted={calendarShowCompleted}
+                  onCalendarShowCompletedChange={setCalendarShowCompleted}
+                  onSelectedDateChange={setSelectedDate}
+                  selectedDate={selectedDate}
+                />
+              </AppBar>
+
+              {/* 多选工具栏 */}
+              {multiSelectState.isActive && (
+                <MultiSelectToolbar
+                  visible={multiSelectState.isActive}
+                  selectedCount={multiSelectState.selectedCount}
+                  totalCount={multiSelectState.totalCount}
+                  itemType={multiSelectState.itemType}
+                  onSelectAll={() => {
+                    if (currentMultiSelectRef) {
+                      currentMultiSelectRef.selectAll();
+                    }
+                  }}
+                  onSelectNone={() => {
+                    if (currentMultiSelectRef) {
+                      currentMultiSelectRef.selectNone();
+                    }
+                  }}
+                  onDelete={showDeleted || multiSelectState.itemType !== '笔记' ? undefined : async () => {
+                    if (multiSelectState.selectedIds.length === 0) return;
+
+                    try {
+                      if (multiSelectState.itemType === '笔记') {
+                        const result = await batchDeleteNotes(multiSelectState.selectedIds);
+                        if (result.success) {
+                          console.log(`成功删除 ${multiSelectState.selectedIds.length} 个笔记`);
+                        } else {
+                          console.error('批量删除笔记失败:', result.error);
+                        }
+                      } else if (multiSelectState.itemType === '待办事项') {
+                        const result = await batchDeleteTodos(multiSelectState.selectedIds);
+                        if (result.success) {
+                          console.log(`成功删除 ${multiSelectState.selectedIds.length} 个待办事项`);
+                          // 触发待办事项列表刷新
+                          setTodoRefreshTrigger(prev => prev + 1);
+                        } else {
+                          console.error('批量删除待办事项失败:', result.error);
+                        }
                       }
-                    } else if (multiSelectState.itemType === '待办事项') {
-                      const result = await batchDeleteTodos(multiSelectState.selectedIds);
-                      if (result.success) {
-                        console.log(`成功删除 ${multiSelectState.selectedIds.length} 个待办事项`);
-                        // 触发待办事项列表刷新
-                        setTodoRefreshTrigger(prev => prev + 1);
-                      } else {
-                        console.error('批量删除待办事项失败:', result.error);
+                    } catch (error) {
+                      console.error('批量删除失败:', error);
+                    } finally {
+                      // 无论成功失败都退出多选模式
+                      if (currentMultiSelectRef) {
+                        currentMultiSelectRef.exitMultiSelectMode();
                       }
                     }
-                  } catch (error) {
-                    console.error('批量删除失败:', error);
-                  } finally {
-                    // 无论成功失败都退出多选模式
+                  }}
+                  onSetTags={showDeleted || multiSelectState.itemType !== '笔记' ? undefined : handleBatchSetTags}
+                  onClose={() => {
                     if (currentMultiSelectRef) {
                       currentMultiSelectRef.exitMultiSelectMode();
                     }
-                  }
-                }}
-                onSetTags={showDeleted || multiSelectState.itemType !== '笔记' ? undefined : handleBatchSetTags}
-                onClose={() => {
-                  if (currentMultiSelectRef) {
-                    currentMultiSelectRef.exitMultiSelectMode();
-                  }
-                }}
-                customActions={
-                  showDeleted && multiSelectState.itemType === '笔记' ? [
-                    {
-                      label: '批量恢复',
-                      icon: <RestoreIcon />,
-                      onClick: async () => {
-                        if (multiSelectState.selectedIds.length === 0) return;
-                        
-                        try {
-                          const result = await batchRestoreNotes(multiSelectState.selectedIds);
-                          if (result.success) {
-                            console.log(`成功恢复 ${multiSelectState.selectedIds.length} 个笔记`);
-                          } else {
-                            console.error('批量恢复笔记失败:', result.error);
-                          }
-                        } catch (error) {
-                          console.error('批量恢复失败:', error);
-                        } finally {
-                          if (currentMultiSelectRef) {
-                            currentMultiSelectRef.exitMultiSelectMode();
-                          }
-                        }
-                      },
-                      color: 'primary'
-                    },
-                    {
-                      label: permanentDeleteConfirm ? '确认删除' : '永久删除',
-                      icon: <DeleteForeverIcon />,
-                      onClick: async () => {
-                        if (multiSelectState.selectedIds.length === 0) return;
-                        
-                        if (!permanentDeleteConfirm) {
-                          // 第一次点击，设置确认状态
-                          setPermanentDeleteConfirm(true);
-                          // 3秒后自动重置状态
-                          setTimeout(() => {
-                            setPermanentDeleteConfirm(false);
-                          }, 3000);
-                        } else {
-                          // 第二次点击，执行删除
+                  }}
+                  customActions={
+                    showDeleted && multiSelectState.itemType === '笔记' ? [
+                      {
+                        label: '批量恢复',
+                        icon: <RestoreIcon />,
+                        onClick: async () => {
+                          if (multiSelectState.selectedIds.length === 0) return;
+
                           try {
-                            const result = await batchPermanentDeleteNotes(multiSelectState.selectedIds);
+                            const result = await batchRestoreNotes(multiSelectState.selectedIds);
                             if (result.success) {
-                              console.log(`成功永久删除 ${multiSelectState.selectedIds.length} 个笔记`);
+                              console.log(`成功恢复 ${multiSelectState.selectedIds.length} 个笔记`);
                             } else {
-                              console.error('批量永久删除笔记失败:', result.error);
+                              console.error('批量恢复笔记失败:', result.error);
                             }
                           } catch (error) {
-                            console.error('批量永久删除失败:', error);
+                            console.error('批量恢复失败:', error);
                           } finally {
-                            setPermanentDeleteConfirm(false);
                             if (currentMultiSelectRef) {
                               currentMultiSelectRef.exitMultiSelectMode();
                             }
                           }
-                        }
+                        },
+                        color: 'primary'
                       },
-                      color: permanentDeleteConfirm ? 'error' : 'inherit',
-                      sx: permanentDeleteConfirm ? {
-                        backgroundColor: 'error.main',
-                        color: 'error.contrastText',
-                        '&:hover': {
-                          backgroundColor: 'error.dark'
-                        }
-                      } : {}
-                    }
-                  ] : multiSelectState.itemType === '待办事项' ? [
-                    {
-                      label: '设为完成',
-                      icon: <CheckCircleIcon />,
-                      onClick: async () => {
-                        if (multiSelectState.selectedIds.length === 0) return;
-                        
-                        try {
-                          const result = await batchCompleteTodos(multiSelectState.selectedIds);
-                          if (result.success) {
-                            console.log(`成功完成 ${multiSelectState.selectedIds.length} 个待办事项`);
-                            // 触发待办事项列表刷新
-                            setTodoRefreshTrigger(prev => prev + 1);
+                      {
+                        label: permanentDeleteConfirm ? '确认删除' : '永久删除',
+                        icon: <DeleteForeverIcon />,
+                        onClick: async () => {
+                          if (multiSelectState.selectedIds.length === 0) return;
+
+                          if (!permanentDeleteConfirm) {
+                            // 第一次点击，设置确认状态
+                            setPermanentDeleteConfirm(true);
+                            // 3秒后自动重置状态
+                            setTimeout(() => {
+                              setPermanentDeleteConfirm(false);
+                            }, 3000);
                           } else {
-                            console.error('批量完成待办事项失败:', result.error);
+                            // 第二次点击，执行删除
+                            try {
+                              const result = await batchPermanentDeleteNotes(multiSelectState.selectedIds);
+                              if (result.success) {
+                                console.log(`成功永久删除 ${multiSelectState.selectedIds.length} 个笔记`);
+                              } else {
+                                console.error('批量永久删除笔记失败:', result.error);
+                              }
+                            } catch (error) {
+                              console.error('批量永久删除失败:', error);
+                            } finally {
+                              setPermanentDeleteConfirm(false);
+                              if (currentMultiSelectRef) {
+                                currentMultiSelectRef.exitMultiSelectMode();
+                              }
+                            }
                           }
-                        } catch (error) {
-                          console.error('批量完成失败:', error);
-                        } finally {
-                          if (currentMultiSelectRef) {
-                            currentMultiSelectRef.exitMultiSelectMode();
+                        },
+                        color: permanentDeleteConfirm ? 'error' : 'inherit',
+                        sx: permanentDeleteConfirm ? {
+                          backgroundColor: 'error.main',
+                          color: 'error.contrastText',
+                          '&:hover': {
+                            backgroundColor: 'error.dark'
                           }
-                        }
-                      },
-                      color: 'success'
-                    },
-                    {
-                      label: todoPermanentDeleteConfirm ? '确认删除' : '永久删除',
-                      icon: <DeleteForeverIcon />,
-                      onClick: async () => {
-                        if (multiSelectState.selectedIds.length === 0) return;
-                        
-                        if (!todoPermanentDeleteConfirm) {
-                          // 第一次点击，设置确认状态
-                          setTodoPermanentDeleteConfirm(true);
-                          // 3秒后自动重置状态
-                          setTimeout(() => {
-                            setTodoPermanentDeleteConfirm(false);
-                          }, 3000);
-                        } else {
-                          // 第二次点击，执行删除
+                        } : {}
+                      }
+                    ] : multiSelectState.itemType === '待办事项' ? [
+                      {
+                        label: '设为完成',
+                        icon: <CheckCircleIcon />,
+                        onClick: async () => {
+                          if (multiSelectState.selectedIds.length === 0) return;
+
                           try {
-                            const result = await batchDeleteTodos(multiSelectState.selectedIds);
+                            const result = await batchCompleteTodos(multiSelectState.selectedIds);
                             if (result.success) {
-                              console.log(`成功永久删除 ${multiSelectState.selectedIds.length} 个待办事项`);
+                              console.log(`成功完成 ${multiSelectState.selectedIds.length} 个待办事项`);
                               // 触发待办事项列表刷新
                               setTodoRefreshTrigger(prev => prev + 1);
                             } else {
-                              console.error('批量删除待办事项失败:', result.error);
+                              console.error('批量完成待办事项失败:', result.error);
                             }
                           } catch (error) {
-                            console.error('批量删除失败:', error);
+                            console.error('批量完成失败:', error);
                           } finally {
-                            setTodoPermanentDeleteConfirm(false);
                             if (currentMultiSelectRef) {
                               currentMultiSelectRef.exitMultiSelectMode();
                             }
                           }
-                        }
+                        },
+                        color: 'success'
                       },
-                      color: todoPermanentDeleteConfirm ? 'error' : 'inherit',
-                      sx: todoPermanentDeleteConfirm ? {
-                        backgroundColor: 'error.main',
-                        color: 'error.contrastText',
-                        '&:hover': {
-                          backgroundColor: 'error.dark'
-                        }
-                      } : {}
-                    }
-                  ] : []
-                }
-              />
-            )}
+                      {
+                        label: todoPermanentDeleteConfirm ? '确认删除' : '永久删除',
+                        icon: <DeleteForeverIcon />,
+                        onClick: async () => {
+                          if (multiSelectState.selectedIds.length === 0) return;
 
-            {/* 内容区域 */}
-            <Box sx={{ display: 'flex', flex: 1, minHeight: 0, overflow: 'hidden' }}>
-              {/* 二级侧边栏 - 始终渲染以支持动画 */}
-              <SecondarySidebar 
-                open={secondarySidebarOpen} 
-                onClose={() => setSecondarySidebarOpen(false)}
-                onTodoSelect={setSelectedTodo}
-                onViewModeChange={setTodoViewMode}
-                onShowCompletedChange={setTodoShowCompleted}
-                viewMode={todoViewMode}
-                showCompleted={todoShowCompleted}
-                onMultiSelectChange={setMultiSelectState}
-                onMultiSelectRefChange={setCurrentMultiSelectRef}
-                todoRefreshTrigger={todoRefreshTrigger}
-                todoSortBy={todoSortBy}
-                onTodoSortByChange={setTodoSortBy}
-                showDeleted={showDeleted}
-                selectedDate={selectedDate}
-                calendarRefreshTrigger={calendarRefreshTrigger}
-                onTodoUpdated={handleTodoUpdated}
-              />
-              
-              {/* 主内容区域 */}
-              <Box sx={{ flex: 1, overflow: 'hidden' }}>
-                {currentView === 'notes' && <NoteEditor />}
-                {currentView === 'todo' && (
-              <TodoView 
-                viewMode={todoViewMode}
-                showCompleted={todoShowCompleted}
-                onViewModeChange={setTodoViewMode}
-                onShowCompletedChange={setTodoShowCompleted}
-                onRefresh={() => setTodoRefreshTrigger(prev => prev + 1)}
-                onTodoSelect={setSelectedTodo}
-              />
-            )}
-                {currentView === 'calendar' && <CalendarView currentDate={calendarCurrentDate} onDateChange={setCalendarCurrentDate} onTodoSelect={setSelectedTodo} selectedDate={selectedDate} onSelectedDateChange={setSelectedDate} refreshToken={calendarRefreshTrigger} showCompleted={calendarShowCompleted} onShowCompletedChange={setCalendarShowCompleted} onTodoUpdated={handleTodoUpdated} />}
-                {currentView === 'settings' && <Settings />}
-                {currentView === 'plugins' && (
-                  <Box sx={{ p: 3, height: '100%', boxSizing: 'border-box' }}>
-                    <PluginStore />
-                  </Box>
-                )}
-                {currentView === 'profile' && <Profile />}
+                          if (!todoPermanentDeleteConfirm) {
+                            // 第一次点击，设置确认状态
+                            setTodoPermanentDeleteConfirm(true);
+                            // 3秒后自动重置状态
+                            setTimeout(() => {
+                              setTodoPermanentDeleteConfirm(false);
+                            }, 3000);
+                          } else {
+                            // 第二次点击，执行删除
+                            try {
+                              const result = await batchDeleteTodos(multiSelectState.selectedIds);
+                              if (result.success) {
+                                console.log(`成功永久删除 ${multiSelectState.selectedIds.length} 个待办事项`);
+                                // 触发待办事项列表刷新
+                                setTodoRefreshTrigger(prev => prev + 1);
+                              } else {
+                                console.error('批量删除待办事项失败:', result.error);
+                              }
+                            } catch (error) {
+                              console.error('批量删除失败:', error);
+                            } finally {
+                              setTodoPermanentDeleteConfirm(false);
+                              if (currentMultiSelectRef) {
+                                currentMultiSelectRef.exitMultiSelectMode();
+                              }
+                            }
+                          }
+                        },
+                        color: todoPermanentDeleteConfirm ? 'error' : 'inherit',
+                        sx: todoPermanentDeleteConfirm ? {
+                          backgroundColor: 'error.main',
+                          color: 'error.contrastText',
+                          '&:hover': {
+                            backgroundColor: 'error.dark'
+                          }
+                        } : {}
+                      }
+                    ] : []
+                  }
+                />
+              )}
+
+              {/* 内容区域 */}
+              <Box sx={{ display: 'flex', flex: 1, minHeight: 0, overflow: 'hidden' }}>
+                {/* 二级侧边栏 - 始终渲染以支持动画 */}
+                <SecondarySidebar
+                  open={secondarySidebarOpen}
+                  onClose={() => setSecondarySidebarOpen(false)}
+                  onTodoSelect={setSelectedTodo}
+                  onViewModeChange={setTodoViewMode}
+                  onShowCompletedChange={setTodoShowCompleted}
+                  viewMode={todoViewMode}
+                  showCompleted={todoShowCompleted}
+                  onMultiSelectChange={setMultiSelectState}
+                  onMultiSelectRefChange={setCurrentMultiSelectRef}
+                  todoRefreshTrigger={todoRefreshTrigger}
+                  todoSortBy={todoSortBy}
+                  onTodoSortByChange={setTodoSortBy}
+                  showDeleted={showDeleted}
+                  selectedDate={selectedDate}
+                  calendarRefreshTrigger={calendarRefreshTrigger}
+                  onTodoUpdated={handleTodoUpdated}
+                />
+
+                {/* 主内容区域 */}
+                <Box sx={{ flex: 1, overflow: 'hidden' }}>
+                  {currentView === 'notes' && <NoteEditor />}
+                  {currentView === 'todo' && (
+                    <TodoView
+                      viewMode={todoViewMode}
+                      showCompleted={todoShowCompleted}
+                      onViewModeChange={setTodoViewMode}
+                      onShowCompletedChange={setTodoShowCompleted}
+                      onRefresh={() => setTodoRefreshTrigger(prev => prev + 1)}
+                      onTodoSelect={setSelectedTodo}
+                    />
+                  )}
+                  {currentView === 'calendar' && <CalendarView currentDate={calendarCurrentDate} onDateChange={setCalendarCurrentDate} onTodoSelect={setSelectedTodo} selectedDate={selectedDate} onSelectedDateChange={setSelectedDate} refreshToken={calendarRefreshTrigger} showCompleted={calendarShowCompleted} onShowCompletedChange={setCalendarShowCompleted} onTodoUpdated={handleTodoUpdated} />}
+                  {currentView === 'settings' && <Settings />}
+                  {currentView === 'plugins' && (
+                    <Box sx={{ p: 3, height: '100%', boxSizing: 'border-box' }}>
+                      <PluginStore />
+                    </Box>
+                  )}
+                  {currentView === 'profile' && <Profile />}
+                </Box>
               </Box>
             </Box>
           </Box>
         </Box>
-      </Box>
-      
-      <TodoEditDialog
-        todo={selectedTodo}
-        open={Boolean(selectedTodo)}
-        onClose={handleTodoDialogClose}
-        onUpdated={handleTodoUpdated}
-      />
 
-      {/* 创建Todo对话框 */}
-      {showTodoCreateForm && (
-        <CreateTodoModal
-          todo={newTodo}
-          onChange={setNewTodo}
-          onSubmit={handleCreateTodo}
-          onCancel={handleTodoCreateFormClose}
+        <TodoEditDialog
+          todo={selectedTodo}
+          open={Boolean(selectedTodo)}
+          onClose={handleTodoDialogClose}
+          onUpdated={handleTodoUpdated}
         />
-      )}
 
-      {/* 标签选择对话框 */}
-      <TagSelectionDialog
-        open={tagSelectionDialogOpen}
-        onClose={() => {
-          setTagSelectionDialogOpen(false);
-          setSelectedNotesForTagging([]);
-        }}
-        onConfirm={handleConfirmBatchSetTags}
-        noteIds={selectedNotesForTagging}
-        getAllTags={getAllTags}
-      />
+        {/* 创建Todo对话框 */}
+        {showTodoCreateForm && (
+          <CreateTodoModal
+            todo={newTodo}
+            onChange={setNewTodo}
+            onSubmit={handleCreateTodo}
+            onCancel={handleTodoCreateFormClose}
+          />
+        )}
 
-      {/* 插件窗口对话框 */}
-      {pluginWindow && pluginWindow.htmlContent && (
-        <Dialog
-          open={true}
-          onClose={pluginWindow.closable ? () => setPluginWindow(null) : undefined}
-          maxWidth={false}
-          PaperProps={{
-            sx: {
-              width: pluginWindow.width,
-              height: pluginWindow.height,
-              maxWidth: '90vw',
-              maxHeight: '90vh',
-              m: 2
-            }
+        {/* 标签选择对话框 */}
+        <TagSelectionDialog
+          open={tagSelectionDialogOpen}
+          onClose={() => {
+            setTagSelectionDialogOpen(false);
+            setSelectedNotesForTagging([]);
           }}
-        >
-          <DialogTitle sx={{ 
-            display: 'flex', 
-            justifyContent: 'space-between', 
-            alignItems: 'center',
-            p: 2,
-            borderBottom: 1,
-            borderColor: 'divider'
-          }}>
-            {pluginWindow.title}
-            {pluginWindow.closable && (
-              <IconButton
-                edge="end"
-                color="inherit"
-                onClick={() => setPluginWindow(null)}
-                aria-label="close"
-              >
-                <CloseIcon />
-              </IconButton>
-            )}
-          </DialogTitle>
-          <DialogContent sx={{ p: 0, overflow: 'hidden', height: `calc(${pluginWindow.height}px - 64px)` }}>
-            <iframe
-              srcDoc={pluginWindow.htmlContent}
-              style={{
-                width: '100%',
-                height: '100%',
-                border: 'none'
-              }}
-              title={pluginWindow.title}
-              sandbox="allow-scripts allow-same-origin"
-              onLoad={(e) => {
-                // iframe 加载完成后立即注入依赖
-                const iframe = e.target
-                if (iframe && iframe.contentWindow) {
-                  try {
-                    console.log('[Plugin Window] iframe onLoad 触发')
-                    
-                    // 注入 UI Bridge
-                    injectUIBridge(iframe.contentWindow, appTheme, {
-                      pluginId: pluginWindow.pluginId,
-                      commandExecutor: executePluginCommand
-                    })
-                    
-                    // 为 iframe 创建独立的 emotion cache
-                    const iframeDoc = iframe.contentDocument || iframe.contentWindow.document
-                    
-                    if (!iframeDoc.head) {
-                      console.error('[Plugin Window] iframe head 不存在')
-                      return
-                    }
-                    
-                    const iframeCache = createCache({
-                      key: 'iframe-emotion',
-                      container: iframeDoc.head,
-                      prepend: true,
-                      speedy: false
-                    })
-                    
-                    if (!iframeCache || !iframeCache.sheet || !iframeCache.registered) {
-                      console.error('[Plugin Window] emotion cache 创建失败', iframeCache)
-                      return
-                    }
-                    
-                    // 暴露 React 和 Material-UI 依赖
-                    iframe.contentWindow.React = React
-                    iframe.contentWindow.ReactDOM = ReactDOM
-                    iframe.contentWindow.MaterialUI = MaterialUI
-                    iframe.contentWindow.MaterialIcons = MaterialIcons
-                    iframe.contentWindow.appTheme = appTheme
-                    iframe.contentWindow.emotionCache = iframeCache
-                    iframe.contentWindow.CacheProvider = CacheProvider
-                    
-                    console.log('[Plugin Window] ✅ 依赖注入完成')
-                  } catch (error) {
-                    console.error('[Plugin Window] ❌ 依赖注入失败:', error)
-                  }
-                }
-              }}
-            />
-          </DialogContent>
-        </Dialog>
-      )}
+          onConfirm={handleConfirmBatchSetTags}
+          noteIds={selectedNotesForTagging}
+          getAllTags={getAllTags}
+        />
 
-      {/* 命令面板 */}
-      <CommandPalette
-        open={commandPaletteOpen}
-        onClose={() => setCommandPaletteOpen(false)}
-      />
+        {/* 插件窗口对话框 */}
+        {pluginWindow && pluginWindow.htmlContent && (
+          <Dialog
+            open={true}
+            onClose={pluginWindow.closable ? () => setPluginWindow(null) : undefined}
+            maxWidth={false}
+            PaperProps={{
+              sx: {
+                width: pluginWindow.width,
+                height: pluginWindow.height,
+                maxWidth: '90vw',
+                maxHeight: '90vh',
+                m: 2
+              }
+            }}
+          >
+            <DialogTitle sx={{
+              display: 'flex',
+              justifyContent: 'space-between',
+              alignItems: 'center',
+              p: 2,
+              borderBottom: 1,
+              borderColor: 'divider'
+            }}>
+              {pluginWindow.title}
+              {pluginWindow.closable && (
+                <IconButton
+                  edge="end"
+                  color="inherit"
+                  onClick={() => setPluginWindow(null)}
+                  aria-label="close"
+                >
+                  <CloseIcon />
+                </IconButton>
+              )}
+            </DialogTitle>
+            <DialogContent sx={{ p: 0, overflow: 'hidden', height: `calc(${pluginWindow.height}px - 64px)` }}>
+              <iframe
+                srcDoc={pluginWindow.htmlContent}
+                style={{
+                  width: '100%',
+                  height: '100%',
+                  border: 'none'
+                }}
+                title={pluginWindow.title}
+                sandbox="allow-scripts allow-same-origin"
+                onLoad={(e) => {
+                  // iframe 加载完成后立即注入依赖
+                  const iframe = e.target
+                  if (iframe && iframe.contentWindow) {
+                    try {
+                      console.log('[Plugin Window] iframe onLoad 触发')
+
+                      // 注入 UI Bridge
+                      injectUIBridge(iframe.contentWindow, appTheme, {
+                        pluginId: pluginWindow.pluginId,
+                        commandExecutor: executePluginCommand
+                      })
+
+                      // 为 iframe 创建独立的 emotion cache
+                      const iframeDoc = iframe.contentDocument || iframe.contentWindow.document
+                      const iframeCache = createCache({
+                        key: 'iframe-emotion',
+                        container: iframeDoc.head,
+                        prepend: true
+                      })
+
+                      // 暴露 React 和 Material-UI 依赖
+                      iframe.contentWindow.React = React
+                      iframe.contentWindow.ReactDOM = ReactDOM
+                      iframe.contentWindow.MaterialUI = MaterialUI
+                      iframe.contentWindow.MaterialIcons = MaterialIcons
+                      iframe.contentWindow.appTheme = appTheme
+                      iframe.contentWindow.emotionCache = iframeCache
+                      iframe.contentWindow.CacheProvider = CacheProvider
+
+                      console.log('[Plugin Window] ✅ 依赖注入完成')
+                    } catch (error) {
+                      console.error('[Plugin Window] ❌ 依赖注入失败:', error)
+                    }
+                  }
+                }}
+              />
+            </DialogContent>
+          </Dialog>
+        )}
+
+        {/* 命令面板 */}
+        <CommandPalette
+          open={commandPaletteOpen}
+          onClose={() => setCommandPaletteOpen(false)}
+        />
       </DragAnimationProvider>
     </ThemeProvider>
   )

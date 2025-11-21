@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import { useTranslation } from '../utils/i18n';
 import {
   Box,
   Typography,
@@ -17,6 +18,7 @@ import {
 import { CheckCircle, Error as ErrorIcon, Wifi, WifiOff } from '@mui/icons-material';
 
 const ProxySettings = ({ showSnackbar }) => {
+  const { t } = useTranslation();
   const [config, setConfig] = useState({
     enabled: false,
     host: '127.0.0.1',
@@ -66,9 +68,9 @@ const ProxySettings = ({ showSnackbar }) => {
       const result = await window.electronAPI.invoke('proxy:save-config', configToSave);
 
       if (result.success) {
-        if (showSnackbar) showSnackbar('代理配置已保存！重启应用后生效。', 'success');
+        if (showSnackbar) showSnackbar(t('proxy.configSaved'), 'success');
       } else {
-        if (showSnackbar) showSnackbar(result.error || '保存失败', 'error');
+        if (showSnackbar) showSnackbar(result.error || t('proxy.saveFailed'), 'error');
       }
     } catch (error) {
       if (showSnackbar) showSnackbar(error.message, 'error');
@@ -78,7 +80,7 @@ const ProxySettings = ({ showSnackbar }) => {
   // 测试代理
   const handleTest = async () => {
     setTesting(true);
-    if (showSnackbar) showSnackbar('正在测试代理连接...', 'info');
+    if (showSnackbar) showSnackbar(t('proxy.testingConnection'), 'info');
 
     try {
       // 确保发送的数据格式正确
@@ -93,12 +95,12 @@ const ProxySettings = ({ showSnackbar }) => {
       const result = await window.electronAPI.invoke('proxy:test', configToTest);
 
       if (result.success) {
-        if (showSnackbar) showSnackbar(`代理测试成功！延迟: ${result.data.latency}ms`, 'success');
+        if (showSnackbar) showSnackbar(`${t('proxy.testConfig')} ${t('common.success')}! ${t('common.latency')}: ${result.data.latency}ms`, 'success');
       } else {
-        if (showSnackbar) showSnackbar(result.error || '代理连接失败', 'error');
+        if (showSnackbar) showSnackbar(result.error || t('proxy.connectionFailed'), 'error');
       }
     } catch (error) {
-      if (showSnackbar) showSnackbar('测试失败: ' + error.message, 'error');
+      if (showSnackbar) showSnackbar(`${t('proxy.testFailed')}: ${error.message}`, 'error');
     } finally {
       setTesting(false);
     }
@@ -106,7 +108,7 @@ const ProxySettings = ({ showSnackbar }) => {
 
   // 获取当前代理状态
   const getProxyUrl = () => {
-    if (!config.enabled) return '未启用';
+    if (!config.enabled) return t('proxy.notEnabled');
     return `${config.protocol}://${config.host}:${config.port}`;
   };
 
@@ -116,8 +118,8 @@ const ProxySettings = ({ showSnackbar }) => {
         {/* 当前状态 */}
         <ListItem>
           <ListItemText
-            primary="代理状态"
-            secondary={config.enabled ? `已启用 - ${getProxyUrl()}` : '未启用'}
+            primary={t('proxy.proxyStatus')}
+            secondary={config.enabled ? t('proxy.enabledWithUrl', { url: getProxyUrl() }) : t('proxy.disabled')}
           />
           <ListItemSecondaryAction>
             <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
@@ -135,8 +137,8 @@ const ProxySettings = ({ showSnackbar }) => {
         {/* 启用开关 */}
         <ListItem>
           <ListItemText
-            primary="启用代理"
-            secondary="开启后需要重启应用生效"
+            primary={t('proxy.enableProxy')}
+            secondary={t('proxy.enableProxyDesc')}
           />
           <ListItemSecondaryAction>
             <Switch
@@ -151,8 +153,8 @@ const ProxySettings = ({ showSnackbar }) => {
         {/* 主机地址 */}
         <ListItem>
           <ListItemText
-            primary="主机地址"
-            secondary="代理服务器的地址"
+            primary={t('proxy.hostAddress')}
+            secondary={t('proxy.hostAddressDesc')}
           />
           <ListItemSecondaryAction>
             <TextField
@@ -171,8 +173,8 @@ const ProxySettings = ({ showSnackbar }) => {
         {/* 端口 */}
         <ListItem>
           <ListItemText
-            primary="端口"
-            secondary="代理服务器的端口号"
+            primary={t('proxy.port')}
+            secondary={t('proxy.portDesc')}
           />
           <ListItemSecondaryAction>
             <TextField
@@ -192,23 +194,23 @@ const ProxySettings = ({ showSnackbar }) => {
         <ListItem>
           <Box sx={{ width: '100%' }}>
             <Typography variant="subtitle2" sx={{ mb: 1 }}>
-              常用代理配置
+              {t('proxy.commonConfigs')}
             </Typography>
             <Box sx={{ display: 'flex', gap: 1, flexWrap: 'wrap' }}>
               <Chip
-                label="Clash: 7890"
+                label={t('proxy.clashPort')}
                 size="small"
                 onClick={() => setConfig({ ...config, host: '127.0.0.1', port: '7890' })}
                 sx={{ cursor: 'pointer' }}
               />
               <Chip
-                label="V2rayN: 10809"
+                label={t('proxy.v2raynPort')}
                 size="small"
                 onClick={() => setConfig({ ...config, host: '127.0.0.1', port: '10809' })}
                 sx={{ cursor: 'pointer' }}
               />
               <Chip
-                label="Shadowsocks: 1080"
+                label={t('proxy.shadowsocksPort')}
                 size="small"
                 onClick={() => setConfig({ ...config, host: '127.0.0.1', port: '1080' })}
                 sx={{ cursor: 'pointer' }}
@@ -226,7 +228,7 @@ const ProxySettings = ({ showSnackbar }) => {
               variant="contained"
               onClick={handleSave}
             >
-              保存配置
+              {t('proxy.saveConfig')}
             </Button>
 
             <Button
@@ -234,7 +236,7 @@ const ProxySettings = ({ showSnackbar }) => {
               onClick={handleTest}
               disabled={!config.enabled || testing}
             >
-              {testing ? '测试中...' : '测试代理'}
+              {testing ? t('proxy.testing') : t('proxy.testProxy')}
             </Button>
           </Box>
         </ListItem>
@@ -245,21 +247,24 @@ const ProxySettings = ({ showSnackbar }) => {
         <ListItem>
           <Box>
             <Typography variant="subtitle2" gutterBottom color="text.secondary">
-              📖 使用说明
+              📖 {t('proxy.usageInstructions')}
             </Typography>
             <Typography variant="body2" color="text.secondary">
-              1. 启用代理并填写代理地址<br />
-              2. 点击"保存配置"按钮<br />
-              3. 重启 FlashNote 使配置生效<br />
-              4. 可选：点击"测试代理"验证连接
+              {t('proxy.usageInstructionsList', { returnObjects: true }).map((item, index) => (
+                <React.Fragment key={index}>
+                  {index + 1}. {item}<br />
+                </React.Fragment>
+              ))}
             </Typography>
             <Typography variant="subtitle2" gutterBottom color="text.secondary" sx={{ mt: 2 }}>
-              ⚠️ 注意事项
+              ⚠️ {t('proxy.importantNotes')}
             </Typography>
             <Typography variant="body2" color="text.secondary">
-              • 配置需要重启应用后才会生效<br />
-              • 确保你的代理软件正在运行<br />
-              • 用于访问 Google Calendar 等国际服务
+              {t('proxy.importantNotesList', { returnObjects: true }).map((item, index) => (
+                <React.Fragment key={index}>
+                  • {item}<br />
+                </React.Fragment>
+              ))}
             </Typography>
           </Box>
         </ListItem>

@@ -47,6 +47,7 @@ import WYSIWYGEditor from './WYSIWYGEditor'
 import { useDebouncedSave } from '../hooks/useDebouncedSave'
 import { imageAPI } from '../api/imageAPI'
 import { convertMarkdownToWhiteboard } from '../utils/markdownToWhiteboardConverter'
+import { useTranslation } from '../utils/i18n'
 
 const NoteEditor = () => {
   // 检测是否在独立窗口模式下运行
@@ -63,6 +64,8 @@ const NoteEditor = () => {
   // 根据运行环境选择状态管理
   const mainStore = useStore()
   const store = standaloneContext || mainStore
+  
+  const { t } = useTranslation()
   
   const {
     selectedNoteId,
@@ -391,7 +394,7 @@ const NoteEditor = () => {
 
     if (matchingNotes.length === 0) {
       console.warn(`Wiki link target not found: ${wikiTarget}`)
-      setWikiLinkError(`找不到笔记"${wikiTarget}"`)
+      setWikiLinkError(t('common.wikiLinkNotFound', { noteTitle: wikiTarget }))
       return
     }
 
@@ -741,10 +744,10 @@ const NoteEditor = () => {
       >
         <Box sx={{ textAlign: 'center' }}>
           <Typography variant="h6" gutterBottom>
-            选择一个笔记开始编辑
+            {t('common.selectNoteToEdit')}
           </Typography>
           <Typography variant="body2">
-            从左侧列表中选择笔记，或创建一个新笔记
+            {t('common.selectOrCreateNote')}
           </Typography>
         </Box>
       </Box>
@@ -835,17 +838,17 @@ const NoteEditor = () => {
             <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
               <AutoSaveIcon fontSize="small" color="action" />
               <Typography variant="body2" color="text.secondary">
-                正在自动保存...
+                {t('common.autoSaving')}
               </Typography>
             </Box>
           ) : (
             <Typography variant="body2" color="text.secondary">
               {hasUnsavedChanges ? (
-                '有未保存的更改'
+                t('common.unsavedChanges')
               ) : lastSaved ? (
-                `上次保存: ${formatLastSaved(lastSaved)}`
+                t('common.lastSaved', { time: formatLastSaved(lastSaved) })
               ) : (
-                '新笔记'
+                t('common.newNote')
               )}
             </Typography>
           )}
@@ -868,13 +871,13 @@ const NoteEditor = () => {
           </ToggleButton>
         </ToggleButtonGroup>
         
-        <Tooltip title="在独立窗口打开">
+        <Tooltip title={t('notes.openInNewWindow')}>
           <IconButton onClick={handleOpenStandalone} size="small">
             <OpenInNewIcon />
           </IconButton>
         </Tooltip>
         
-        <Tooltip title={currentNote?.is_pinned ? '取消置顶' : '置顶笔记'}>
+        <Tooltip title={currentNote?.is_pinned ? t('notes.unpinNote') : t('notes.pinNote')}>
           <IconButton onClick={handleTogglePin} size="small">
             {currentNote?.is_pinned ? (
               <PinIcon color="primary" />
@@ -886,7 +889,7 @@ const NoteEditor = () => {
         
         {/* Markdown 模式：保存按钮 */}
         {noteType === 'markdown' && (
-          <Tooltip title="保存 (Ctrl+S)">
+          <Tooltip title={t('common.saveTooltip')}>
             <IconButton 
               onClick={handleManualSave} 
               size="small"
@@ -900,7 +903,7 @@ const NoteEditor = () => {
         {/* 白板模式：保存白板和导出PNG */}
         {noteType === 'whiteboard' && (
           <>
-            <Tooltip title="保存白板 (Ctrl+S)">
+            <Tooltip title={t('common.saveWhiteboardTooltip')}>
               <IconButton 
                 onClick={() => whiteboardSaveFunc?.()} 
                 size="small"
@@ -909,7 +912,7 @@ const NoteEditor = () => {
               </IconButton>
             </Tooltip>
             
-            <Tooltip title="导出 PNG">
+            <Tooltip title={t('common.exportPngTooltip')}>
               <IconButton 
                 onClick={() => whiteboardExportFunc?.()}
                 size="small"
@@ -954,7 +957,7 @@ const NoteEditor = () => {
           ref={titleRef}
           fullWidth
           variant="standard"
-          placeholder="笔记标题..."
+          placeholder={t('common.noteTitlePlaceholder')}
           value={title}
           onChange={handleTitleChange}
           onKeyDown={handleKeyDown}
@@ -976,7 +979,7 @@ const NoteEditor = () => {
         <Box sx={{ flex: 1, display: 'flex', alignItems: 'center', gap: 0.5, justifyContent: 'flex-end' }}>
           <TextField
             size="small"
-            placeholder="分类"
+            placeholder={t('common.categoryPlaceholder')}
             value={category}
             onChange={handleCategoryChange}
             onKeyDown={handleKeyDown}
@@ -1003,7 +1006,7 @@ const NoteEditor = () => {
                 prevStateRef.current.tags = newTags;
                 debouncedSave();
               }}
-              placeholder="标签"
+              placeholder={t('common.tagsPlaceholder')}
               maxTags={5}
               showSuggestions={true}
               inline={true}
@@ -1031,7 +1034,7 @@ const NoteEditor = () => {
         {/* 独立窗口打开提示 */}
         {isOpenInStandaloneWindow && !isStandaloneMode && (
           <Alert severity="info" sx={{ m: 2, mb: 0 }}>
-            此笔记已在独立窗口中打开。为避免冲突，请在独立窗口中编辑，或关闭独立窗口后再在此编辑。
+            {t('common.noteOpenInStandalone')}
           </Alert>
         )}
         {/* Markdown 编辑器 */}
@@ -1086,9 +1089,19 @@ const NoteEditor = () => {
                     position: 'relative',
                     // 拖拽样式
                     ...(isDragging && editorMode === 'markdown' && {
-                      backgroundColor: 'action.hover',
-                      '&::after': {
-                        content: '"拖拽图片到这里"',
+                      backgroundColor: 'action.hover'
+                    })
+                  }}
+                  onDragEnter={editorMode === 'markdown' ? handleDragEnter : undefined}
+                  onDragLeave={editorMode === 'markdown' ? handleDragLeave : undefined}
+                  onDragOver={editorMode === 'markdown' ? handleDragOver : undefined}
+                  onDrop={editorMode === 'markdown' ? handleDrop : undefined}
+                  onPaste={editorMode === 'markdown' ? handlePaste : undefined}
+                >
+                  {/* 拖拽覆盖层 */}
+                  {isDragging && editorMode === 'markdown' && (
+                    <Box
+                      sx={{
                         position: 'absolute',
                         top: 0,
                         left: 0,
@@ -1105,15 +1118,12 @@ const NoteEditor = () => {
                         border: '2px dashed',
                         borderColor: 'primary.main',
                         borderRadius: 1
-                      }
-                    })
-                  }}
-                  onDragEnter={editorMode === 'markdown' ? handleDragEnter : undefined}
-                  onDragLeave={editorMode === 'markdown' ? handleDragLeave : undefined}
-                  onDragOver={editorMode === 'markdown' ? handleDragOver : undefined}
-                  onDrop={editorMode === 'markdown' ? handleDrop : undefined}
-                  onPaste={editorMode === 'markdown' ? handlePaste : undefined}
-                >
+                      }}
+                    >
+                      {t('common.dragImageHere')}
+                    </Box>
+                  )}
+                  
                   {/* 内容编辑器 - 根据 editorMode 切换 */}
                   {editorMode === 'markdown' ? (
                     <TextField
@@ -1121,7 +1131,7 @@ const NoteEditor = () => {
                       fullWidth
                       multiline
                       variant="standard"
-                      placeholder="开始写笔记... (支持Markdown语法)"
+                      placeholder={t('common.startWritingMarkdown')}
                       value={content}
                       onChange={handleContentChange}
                       onKeyDown={handleKeyDown}
@@ -1152,7 +1162,7 @@ const NoteEditor = () => {
                         prevStateRef.current.content = newContent
                         debouncedSave()
                       }}
-                      placeholder="开始写笔记..."
+                      placeholder={t('common.startWriting')}
                     />
                   )}
                 </Box>
@@ -1209,7 +1219,7 @@ const NoteEditor = () => {
         anchorOrigin={{ vertical: 'bottom', horizontal: 'right' }}
       >
         <Alert severity="success" onClose={() => setShowSaveSuccess(false)}>
-          笔记已保存
+          {t('common.noteSaved')}
         </Alert>
       </Snackbar>
 

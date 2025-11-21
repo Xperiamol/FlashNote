@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useCallback } from 'react'
+import { useTranslation } from '../utils/i18n'
 import {
   Box,
   List,
@@ -59,6 +60,7 @@ import { useDragAnimation } from './DragAnimationProvider'
 import { ANIMATIONS, createTransitionString } from '../utils/animationConfig'
 
 const NoteList = ({ showDeleted = false, onMultiSelectChange, onMultiSelectRefChange }) => {
+  const { t } = useTranslation()
   const theme = useTheme()
   const {
     notes,
@@ -82,7 +84,7 @@ const NoteList = ({ showDeleted = false, onMultiSelectChange, onMultiSelectRefCh
   const [selectedTagFilters, setSelectedTagFilters] = useState([])
   const [permanentDeleteConfirm, setPermanentDeleteConfirm] = useState(false)
   const [batchPermanentDeleteConfirm, setBatchPermanentDeleteConfirm] = useState(false)
-  
+
   // 筛选器可见性状态
   const { filtersVisible, toggleFiltersVisibility } = useFiltersVisibility('note_filters_visible')
 
@@ -108,19 +110,19 @@ const NoteList = ({ showDeleted = false, onMultiSelectChange, onMultiSelectRefCh
   // 过滤笔记
   const filteredNotes = notes.filter(note => {
     const matchesDeletedStatus = showDeleted ? note.is_deleted : !note.is_deleted;
-    
+
     // 如果没有选择标签筛选，只按删除状态筛选
     if (selectedTagFilters.length === 0) {
       return matchesDeletedStatus;
     }
-    
+
     // 检查笔记是否包含选中的标签
-    const noteTags = note.tags ? 
+    const noteTags = note.tags ?
       (Array.isArray(note.tags) ? note.tags : note.tags.split(',').map(tag => tag.trim())) : [];
-    const hasSelectedTags = selectedTagFilters.some(filterTag => 
+    const hasSelectedTags = selectedTagFilters.some(filterTag =>
       noteTags.includes(filterTag)
     );
-    
+
     return matchesDeletedStatus && hasSelectedTags;
   })
 
@@ -137,16 +139,16 @@ const NoteList = ({ showDeleted = false, onMultiSelectChange, onMultiSelectRefCh
       setIsTransitioning(true)
       // 添加短暂延迟以显示过渡动画
       await new Promise(resolve => setTimeout(resolve, 150))
-      
+
       if (showDeleted) {
         await loadNotes({ deleted: true })
       } else {
         await loadNotes()
       }
-      
+
       setIsTransitioning(false)
     }
-    
+
     handleTransition()
   }, [showDeleted]) // 移除 loadNotes 依赖，避免无限循环
 
@@ -166,12 +168,12 @@ const NoteList = ({ showDeleted = false, onMultiSelectChange, onMultiSelectRefCh
   const stableSearchFunction = useCallback((query) => {
     searchNotes(query)
   }, [searchNotes])
-  
+
   const stableLoadFunction = useCallback((condition) => {
     setSearchQuery('')
     loadNotes(condition)
   }, [setSearchQuery, loadNotes])
-  
+
   // 使用搜索管理hook解决无限循环问题
   const { localSearchQuery, setLocalSearchQuery } = useSearchManager({
     searchFunction: stableSearchFunction,
@@ -240,7 +242,7 @@ const NoteList = ({ showDeleted = false, onMultiSelectChange, onMultiSelectRefCh
   // 在独立窗口打开笔记
   const handleOpenStandalone = async () => {
     if (!selectedNote) return
-    
+
     try {
       await window.electronAPI.createNoteWindow(selectedNote.id)
       handleMenuClose()
@@ -257,7 +259,7 @@ const NoteList = ({ showDeleted = false, onMultiSelectChange, onMultiSelectRefCh
       // 从笔记内容中提取第一行作为待办标题
       let content = '未命名待办'
       let description = ''
-      
+
       if (selectedNote.content) {
         const lines = selectedNote.content.trim().split('\n').filter(line => line.trim())
         if (lines.length > 0) {
@@ -280,15 +282,15 @@ const NoteList = ({ showDeleted = false, onMultiSelectChange, onMultiSelectRefCh
       }
 
       const result = await createTodo(todoData)
-      
+
       if (result) {
         // 删除原笔记
         await deleteNote(selectedNote.id)
-        
+
         // 显示成功提示
         console.log('已转换为待办事项:', result)
       }
-      
+
       handleMenuClose()
     } catch (error) {
       console.error('转换为待办失败:', error)
@@ -299,7 +301,7 @@ const NoteList = ({ showDeleted = false, onMultiSelectChange, onMultiSelectRefCh
   // 批量操作处理函数
   const handleBatchRestore = async (selectedIds) => {
     if (selectedIds.length === 0) return
-    
+
     const confirmed = window.confirm(`确定要恢复 ${selectedIds.length} 个笔记吗？`)
     if (confirmed) {
       const result = await batchRestoreNotes(selectedIds)
@@ -311,7 +313,7 @@ const NoteList = ({ showDeleted = false, onMultiSelectChange, onMultiSelectRefCh
 
   const handleBatchPermanentDelete = async (selectedIds) => {
     if (selectedIds.length === 0) return
-    
+
     if (!batchPermanentDeleteConfirm) {
       // 第一次点击，设置确认状态
       setBatchPermanentDeleteConfirm(true)
@@ -331,7 +333,7 @@ const NoteList = ({ showDeleted = false, onMultiSelectChange, onMultiSelectRefCh
 
   const handleBatchDelete = async (selectedIds) => {
     if (selectedIds.length === 0) return
-    
+
     const confirmed = window.confirm(`确定要删除 ${selectedIds.length} 个笔记吗？`)
     if (confirmed) {
       const result = await batchDeleteNotes(selectedIds)
@@ -354,49 +356,49 @@ const NoteList = ({ showDeleted = false, onMultiSelectChange, onMultiSelectRefCh
         locale: dateFnsZhCN
       })
     } catch {
-      return '未知时间'
+      return t('notes.unknownTime')
     }
   }
 
   const getPreviewText = (content, noteType) => {
-    if (!content) return '空笔记'
-    
+    if (!content) return t('notes.emptyNote')
+
     // Handle whiteboard notes specially
     if (noteType === 'whiteboard') {
       try {
         const whiteboardData = JSON.parse(content)
-        return `白板 (${whiteboardData.elements?.length || 0} 个元素)`
+        return t('notes.whiteboardElements', { count: whiteboardData.elements?.length || 0 })
       } catch (error) {
-        return '白板笔记'
+        return t('notes.whiteboardNote')
       }
     }
-    
+
     // Handle markdown notes normally
     return content.replace(/[#*`\n]/g, '').substring(0, 100)
   }
 
   // 渲染加载状态
   const renderLoadingState = () => (
-    <Box sx={{ 
-      display: 'flex', 
-      flexDirection: 'column', 
-      alignItems: 'center', 
+    <Box sx={{
+      display: 'flex',
+      flexDirection: 'column',
+      alignItems: 'center',
       justifyContent: 'center',
       height: '200px',
       gap: 2
     }}>
       <CircularProgress size={40} />
       <Typography variant="body2" color="text.secondary">
-        {showDeleted ? '加载回收站...' : '加载笔记...'}
+        {showDeleted ? t('notes.loadingTrash') : t('notes.loadingNotes')}
       </Typography>
     </Box>
   )
 
   if (isLoading && !isTransitioning) {
     return (
-      <Box sx={{ 
+      <Box sx={{
         flex: 1,
-        display: 'flex', 
+        display: 'flex',
         flexDirection: 'column',
         overflow: 'hidden',
         minHeight: 0
@@ -404,10 +406,10 @@ const NoteList = ({ showDeleted = false, onMultiSelectChange, onMultiSelectRefCh
         <Box sx={{ p: 2, pb: 1, flexShrink: 0 }}>
           <Skeleton variant="rectangular" height={40} />
         </Box>
-        <Box sx={{ 
-          flex: 1, 
-          display: 'flex', 
-          alignItems: 'center', 
+        <Box sx={{
+          flex: 1,
+          display: 'flex',
+          alignItems: 'center',
           justifyContent: 'center',
           minHeight: 0
         }}>
@@ -418,9 +420,9 @@ const NoteList = ({ showDeleted = false, onMultiSelectChange, onMultiSelectRefCh
   }
 
   return (
-    <Box sx={{ 
+    <Box sx={{
       flex: 1,
-      display: 'flex', 
+      display: 'flex',
       flexDirection: 'column',
       overflow: 'hidden',
       minHeight: 0
@@ -456,10 +458,10 @@ const NoteList = ({ showDeleted = false, onMultiSelectChange, onMultiSelectRefCh
             )
           }}
         />
-        
+
         {/* 标签筛选 */}
-        <Collapse 
-          in={filtersVisible} 
+        <Collapse
+          in={filtersVisible}
           timeout={200}
           easing={{
             enter: ANIMATIONS.dragTransition.easing,
@@ -492,13 +494,13 @@ const NoteList = ({ showDeleted = false, onMultiSelectChange, onMultiSelectRefCh
           onClose={multiSelect.exitMultiSelectMode}
           customActions={showDeleted ? [
             {
-              label: '批量恢复',
+              label: t('notes.batchRestore'),
               icon: <RestoreIcon />,
               onClick: () => handleBatchRestore(multiSelect.selectedIds),
               color: 'primary'
             },
             {
-              label: batchPermanentDeleteConfirm ? '确认删除' : '永久删除',
+              label: batchPermanentDeleteConfirm ? t('notes.confirmDelete') : t('notes.permanentDelete'),
               icon: <DeleteForeverIcon />,
               onClick: () => handleBatchPermanentDelete(multiSelect.selectedIds),
               color: batchPermanentDeleteConfirm ? 'error' : 'inherit',
@@ -515,9 +517,9 @@ const NoteList = ({ showDeleted = false, onMultiSelectChange, onMultiSelectRefCh
       )}
 
       {/* 笔记列表 */}
-      <Box sx={{ 
-        flex: 1, 
-        overflow: 'auto', 
+      <Box sx={{
+        flex: 1,
+        overflow: 'auto',
         position: 'relative',
         minHeight: 0
       }}>
@@ -538,7 +540,7 @@ const NoteList = ({ showDeleted = false, onMultiSelectChange, onMultiSelectRefCh
             {renderLoadingState()}
           </Box>
         )}
-        
+
         {/* 笔记内容 */}
         <Fade in={!isTransitioning} timeout={200}>
           <Box>
@@ -546,10 +548,10 @@ const NoteList = ({ showDeleted = false, onMultiSelectChange, onMultiSelectRefCh
               <Box sx={{ p: 4, textAlign: 'center' }}>
                 <NoteIcon sx={{ fontSize: 48, color: 'text.secondary', mb: 2 }} />
                 <Typography variant="h6" color="text.secondary">
-                  {showDeleted ? '回收站为空' : '还没有笔记'}
+                  {showDeleted ? t('notes.trashEmpty') : t('notes.noNotes')}
                 </Typography>
                 <Typography variant="body2" color="text.secondary" sx={{ mt: 1 }}>
-                  {showDeleted ? '删除的笔记会显示在这里' : '点击新建按钮创建第一个笔记'}
+                  {showDeleted ? t('notes.trashEmptyDesc') : t('notes.noNotesDesc')}
                 </Typography>
               </Box>
             ) : (
@@ -628,7 +630,7 @@ const NoteList = ({ showDeleted = false, onMultiSelectChange, onMultiSelectRefCh
                                   flex: 1
                                 }}
                               >
-                                {note.title || '无标题'}
+                                {note.title || t('notes.untitled')}
                               </Typography>
                               {note.category && (
                                 <Chip
@@ -654,9 +656,9 @@ const NoteList = ({ showDeleted = false, onMultiSelectChange, onMultiSelectRefCh
                                   display: 'block'
                                 }}
                               >
-                              {getPreviewText(note.content, note.note_type)}
-                            </Typography>
-                            <Typography component="span" variant="caption" color="text.secondary" sx={{ display: 'block' }}>
+                                {getPreviewText(note.content, note.note_type)}
+                              </Typography>
+                              <Typography component="span" variant="caption" color="text.secondary" sx={{ display: 'block' }}>
                                 {formatDate(note.updated_at)}
                               </Typography>
                             </Box>
@@ -687,10 +689,10 @@ const NoteList = ({ showDeleted = false, onMultiSelectChange, onMultiSelectRefCh
               <ListItemIcon>
                 <RestoreIcon fontSize="small" />
               </ListItemIcon>
-              <ListItemText>恢复笔记</ListItemText>
+              <ListItemText>{t('notes.restoreNote')}</ListItemText>
             </MenuItem>,
-            <MenuItem 
-              key="permanent-delete" 
+            <MenuItem
+              key="permanent-delete"
               onClick={handlePermanentDelete}
               sx={permanentDeleteConfirm ? {
                 backgroundColor: 'error.main',
@@ -703,7 +705,7 @@ const NoteList = ({ showDeleted = false, onMultiSelectChange, onMultiSelectRefCh
               <ListItemIcon>
                 <DeleteIcon fontSize="small" color={permanentDeleteConfirm ? "inherit" : "error"} />
               </ListItemIcon>
-              <ListItemText>{permanentDeleteConfirm ? '确认删除' : '永久删除'}</ListItemText>
+              <ListItemText>{permanentDeleteConfirm ? t('notes.confirmDelete') : t('notes.permanentDelete')}</ListItemText>
             </MenuItem>
           ]
         ) : (
@@ -717,27 +719,27 @@ const NoteList = ({ showDeleted = false, onMultiSelectChange, onMultiSelectRefCh
                 )}
               </ListItemIcon>
               <ListItemText>
-                {selectedNote?.is_pinned ? '取消置顶' : '置顶笔记'}
+                {selectedNote?.is_pinned ? t('notes.unpinNote') : t('notes.pinNote')}
               </ListItemText>
             </MenuItem>,
             <MenuItem key="standalone" onClick={handleOpenStandalone}>
               <ListItemIcon>
                 <OpenInNewIcon fontSize="small" />
               </ListItemIcon>
-              <ListItemText>在独立窗口打开</ListItemText>
+              <ListItemText>{t('notes.openInNewWindow')}</ListItemText>
             </MenuItem>,
             <MenuItem key="convert" onClick={handleConvertToTodo}>
               <ListItemIcon>
                 <TodoIcon fontSize="small" />
               </ListItemIcon>
-              <ListItemText>转换为待办事项</ListItemText>
+              <ListItemText>{t('notes.convertToTodo')}</ListItemText>
             </MenuItem>,
             <Divider key="divider" />,
             <MenuItem key="delete" onClick={handleDelete}>
               <ListItemIcon>
                 <DeleteIcon fontSize="small" />
               </ListItemIcon>
-              <ListItemText>删除笔记</ListItemText>
+              <ListItemText>{t('notes.deleteNote')}</ListItemText>
             </MenuItem>
           ]
         )}

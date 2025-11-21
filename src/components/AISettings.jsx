@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import { useTranslation } from '../utils/i18n';
 import {
   Box,
   Typography,
@@ -27,6 +28,7 @@ import {
 } from '@mui/icons-material';
 
 const AISettings = ({ showSnackbar }) => {
+  const { t } = useTranslation();
   const [config, setConfig] = useState({
     enabled: false,
     provider: 'openai',
@@ -58,7 +60,7 @@ const AISettings = ({ showSnackbar }) => {
       }
     } catch (error) {
       console.error('加载AI配置失败:', error);
-      if (showSnackbar) showSnackbar('加载配置失败', 'error');
+      if (showSnackbar) showSnackbar(t('ai.loadConfigFailed'), 'error');
     }
   };
 
@@ -89,7 +91,7 @@ const AISettings = ({ showSnackbar }) => {
       [field]: value
     };
     setConfig(newConfig);
-    
+
     // 自动保存逻辑：除了文本输入框外，其他修改立即保存
     // 文本输入框(apiKey, apiUrl)在 onBlur 时保存，避免频繁IO
     if (!['apiKey', 'apiUrl'].includes(field)) {
@@ -106,13 +108,13 @@ const AISettings = ({ showSnackbar }) => {
     try {
       const result = await window.electronAPI.ai.saveConfig(configToSave);
       if (!result?.success) {
-        if (showSnackbar) showSnackbar(result.error || '保存失败', 'error');
+        if (showSnackbar) showSnackbar(result.error || t('ai.saveFailed'), 'error');
       } else {
-        if (showSnackbar) showSnackbar('配置已保存', 'success');
+        if (showSnackbar) showSnackbar(t('ai.configSaved'), 'success');
       }
     } catch (error) {
       console.error('保存AI配置失败:', error);
-      if (showSnackbar) showSnackbar('保存失败', 'error');
+      if (showSnackbar) showSnackbar(t('ai.saveFailed'), 'error');
     } finally {
       setSaving(false);
     }
@@ -121,26 +123,26 @@ const AISettings = ({ showSnackbar }) => {
   const handleProviderChange = (providerId) => {
     const provider = providers.find(p => p.id === providerId);
     setSelectedProvider(provider);
-    
+
     const newConfig = {
       ...config,
       provider: providerId,
       // 切换提供商时，更新默认模型
       model: (provider && provider.models && provider.models.length > 0) ? provider.models[0] : config.model
     };
-    
+
     setConfig(newConfig);
     saveConfigToBackend(newConfig);
   };
 
   const handleTestConnection = async () => {
     if (!config.apiKey) {
-      if (showSnackbar) showSnackbar('请先输入API密钥', 'warning');
+      if (showSnackbar) showSnackbar(t('ai.enterApiKey'), 'warning');
       return;
     }
 
     if (config.provider === 'custom' && !config.apiUrl) {
-      if (showSnackbar) showSnackbar('请先输入自定义API地址', 'warning');
+      if (showSnackbar) showSnackbar(t('ai.enterCustomApiUrl'), 'warning');
       return;
     }
 
@@ -149,12 +151,12 @@ const AISettings = ({ showSnackbar }) => {
     try {
       const result = await window.electronAPI.ai.testConnection(config);
       if (result?.success) {
-        if (showSnackbar) showSnackbar(result.message || '连接测试成功', 'success');
+        if (showSnackbar) showSnackbar(result.message || t('ai.connectionTestSuccess'), 'success');
       } else {
-        if (showSnackbar) showSnackbar(result.error || '连接测试失败', 'error');
+        if (showSnackbar) showSnackbar(result.error || t('ai.connectionTestFailed'), 'error');
       }
     } catch (error) {
-      if (showSnackbar) showSnackbar(error.message || '连接测试失败', 'error');
+      if (showSnackbar) showSnackbar(error.message || t('ai.connectionTestFailed'), 'error');
     } finally {
       setTesting(false);
     }
@@ -175,8 +177,8 @@ const AISettings = ({ showSnackbar }) => {
         {/* AI 功能开关 */}
         <ListItem>
           <ListItemText
-            primary="AI 功能"
-            secondary="启用AI功能为后续功能提供智能支持"
+            primary={t('ai.enableAI')}
+            secondary={t('ai.enableAIDesc')}
           />
           <ListItemSecondaryAction>
             <Switch
@@ -193,10 +195,10 @@ const AISettings = ({ showSnackbar }) => {
         <ListItem>
           <Box sx={{ width: '100%', pt: 1, pb: 1 }}>
             <FormControl fullWidth>
-              <InputLabel>AI 服务提供商</InputLabel>
+              <InputLabel>{t('ai.provider')}</InputLabel>
               <Select
                 value={config.provider}
-                label="AI 服务提供商"
+                label={t('ai.provider')}
                 onChange={(e) => handleProviderChange(e.target.value)}
               >
                 {providers.map(provider => (
@@ -221,16 +223,16 @@ const AISettings = ({ showSnackbar }) => {
           <Box sx={{ width: '100%', pt: 1, pb: 1 }}>
             <TextField
               fullWidth
-              label="API Key"
+              label={t('ai.apiKey')}
               type="password"
               value={config.apiKey}
               onChange={(e) => handleConfigChange('apiKey', e.target.value)}
               onBlur={handleTextBlur}
-              placeholder="请输入API密钥"
+              placeholder={t('ai.apiKeyPlaceholder')}
               helperText={
                 selectedProvider && getProviderDocLink(config.provider) && (
-                  <Link 
-                    href="#" 
+                  <Link
+                    href="#"
                     onClick={(e) => {
                       e.preventDefault();
                       if (window.electronAPI?.system) {
@@ -238,7 +240,7 @@ const AISettings = ({ showSnackbar }) => {
                       }
                     }}
                   >
-                    如何获取API Key?
+                    {t('ai.howToGetApiKey')}
                   </Link>
                 )
               }
@@ -254,12 +256,12 @@ const AISettings = ({ showSnackbar }) => {
               <Box sx={{ width: '100%', pt: 1, pb: 1 }}>
                 <TextField
                   fullWidth
-                  label="API URL"
+                  label={t('ai.apiUrl')}
                   value={config.apiUrl}
                   onChange={(e) => handleConfigChange('apiUrl', e.target.value)}
                   onBlur={handleTextBlur}
-                  placeholder="https://api.example.com/v1/chat/completions"
-                  helperText="兼容OpenAI API格式的自定义服务地址"
+                  placeholder={t('ai.apiUrlPlaceholder')}
+                  helperText={t('ai.apiUrlDesc')}
                 />
               </Box>
             </ListItem>
@@ -273,10 +275,10 @@ const AISettings = ({ showSnackbar }) => {
           <Box sx={{ width: '100%', pt: 1, pb: 1 }}>
             {selectedProvider && selectedProvider.models && selectedProvider.models.length > 0 ? (
               <FormControl fullWidth>
-                <InputLabel>模型</InputLabel>
+                <InputLabel>{t('ai.model')}</InputLabel>
                 <Select
                   value={config.model}
-                  label="模型"
+                  label={t('ai.model')}
                   onChange={(e) => handleConfigChange('model', e.target.value)}
                 >
                   {selectedProvider.models.map(model => (
@@ -289,11 +291,11 @@ const AISettings = ({ showSnackbar }) => {
             ) : (
               <TextField
                 fullWidth
-                label="模型名称"
+                label={t('ai.modelName')}
                 value={config.model}
                 onChange={(e) => handleConfigChange('model', e.target.value)}
                 onBlur={handleTextBlur}
-                placeholder="gpt-3.5-turbo"
+                placeholder={t('ai.modelPlaceholder')}
               />
             )}
           </Box>
@@ -305,10 +307,10 @@ const AISettings = ({ showSnackbar }) => {
         <ListItem>
           <Box sx={{ width: '100%', pt: 2, pb: 2 }}>
             <Typography variant="body2" color="text.secondary" gutterBottom>
-              Temperature (创造性): {config.temperature}
+              {t('ai.temperature')}: {typeof config.temperature === 'number' && !isNaN(config.temperature) ? config.temperature : 0.7}
             </Typography>
             <Slider
-              value={config.temperature}
+              value={typeof config.temperature === 'number' && !isNaN(config.temperature) ? config.temperature : 0.7}
               onChange={(e, value) => handleConfigChange('temperature', value)}
               min={0}
               max={2}
@@ -321,7 +323,7 @@ const AISettings = ({ showSnackbar }) => {
               valueLabelDisplay="auto"
             />
             <Typography variant="caption" color="text.secondary">
-              较低的值使输出更确定，较高的值使输出更有创造性
+              {t('ai.temperatureDesc')}
             </Typography>
           </Box>
         </ListItem>
@@ -332,10 +334,10 @@ const AISettings = ({ showSnackbar }) => {
         <ListItem>
           <Box sx={{ width: '100%', pt: 2, pb: 2 }}>
             <Typography variant="body2" color="text.secondary" gutterBottom>
-              最大Token数: {config.maxTokens}
+              {t('ai.maxTokens')}: {typeof config.maxTokens === 'number' && !isNaN(config.maxTokens) ? config.maxTokens : 2000}
             </Typography>
             <Slider
-              value={config.maxTokens}
+              value={typeof config.maxTokens === 'number' && !isNaN(config.maxTokens) ? config.maxTokens : 2000}
               onChange={(e, value) => handleConfigChange('maxTokens', value)}
               min={100}
               max={4000}
@@ -348,7 +350,7 @@ const AISettings = ({ showSnackbar }) => {
               valueLabelDisplay="auto"
             />
             <Typography variant="caption" color="text.secondary">
-              控制AI响应的最大长度
+              {t('ai.maxTokensDesc')}
             </Typography>
           </Box>
         </ListItem>
@@ -364,7 +366,7 @@ const AISettings = ({ showSnackbar }) => {
               disabled={!config.apiKey || testing}
               startIcon={testing ? <CircularProgress size={16} /> : <CheckIcon />}
             >
-              {testing ? '测试中...' : '测试连接'}
+              {testing ? t('ai.testing') : t('ai.testConnection')}
             </Button>
           </Box>
         </ListItem>
@@ -373,14 +375,13 @@ const AISettings = ({ showSnackbar }) => {
       {/* 使用说明 */}
       <Alert severity="info" icon={<InfoIcon />} sx={{ mt: 3 }}>
         <Typography variant="body2" gutterBottom>
-          <strong>使用说明：</strong>
+          <strong>{t('ai.usageInstructions')}：</strong>
         </Typography>
         <Typography variant="body2" component="div">
           <ul style={{ margin: 0, paddingLeft: 20 }}>
-            <li>配置完成后，AI功能将可供后续功能/插件调用</li>
-            <li>建议先测试连接确保配置正确</li>
-            <li>API密钥将安全存储在本地数据库中</li>
-            <li>不同的AI提供商可能有不同的定价策略，请查看官方文档</li>
+            {t('ai.usageInstructionsList', { returnObjects: true }).map((item, index) => (
+              <li key={index}>{item}</li>
+            ))}
           </ul>
         </Typography>
       </Alert>

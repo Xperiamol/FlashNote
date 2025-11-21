@@ -32,7 +32,7 @@ const DragPreviewContainer = styled(Paper, {
 })(({ theme, isDragging, isNearBoundary, primaryColor }) => ({
   position: 'fixed',
   pointerEvents: 'none',
-  zIndex: 9999,
+  zIndex: 99999, // 增加 z-index
   padding: theme.spacing(1.5),
   minWidth: 200,
   maxWidth: 280,
@@ -40,19 +40,19 @@ const DragPreviewContainer = styled(Paper, {
   border: `2px solid ${primaryColor}`,
   borderRadius: theme.spacing(1),
   transform: 'translate(-50%, -50%)',
-  transition: 'transform 0.1s ease-out', // 减少过渡时间，提高流畅度
+  transition: 'transform 0.1s ease-out',
   animation: isDragging ? `${dragFloat} 2s ease-in-out infinite` : 'none',
-  // 确保内容不会溢出
   overflow: 'hidden',
   wordWrap: 'break-word',
   wordBreak: 'break-all',
-  // 添加阴影效果
   boxShadow: theme.shadows[8],
+  display: 'block', // 确保显示
+  visibility: 'visible', // 确保可见
   ...(isNearBoundary && {
     animation: `${boundaryPulse} 1s ease-in-out infinite, ${dragFloat} 2s ease-in-out infinite`,
     borderColor: primaryColor,
-    backgroundColor: `${primaryColor}20`, // 20% 透明度
-    boxShadow: `0 0 20px ${primaryColor}40`, // 发光效果
+    backgroundColor: `${primaryColor}20`,
+    boxShadow: `0 0 20px ${primaryColor}40`,
   }),
 }));
 
@@ -116,7 +116,8 @@ const DragPreview = ({
   draggedItemType, 
   currentPosition, 
   isNearBoundary,
-  boundaryPosition 
+  boundaryPosition,
+  previewRef  // 接收 ref
 }) => {
   const { primaryColor } = useStore();
   const [showPreview, setShowPreview] = useState(false);
@@ -130,7 +131,7 @@ const DragPreview = ({
       const timer = setTimeout(() => setShowPreview(false), 200);
       return () => clearTimeout(timer);
     }
-  }, [isDragging]);
+  }, [isDragging, draggedItem]);
 
   useEffect(() => {
     if (isNearBoundary) {
@@ -180,16 +181,32 @@ const DragPreview = ({
   return (
     <>
       {/* 拖拽预览 */}
-      <Fade in={isDragging} timeout={200}>
-        <DragPreviewContainer
-          isDragging={isDragging}
-          isNearBoundary={isNearBoundary}
-          primaryColor={primaryColor}
-          style={{
-            left: currentPosition.x,
-            top: currentPosition.y,
-          }}
-        >
+      <div
+        ref={previewRef}
+        style={{
+          position: 'fixed',
+          left: currentPosition.x,
+          top: currentPosition.y,
+          transform: 'translate(-50%, -50%)',
+          pointerEvents: 'none',
+          zIndex: 99999,
+          opacity: isDragging ? 1 : 0,
+          transition: 'opacity 200ms',
+          padding: '12px',
+          minWidth: '200px',
+          maxWidth: '280px',
+          backgroundColor: 'white',
+          border: `2px solid ${primaryColor}`,
+          borderRadius: '8px',
+          boxShadow: '0px 8px 16px rgba(0,0,0,0.2)',
+          animation: isDragging ? `${dragFloat} 2s ease-in-out infinite` : 'none',
+          willChange: 'left, top',  // 提示浏览器优化这些属性
+          ...(isNearBoundary && {
+            backgroundColor: `${primaryColor}20`,
+            boxShadow: `0 0 20px ${primaryColor}40`,
+          }),
+        }}
+      >
           <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: 1 }}>
             {getItemIcon()}
             <Typography 
@@ -205,9 +222,12 @@ const DragPreview = ({
               {getItemTitle()}
             </Typography>
             {isNearBoundary && (
-              <Zoom in={isNearBoundary}>
-                <LaunchIcon color="success" fontSize="small" />
-              </Zoom>
+              <LaunchIcon color="success" fontSize="small" 
+                style={{
+                  opacity: isNearBoundary ? 1 : 0,
+                  transition: 'opacity 200ms',
+                }}
+              />
             )}
           </Box>
           
@@ -226,29 +246,38 @@ const DragPreview = ({
           </Typography>
           
           {isNearBoundary && (
-            <Fade in={isNearBoundary}>
-              <Typography 
-                variant="caption" 
-                color="success.main" 
-                sx={{ 
-                  display: 'block', 
-                  mt: 0.5, 
-                  fontWeight: 'bold',
-                  textAlign: 'center'
-                }}
-              >
-                释放以创建独立窗口
-              </Typography>
-            </Fade>
+            <Typography 
+              variant="caption" 
+              color="success.main" 
+              sx={{ 
+                display: 'block', 
+                mt: 0.5, 
+                fontWeight: 'bold',
+                textAlign: 'center',
+                opacity: isNearBoundary ? 1 : 0,
+                transition: 'opacity 200ms',
+              }}
+            >
+              释放以创建独立窗口
+            </Typography>
           )}
-        </DragPreviewContainer>
-      </Fade>
+        </div>
 
       {/* 边界指示器 */}
       {showBoundaryIndicator && boundaryPosition && (
-        <Fade in={isNearBoundary} timeout={300}>
-          <BoundaryIndicator position={boundaryPosition} primaryColor={primaryColor} />
-        </Fade>
+        <div
+          style={{
+            position: 'fixed',
+            backgroundColor: primaryColor,
+            opacity: isNearBoundary ? 0.8 : 0,
+            zIndex: 99998,
+            transition: 'opacity 300ms',
+            ...(boundaryPosition === 'top' && { top: 0, left: 0, right: 0, height: '4px' }),
+            ...(boundaryPosition === 'bottom' && { bottom: 0, left: 0, right: 0, height: '4px' }),
+            ...(boundaryPosition === 'left' && { top: 0, left: 0, bottom: 0, width: '4px' }),
+            ...(boundaryPosition === 'right' && { top: 0, right: 0, bottom: 0, width: '4px' }),
+          }}
+        />
       )}
     </>
   );

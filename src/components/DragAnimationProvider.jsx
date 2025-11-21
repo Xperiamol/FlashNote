@@ -21,6 +21,10 @@ export const DragAnimationProvider = ({ children }) => {
   
   // 使用 ref 来存储动画帧 ID
   const animationFrameRef = useRef(null);
+  // 使用 ref 来存储预览元素，避免频繁查询 DOM
+  const previewElementRef = useRef(null);
+  // 使用 ref 来存储当前位置，避免频繁状态更新
+  const currentPositionRef = useRef({ x: 0, y: 0 });
 
   // 配置拖拽管理器的动画回调
   const configureDragAnimations = useCallback((originalCallbacks = {}) => {
@@ -41,16 +45,20 @@ export const DragAnimationProvider = ({ children }) => {
         }
       },
       onDragMove: (dragData) => {
-        // 使用 requestAnimationFrame 来优化性能
+        // 使用 ref 直接更新位置，避免频繁的状态更新
+        currentPositionRef.current = dragData.currentPosition;
+        
+        // 使用 requestAnimationFrame 来优化 DOM 更新
         if (animationFrameRef.current) {
           cancelAnimationFrame(animationFrameRef.current);
         }
         
         animationFrameRef.current = requestAnimationFrame(() => {
-          setDragState(prev => ({
-            ...prev,
-            currentPosition: dragData.currentPosition
-          }));
+          // 直接更新 DOM 而不是 React 状态
+          if (previewElementRef.current) {
+            previewElementRef.current.style.left = `${dragData.currentPosition.x}px`;
+            previewElementRef.current.style.top = `${dragData.currentPosition.y}px`;
+          }
         });
         
         // 调用原始回调
@@ -165,7 +173,8 @@ export const DragAnimationProvider = ({ children }) => {
   const contextValue = {
     dragState,
     createAnimatedDragHandler,
-    configureDragAnimations
+    configureDragAnimations,
+    previewElementRef  // 暴露 ref 给 DragPreview 使用
   };
 
   return (
@@ -179,6 +188,7 @@ export const DragAnimationProvider = ({ children }) => {
         currentPosition={dragState.currentPosition}
         isNearBoundary={dragState.isNearBoundary}
         boundaryPosition={dragState.boundaryPosition}
+        previewRef={previewElementRef}
       />
     </DragAnimationContext.Provider>
   );
