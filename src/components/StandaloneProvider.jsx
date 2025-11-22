@@ -1,5 +1,6 @@
 import React, { createContext, useContext, useEffect } from 'react'
 import { useStandaloneStore } from '../store/useStandaloneStore'
+import { useStore } from '../store/useStore'
 import { DragAnimationProvider } from './DragAnimationProvider'
 
 export const StandaloneContext = createContext(null)
@@ -14,6 +15,7 @@ export const useStandaloneContext = () => {
 
 export const StandaloneProvider = ({ children, windowType, windowData }) => {
   const store = useStandaloneStore()
+  const { defaultMinibarMode } = useStore()
   const [isLoading, setIsLoading] = React.useState(true)
   
   // 初始化窗口配置
@@ -21,6 +23,13 @@ export const StandaloneProvider = ({ children, windowType, windowData }) => {
     const initializeData = async () => {
       if (windowType && windowData) {
         store.setWindowConfig(windowType, windowData)
+        
+        // 设置默认minibar模式：优先使用 windowData 中的 minibarMode（如果存在），否则使用主应用的 defaultMinibarMode
+        if (windowData && typeof windowData.minibarMode !== 'undefined') {
+          store.setMinibarMode(Boolean(windowData.minibarMode))
+        } else {
+          store.setMinibarMode(defaultMinibarMode)
+        }
         
         // 如果是笔记窗口，加载对应的笔记
         if (windowType === 'note' && windowData.noteId) {
@@ -34,7 +43,7 @@ export const StandaloneProvider = ({ children, windowType, windowData }) => {
     }
     
     initializeData()
-  }, [windowType, windowData]) // 移除store依赖，避免循环更新
+  }, [windowType, windowData, defaultMinibarMode]) // 添加defaultMinibarMode依赖
 
   // 订阅主进程推送的笔记更新事件，实现跨窗口同步
   useEffect(() => {

@@ -83,7 +83,7 @@ const SecondarySidebar = ({ open, onClose, width = 320, onTodoSelect, onViewMode
         return (
           <Box sx={{ p: 2, display: 'flex', flexDirection: 'column', height: '100%' }}>
             <Typography variant="h6" sx={{ mb: 2 }}>
-              {t('sidebar.notes')}
+              {t('sidebar.plugins')}
             </Typography>
 
             <Stack direction="row" spacing={1} sx={{ mb: 3 }}>

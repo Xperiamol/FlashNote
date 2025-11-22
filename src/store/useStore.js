@@ -41,6 +41,7 @@ const useStore = create(
                 userAvatar: '', // 用户头像
                 userName: '', // 用户名称
                 editorMode: 'markdown', // 编辑器模式：'markdown' | 'wysiwyg'
+                defaultMinibarMode: false, // 独立窗口默认minibar模式
 
                 // 插件商店相关 UI 状态
                 pluginStoreFilters: {
@@ -70,6 +71,8 @@ const useStore = create(
                 setTitleBarStyle: (style) => set({ titleBarStyle: style }),
 
                 setEditorMode: (mode) => set({ editorMode: mode }),
+
+                setDefaultMinibarMode: (enabled) => set({ defaultMinibarMode: enabled }),
 
                 setLanguage: (language) => set({ language }),
 
@@ -535,6 +538,9 @@ const useStore = create(
                                 }
                                 if (settings.language) {
                                     set({ language: settings.language })
+                                }
+                                if (settings.defaultMinibarMode !== undefined) {
+                                    set({ defaultMinibarMode: Boolean(settings.defaultMinibarMode) })
                                 }
                             }
                         }

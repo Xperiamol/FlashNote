@@ -40,11 +40,40 @@ function ensureFutureDueDate(dueStr, minIso) {
   // 若 dueStr 为空或早于 minIso，则返回 minIso（默认 minIso 为 ISO date + time）
   if (!dueStr) return minIso
   try {
-    const d = new Date(dueStr)
+    // 解析时间字符串（支持带 Z 的 UTC 格式和不带时区的本地格式）
+    let d
+    if (dueStr.endsWith('Z')) {
+      // UTC 时间，转换为本地时间
+      d = new Date(dueStr)
+    } else {
+      // 假设为本地时间格式，添加本地时区偏移
+      d = new Date(dueStr)
+    }
+    
     const m = new Date(minIso)
     if (isNaN(d.getTime()) || d < m) return minIso
-    return d.toISOString().split('.')[0]
+    
+    // 获取本地时间的小时（0-23）
+    const localHour = d.getHours()
+    
+    // 检查小时是否在合理范围（8:00-23:59）
+    if (localHour >= 0 && localHour < 8) {
+      // 如果在凌晨0-7点，调整到当天早上9点
+      d.setHours(9, 0, 0, 0)
+      console.log(`[Time Adjust] 调整凌晨时间 ${dueStr} (${localHour}:00) -> ${d.toISOString()}`)
+    }
+    
+    // 返回本地时间的 ISO 格式（不含毫秒和时区）
+    const year = d.getFullYear()
+    const month = String(d.getMonth() + 1).padStart(2, '0')
+    const day = String(d.getDate()).padStart(2, '0')
+    const hours = String(d.getHours()).padStart(2, '0')
+    const minutes = String(d.getMinutes()).padStart(2, '0')
+    const seconds = String(d.getSeconds()).padStart(2, '0')
+    
+    return `${year}-${month}-${day}T${hours}:${minutes}:${seconds}`
   } catch (e) {
+    console.error('[Time Parse Error]', e)
     return minIso
   }
 }
@@ -178,20 +207,47 @@ function GeneratorFactory(runtime, cfg, logger, memoryManager) {
     }
   }
 
-  function buildPrompt(taskDescription, memoryContext, nowIsoMin) {
+  function buildPrompt(taskDescription, memoryContext, nowIsoMin, upcomingEvents) {
     // 注意：尽量把格式样例 JSON 用字符串插入，不用 code block
     const today = todayISODate()
+    const now = new Date()
+    const currentHour = now.getHours()
+    
+    // 生成一个合理的示例时间（如果当前时间在凌晨，使用上午9点；否则使用当前时间）
+    let exampleHour = currentHour >= 8 && currentHour < 24 ? currentHour : 9
+    let exampleMinute = currentHour >= 8 && currentHour < 24 ? now.getMinutes() : 0
+    const exampleTime = `${String(exampleHour).padStart(2, '0')}:${String(exampleMinute).padStart(2, '0')}:00`
+    
     const example = [
       {
         content: '第一步任务',
         description: '具体怎么做',
         is_important: true,
         is_urgent: false,
-        due_date: `${today}T${nowIsoMin}:00`
+        due_date: `${today}T${exampleTime}`
       }
     ]
+    
+    // 格式化未来事件信息
+    let eventsContext = '';
+    if (upcomingEvents && upcomingEvents.length > 0) {
+      eventsContext = '\n未来一周的日程安排（请避免与这些时间冲突）：\n';
+      upcomingEvents.forEach((event, idx) => {
+        const dueDate = event.due_date ? new Date(event.due_date).toLocaleString('zh-CN', { 
+          month: 'numeric', 
+          day: 'numeric', 
+          weekday: 'short',
+          hour: '2-digit', 
+          minute: '2-digit' 
+        }) : '无截止日期';
+        const urgentTag = event.is_urgent && event.is_important ? '[紧急重要]' : event.is_important ? '[重要]' : event.is_urgent ? '[紧急]' : '';
+        const status = event.is_completed ? '[已完成]' : '[待处理]';
+        eventsContext += `${idx + 1}. ${status}${urgentTag} ${event.content} - ${dueDate}\n`;
+      });
+    }
+    
     return `
-你是任务规划专家。根据任务描述和用户历史偏好，将任务拆解成具体且可执行的待办事项。
+你是任务规划专家。根据任务描述、用户历史偏好和未来日程安排，将任务拆解成具体且可执行的待办事项。
 
 今天日期：${today}
 
@@ -199,6 +255,7 @@ function GeneratorFactory(runtime, cfg, logger, memoryManager) {
 
 历史参考（若有）：
 ${memoryContext || '无历史偏好'}
+${eventsContext}
 
 格式要求：
 - 返回 JSON 数组，每个元素包含字段：content, description, is_important, is_urgent, due_date（可选，ISO 格式）。
@@ -206,13 +263,17 @@ ${memoryContext || '无历史偏好'}
 - description: 详细执行步骤或注意事项（选填）
 - is_important: true/false（必填）
 - is_urgent: true/false（必填）
-- due_date: YYYY-MM-DDTHH:MM:SS（必须是今天或未来）
+- due_date: YYYY-MM-DDTHH:MM:SS 格式，时间部分 HH 必须在 08-23 之间（例如：2025-01-15T09:00:00 或 2025-01-15T18:30:00）
 
 规划原则：
 1) 生成 3-5 个待办事项，按执行顺序排列
 2) 为每个任务分配合理的 due_date（不能早于 ${nowIsoMin}）
 3) 如果记忆显示用户习惯渐进式截止，则分配跨天的截止日期
-4) 直接返回纯 JSON 数组（不要用 Markdown 代码块）
+4) **重要**：仔细查看上面列出的未来日程，避免新任务与已有日程在同一天的同一时间段冲突
+5) **严格要求**：due_date 的时间必须在 08:00:00 到 23:59:59 之间，绝对不能使用 00:00-07:59 的时间（例如禁止 T01:00:00、T05:30:00）
+6) 推荐时间段：上午 09:00-12:00，下午 14:00-18:00，晚上 19:00-22:00
+7) 时间格式：使用本地时间，格式为 YYYY-MM-DDTHH:MM:SS（不要加 Z 或时区标识）
+8) 直接返回纯 JSON 数组（不要用 Markdown 代码块）
 
 示例格式：
 ${JSON.stringify(example, null, 2)}
@@ -310,14 +371,33 @@ ${JSON.stringify(example, null, 2)}
       logger.warn('[Generator] failed to get memory context', e)
     }
 
+    // Step 1.5: retrieve upcoming events (next 7 days)
+    let upcomingEvents = []
+    try {
+      const sevenDaysLater = new Date(now.getTime() + 7 * 24 * 60 * 60 * 1000)
+      const allTodos = await runtime.todos.list({ includeCompleted: false })
+      upcomingEvents = allTodos.filter(todo => {
+        if (!todo.due_date) return false
+        const dueDate = new Date(todo.due_date)
+        return dueDate >= now && dueDate <= sevenDaysLater
+      }).sort((a, b) => new Date(a.due_date) - new Date(b.due_date))
+      logger.info('[Generator] 未来7天待办数量:', upcomingEvents.length)
+      if (upcomingEvents.length > 0) {
+        logger.info('[Generator] 示例事件:', upcomingEvents.slice(0, 3).map(e => `${e.content} @ ${e.due_date}`))
+      }
+    } catch (e) {
+      logger.warn('[Generator] failed to get upcoming events', e)
+    }
+
     // Step 2: build prompt and call AI
-    const prompt = buildPrompt(taskDescription, memContext, minIso)
+    const prompt = buildPrompt(taskDescription, memContext, minIso, upcomingEvents)
     logger.debug('[Generator] prompt preview', prompt.substring(0, 500))
     const raw = await callAI(prompt)
     logger.debug('[Generator] AI raw content length', raw ? raw.length : 0)
 
     // Step 3: parse tasks
     const tasks = await parseTasksFromAI(raw)
+    logger.info('[Generator] AI 返回的任务数量:', tasks.length)
 
     // Step 4: normalize & validate tasks
     const normalized = tasks.map((t, idx) => {
@@ -325,7 +405,16 @@ ${JSON.stringify(example, null, 2)}
       const description = t.description || ''
       const is_important = !!t.is_important
       const is_urgent = !!t.is_urgent
+      const originalDueDate = t.due_date
       const due_date = t.due_date ? ensureFutureDueDate(t.due_date, minIso) : null
+      
+      // 记录时间调整信息
+      if (originalDueDate && due_date && originalDueDate !== due_date) {
+        logger.info(`[Generator] 时间已调整: "${content}" ${originalDueDate} -> ${due_date}`)
+      } else if (due_date) {
+        logger.info(`[Generator] 任务时间: "${content}" ${due_date}`)
+      }
+      
       return { content, description, is_important, is_urgent, due_date }
     })
 

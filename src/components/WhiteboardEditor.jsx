@@ -541,8 +541,12 @@ const WhiteboardEditor = ({ noteId, showToolbar = true, isStandaloneMode = false
         console.log('[WhiteboardEditor] 开始执行保存...')
         await saveNow()
         console.log('[WhiteboardEditor] 保存完成')
+        // 通知主进程保存完成
+        window.dispatchEvent(new CustomEvent('standalone-save-complete'))
       } catch (error) {
         console.error('[WhiteboardEditor] 保存失败:', error)
+        // 即使失败也通知，避免主进程一直等待
+        window.dispatchEvent(new CustomEvent('standalone-save-complete'))
       }
     }
 

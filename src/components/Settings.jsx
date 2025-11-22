@@ -85,7 +85,7 @@ function TabPanel({ children, value, index, ...other }) {
 }
 
 const Settings = () => {
-    const { theme, setTheme, setPrimaryColor, setUserAvatar, setUserName, titleBarStyle, setTitleBarStyle, editorMode, setEditorMode, language, setLanguage } = useStore();
+    const { theme, setTheme, setPrimaryColor, setUserAvatar, setUserName, titleBarStyle, setTitleBarStyle, editorMode, setEditorMode, language, setLanguage, defaultMinibarMode, setDefaultMinibarMode } = useStore();
     const settingsTabValue = useStore((state) => state.settingsTabValue);
     const [settings, setSettings] = useState({
         theme: 'system',
@@ -94,7 +94,8 @@ const Settings = () => {
         userAvatar: '',
         userName: '',
         titleBarStyle: 'windows',
-        language: 'zh-CN'
+        language: 'zh-CN',
+        defaultMinibarMode: false
     });
     const [shortcuts, setShortcuts] = useState(DEFAULT_SHORTCUTS);
     const [shortcutConflicts, setShortcutConflicts] = useState({});
@@ -143,57 +144,74 @@ const Settings = () => {
         }
     };
 
+    // 设置处理器配置 - 遵循开闭原则（OCP）
+    const settingHandlers = {
+        language: {
+            syncGlobalState: setLanguage,
+            beforeSave: async (value) => {
+                initI18n(value); // 更新i18n系统
+            }
+        },
+        autoLaunch: {
+            customSave: async (value) => {
+                const result = await window.electronAPI.settings.setAutoLaunch(value);
+                if (!result.success) {
+                    throw new Error(t('settings.autoLaunchFailed') + result.error);
+                }
+            }
+        },
+        defaultMinibarMode: {
+            syncGlobalState: setDefaultMinibarMode
+        },
+        theme: {
+            syncGlobalState: setTheme
+        },
+        customThemeColor: {
+            syncGlobalState: setPrimaryColor
+        },
+        titleBarStyle: {
+            syncGlobalState: setTitleBarStyle
+        },
+        userName: {
+            syncGlobalState: setUserName
+        },
+        userAvatar: {
+            syncGlobalState: setUserAvatar
+        }
+    };
+
+    // 统一的设置更改处理器 - 遵循单一职责原则（SRP）
     const handleSettingChange = async (key, value) => {
         try {
+            // 1. 更新本地状态
             setSettings(prev => ({ ...prev, [key]: value }));
 
-            // 特殊处理语言设置
-            if (key === 'language') {
-                setLanguage(value);
-                initI18n(value); // 更新i18n系统
-                if (window.electronAPI?.settings) {
-                    await window.electronAPI.settings.set(key, value);
-                }
-                return;
+            const handler = settingHandlers[key] || {};
+
+            // 2. 执行前置钩子
+            if (handler.beforeSave) {
+                await handler.beforeSave(value);
             }
 
-            // 特殊处理开机自启
-            if (key === 'autoLaunch') {
-                if (window.electronAPI?.settings) {
-                    const result = await window.electronAPI.settings.setAutoLaunch(value);
-                    if (!result.success) {
-                        // 如果设置失败，恢复原状态
-                        setSettings(prev => ({ ...prev, [key]: !value }));
-                        showSnackbar(t('settings.autoLaunchFailed') + result.error, 'error');
-                        return;
-                    }
-                }
-            } else {
-                // 其他设置使用通用方法
-                if (window.electronAPI?.settings) {
-                    await window.electronAPI.settings.set(key, value);
-                }
+            // 3. 保存设置（自定义保存或默认保存）
+            if (handler.customSave) {
+                await handler.customSave(value);
+            } else if (window.electronAPI?.settings) {
+                await window.electronAPI.settings.set(key, value);
             }
 
-            // 特殊处理主题切换
-            if (key === 'theme') {
-                setTheme(value);
+            // 4. 同步到全局状态
+            if (handler.syncGlobalState) {
+                handler.syncGlobalState(value);
             }
 
-            // 特殊处理主题颜色切换
-            if (key === 'customThemeColor') {
-                setPrimaryColor(value);
-            }
-
-            // 特殊处理标题栏样式切换
-            if (key === 'titleBarStyle') {
-                setTitleBarStyle(value);
-            }
-
+            // 5. 显示成功提示
             showSnackbar(t('settings.settingsSaved'), 'success');
         } catch (error) {
             console.error('Failed to save setting:', error);
-            showSnackbar(t('settings.saveSettingsFailed'), 'error');
+            // 恢复原状态
+            setSettings(prev => ({ ...prev, [key]: !value }));
+            showSnackbar(error.message || t('settings.saveSettingsFailed'), 'error');
         }
     };
 
@@ -237,26 +255,24 @@ const Settings = () => {
         setSnackbar({ open: true, message, severity });
     };
 
+    // 头像管理 - 遵循单一职责原则
     const handleAvatarChange = async () => {
         try {
-            if (window.electronAPI?.system) {
-                const result = await window.electronAPI.system.showOpenDialog({
-                    title: '选择头像图片',
-                    filters: [
-                        { name: '图片文件', extensions: ['jpg', 'jpeg', 'png', 'gif', 'bmp', 'webp'] }
-                    ],
-                    properties: ['openFile']
-                });
+            if (!window.electronAPI?.system) return;
 
-                if (result && !result.canceled && result.filePaths.length > 0) {
-                    const filePath = result.filePaths[0];
-                    // 通过Electron API读取文件并转换为base64
-                    const base64Image = await window.electronAPI.system.readImageAsBase64(filePath);
+            const result = await window.electronAPI.system.showOpenDialog({
+                title: '选择头像图片',
+                filters: [
+                    { name: '图片文件', extensions: ['jpg', 'jpeg', 'png', 'gif', 'bmp', 'webp'] }
+                ],
+                properties: ['openFile']
+            });
 
-                    await handleSettingChange('userAvatar', base64Image);
-                    setUserAvatar(base64Image); // 同步更新全局状态
-                    showSnackbar(t('settings.avatarUpdateSuccess'), 'success');
-                }
+            if (result && !result.canceled && result.filePaths.length > 0) {
+                const filePath = result.filePaths[0];
+                const base64Image = await window.electronAPI.system.readImageAsBase64(filePath);
+                await handleSettingChange('userAvatar', base64Image);
+                showSnackbar(t('settings.avatarUpdateSuccess'), 'success');
             }
         } catch (error) {
             console.error('Failed to change avatar:', error);
@@ -267,7 +283,6 @@ const Settings = () => {
     const handleAvatarDelete = async () => {
         try {
             await handleSettingChange('userAvatar', '');
-            setUserAvatar(''); // 同步更新全局状态
             showSnackbar(t('settings.avatarDeleted'), 'success');
         } catch (error) {
             console.error('Failed to delete avatar:', error);
@@ -275,26 +290,41 @@ const Settings = () => {
         }
     };
 
-    // 快捷键相关处理函数
+    // 快捷键管理 - 提取公共逻辑，遵循DRY原则
+    const saveShortcut = async (shortcutId, updatedShortcuts) => {
+        // 通过ShortcutManager更新配置
+        shortcutManager.updateShortcuts(updatedShortcuts);
+
+        // 保存到设置
+        if (window.electronAPI?.settings) {
+            await window.electronAPI.settings.set('shortcuts', updatedShortcuts);
+        }
+
+        // 通知主进程更新全局快捷键
+        const shortcut = updatedShortcuts[shortcutId];
+        if (shortcut.type === 'global' && window.electronAPI?.shortcuts) {
+            await window.electronAPI.shortcuts.update(shortcutId, shortcut.currentKey, shortcut.action);
+        }
+    };
+
     const handleShortcutChange = async (shortcutId, newKey) => {
         try {
-            // 检查冲突
+            // 1. 检查冲突
             const conflicts = checkShortcutConflict(newKey, shortcuts, shortcutId);
-
             if (conflicts.length > 0) {
                 setShortcutConflicts(prev => ({ ...prev, [shortcutId]: conflicts }));
                 showSnackbar(t('settings.shortcutConflict', { name: conflicts[0].name }), 'warning');
                 return;
             }
 
-            // 清除冲突状态
+            // 2. 清除冲突状态
             setShortcutConflicts(prev => {
                 const newConflicts = { ...prev };
                 delete newConflicts[shortcutId];
                 return newConflicts;
             });
 
-            // 更新快捷键
+            // 3. 更新快捷键
             const updatedShortcuts = {
                 ...shortcuts,
                 [shortcutId]: {
@@ -302,22 +332,10 @@ const Settings = () => {
                     currentKey: newKey
                 }
             };
-
             setShortcuts(updatedShortcuts);
 
-            // 通过ShortcutManager更新配置
-            shortcutManager.updateShortcuts(updatedShortcuts);
-
-            // 保存到设置
-            if (window.electronAPI?.settings) {
-                await window.electronAPI.settings.set('shortcuts', updatedShortcuts);
-            }
-
-            // 通知主进程更新快捷键
-            if (shortcuts[shortcutId].type === 'global' && window.electronAPI?.shortcuts) {
-                const action = shortcuts[shortcutId].action;
-                await window.electronAPI.shortcuts.update(shortcutId, newKey, action);
-            }
+            // 4. 保存快捷键
+            await saveShortcut(shortcutId, updatedShortcuts);
 
             showSnackbar(t('settings.shortcutUpdated'), 'success');
         } catch (error) {
@@ -458,6 +476,21 @@ const Settings = () => {
                                         />
                                     ))}
                                 </Box>
+                            </ListItemSecondaryAction>
+                        </ListItem>
+
+                        <Divider />
+
+                        <ListItem>
+                            <ListItemText
+                                primary={t('settings.defaultMinibarMode')}
+                                secondary={t('settings.defaultMinibarModeDesc')}
+                            />
+                            <ListItemSecondaryAction>
+                                <Switch
+                                    checked={settings.defaultMinibarMode}
+                                    onChange={(e) => handleSettingChange('defaultMinibarMode', e.target.checked)}
+                                />
                             </ListItemSecondaryAction>
                         </ListItem>
 

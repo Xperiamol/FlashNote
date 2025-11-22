@@ -61,6 +61,7 @@ function createWindow() {
       nodeIntegration: false, // 安全考虑，禁用node集成
       contextIsolation: true, // 启用上下文隔离
       enableRemoteModule: false, // 禁用remote模块
+      devTools: true, // 允许开发者工具（通过7次点击头像启用）
       preload: path.join(__dirname, 'preload.js') // 预加载脚本
     },
     titleBarStyle: 'hidden', // 隐藏默认标题栏，使用自定义标题栏
@@ -71,21 +72,21 @@ function createWindow() {
   // 处理新窗口打开请求（阻止外部链接在新窗口中打开）
   mainWindow.webContents.setWindowOpenHandler(({ url }) => {
     console.log('[Main] 拦截新窗口请求:', url)
-    
+
     // 如果是 Excalidraw 素材库相关的 URL，在默认浏览器中打开
     if (url.includes('excalidraw.com') || url.includes('libraries.excalidraw.com')) {
       console.log('[Main] 在外部浏览器中打开 Excalidraw 链接')
       shell.openExternal(url)
       return { action: 'deny' }
     }
-    
+
     // 其他外部链接也在浏览器中打开
     if (url.startsWith('http://') || url.startsWith('https://')) {
       console.log('[Main] 在外部浏览器中打开链接:', url)
       shell.openExternal(url)
       return { action: 'deny' }
     }
-    
+
     // 阻止所有其他新窗口
     return { action: 'deny' }
   })
@@ -102,7 +103,45 @@ function createWindow() {
   // 当窗口准备好显示时显示窗口
   mainWindow.once('ready-to-show', () => {
     mainWindow.show()
-    
+
+    // 生产模式下禁用开发者工具快捷键和右键菜单
+    if (!isDev) {
+      // 阻止开发者工具快捷键（Ctrl+Shift+I, F12等）
+      mainWindow.webContents.on('before-input-event', (event, input) => {
+        // 阻止 Ctrl+Shift+I
+        if (input.control && input.shift && input.key.toLowerCase() === 'i') {
+          event.preventDefault()
+          console.log('[Main] 已阻止开发者工具快捷键 Ctrl+Shift+I')
+        }
+        // 阻止 F12
+        if (input.key === 'F12') {
+          event.preventDefault()
+          console.log('[Main] 已阻止开发者工具快捷键 F12')
+        }
+        // 阻止 Ctrl+Shift+C (检查元素)
+        if (input.control && input.shift && input.key.toLowerCase() === 'c') {
+          event.preventDefault()
+          console.log('[Main] 已阻止开发者工具快捷键 Ctrl+Shift+C')
+        }
+      })
+
+      // 阻止右键菜单中的开发者工具选项
+      mainWindow.webContents.on('context-menu', (event, params) => {
+        event.preventDefault()
+        const { Menu } = require('electron')
+        const menu = Menu.buildFromTemplate([
+          { role: 'undo' },
+          { role: 'redo' },
+          { type: 'separator' },
+          { role: 'cut' },
+          { role: 'copy' },
+          { role: 'paste' },
+          { role: 'selectall' }
+        ])
+        menu.popup()
+      })
+    }
+
     // 设置同步事件转发
     setupSyncEventForwarding()
   })
@@ -112,7 +151,7 @@ function createWindow() {
     if (!app.isQuiting) {
       event.preventDefault()
       mainWindow.hide()
-      
+
       // 首次最小化到托盘时显示提示
       if (!global.hasShownTrayNotification) {
         new Notification({
@@ -123,7 +162,7 @@ function createWindow() {
       }
     }
   })
-  
+
   mainWindow.on('closed', () => {
     // 取消引用window对象，如果你的应用支持多窗口，
     // 通常会把多个window对象存放在一个数组里，
@@ -138,7 +177,7 @@ function createTray() {
     // 创建托盘图标 - 根据是否打包使用不同路径
     let iconPath
     let svgIconPath
-    
+
     if (isDev) {
       // 开发环境路径
       iconPath = path.join(__dirname, '../logo.png')
@@ -148,18 +187,18 @@ function createTray() {
       iconPath = path.join(process.resourcesPath, 'logo.png')
       svgIconPath = path.join(process.resourcesPath, 'assets/tray-icon.svg')
     }
-    
+
     let trayIcon
-    
+
     console.log('尝试创建托盘图标，开发环境:', isDev)
     console.log('PNG图标路径:', iconPath)
     console.log('SVG图标路径:', svgIconPath)
-    
+
     // 检查图标文件是否存在
     if (fs.existsSync(iconPath)) {
       console.log('找到logo.png文件')
       trayIcon = nativeImage.createFromPath(iconPath)
-      
+
       // 检查图标是否成功创建
       if (trayIcon.isEmpty()) {
         console.log('logo.png创建的图标为空，尝试使用SVG图标')
@@ -168,7 +207,7 @@ function createTray() {
           trayIcon = nativeImage.createFromPath(svgIconPath)
         }
       }
-      
+
       // 调整图标大小适应托盘 - Windows推荐16x16
       if (!trayIcon.isEmpty()) {
         trayIcon = trayIcon.resize({ width: 16, height: 16 })
@@ -186,7 +225,7 @@ function createTray() {
         trayIcon = nativeImage.createEmpty()
       }
     }
-    
+
     // 确保图标不为空
     if (trayIcon.isEmpty()) {
       console.log('所有图标都创建失败，尝试创建默认图标')
@@ -207,13 +246,13 @@ function createTray() {
         trayIcon = nativeImage.createEmpty()
       }
     }
-    
+
     console.log('创建托盘对象')
     tray = new Tray(trayIcon)
-    
+
     // 设置托盘提示文本
     tray.setToolTip('FlashNote 2.2.2 Epsilon - 快速笔记应用')
-    
+
     // 创建托盘菜单
     const contextMenu = Menu.buildFromTemplate([
       {
@@ -263,7 +302,7 @@ function createTray() {
               category: '',
               tags: []
             });
-            
+
             if (result.success && result.data) {
               // 在独立窗口打开
               await windowManager.createNoteWindow(result.data.id);
@@ -306,10 +345,10 @@ function createTray() {
         }
       }
     ])
-    
+
     // 设置托盘菜单
     tray.setContextMenu(contextMenu)
-    
+
     // 双击托盘图标显示/隐藏主窗口
     tray.on('double-click', () => {
       if (mainWindow) {
@@ -324,7 +363,7 @@ function createTray() {
         }
       }
     })
-    
+
     console.log('系统托盘创建成功')
   } catch (error) {
     console.error('创建系统托盘失败:', error)
@@ -337,7 +376,7 @@ async function initializeServices() {
     // 初始化数据库
     const dbManager = DatabaseManager.getInstance()
     await dbManager.initialize()
-    
+
     // 初始化服务
     services.noteService = new NoteService()
     services.settingsService = new SettingsService()
@@ -345,29 +384,29 @@ async function initializeServices() {
     services.tagService = new TagService()
     services.dataImportService = new DataImportService(services.noteService, services.settingsService)
     services.imageService = new ImageService()
-    
+
     // 暴露 DAO 供插件使用
     const NoteDAO = require('./dao/NoteDAO')
     const TodoDAO = require('./dao/TodoDAO')
     services.noteDAO = new NoteDAO()
     services.todoDAO = new TodoDAO()
-    
+
     // 初始化AI服务
     const SettingDAO = require('./dao/SettingDAO')
     const settingDAO = new SettingDAO()
     services.aiService = new AIService(settingDAO)
     await services.aiService.initialize()
-    
+
     // 初始化STT服务
     services.sttService = new STTService(settingDAO)
     await services.sttService.initialize()
-    
+
     // 初始化 Mem0 服务 - 使用正确的数据库路径
     const dbPath = path.join(app.getPath('userData'), 'database', 'flashnote.db')
     const appDataPath = app.getPath('userData')
     services.mem0Service = new Mem0Service(dbPath, appDataPath)
     services.migrationService = new HistoricalDataMigrationService(services.mem0Service)
-    
+
     // 异步初始化，不阻塞启动
     services.mem0Service.initialize().then(result => {
       if (result.success) {
@@ -378,50 +417,50 @@ async function initializeServices() {
     }).catch(error => {
       console.error('[Main] Mem0 service error:', error)
     })
-    
+
     // 初始化通知服务
     services.notificationService = new NotificationService()
-    
+
     // 初始化云同步管理器
     services.cloudSyncManager = new CloudSyncManager()
     await services.cloudSyncManager.initialize()
-    
+
     // 初始化 CalDAV 日历同步服务
     services.calDAVSyncService = new CalDAVSyncService()
     console.log('[Main] CalDAV sync service initialized')
-    
+
     // 初始化 Google Calendar OAuth 同步服务
     services.googleCalendarService = new GoogleCalendarService()
     console.log('[Main] Google Calendar service initialized')
-    
+
     // 初始化代理服务
     services.proxyService = new ProxyService()
     console.log('[Main] Proxy service initialized')
-    
+
     // 将通知服务连接到TodoService
     services.todoService.setNotificationService(services.notificationService)
-    
+
     // 监听通知点击事件，打开主窗口并聚焦到待办事项
     services.notificationService.on('notification-clicked', (todo) => {
       if (mainWindow) {
         if (mainWindow.isMinimized()) mainWindow.restore()
         if (!mainWindow.isVisible()) mainWindow.show()
         mainWindow.focus()
-        
+
         // 发送事件到渲染进程，让前端跳转到对应的待办事项
         mainWindow.webContents.send('todo:focus', todo.id)
       }
     })
-    
+
     // 启动通知服务
     services.notificationService.start()
-    
+
     // 初始化窗口管理器
-    windowManager = new WindowManager()
-    
-  // 初始化快捷键服务
-  shortcutService = new ShortcutService()
-  services.shortcutService = shortcutService
+    windowManager = new WindowManager(services.settingsService)
+
+    // 初始化快捷键服务
+    shortcutService = new ShortcutService()
+    services.shortcutService = shortcutService
 
     // 转发 NoteService 事件到所有渲染进程
     const broadcastToAll = (channel, data) => {
@@ -578,7 +617,7 @@ By Xperiamol
           tags: ['欢迎', '教程', '2.2.2'],
           category: 'default'
         }
-        
+
         await services.noteService.createNote(welcomeNote)
         console.log('示例笔记创建成功')
       }
@@ -616,159 +655,159 @@ if (!gotTheLock) {
 
   // Electron初始化完成，创建窗口
   app.whenReady().then(async () => {
-  // 注册 app:// 协议处理器
-  protocol.handle('app', async (request) => {
-    try {
-      const url = request.url
-      // app://images/abc.png -> images/abc.png
-      const relativePath = url.replace('app://', '')
-      
-      console.log('[Protocol] 处理 app:// 请求:', relativePath)
-      
-      // 获取完整路径
-      const fullPath = services.imageService.getImagePath(relativePath)
-      console.log('[Protocol] 完整路径:', fullPath)
-      
-      // 检查文件是否存在
-      if (!fs.existsSync(fullPath)) {
-        console.error('[Protocol] 文件不存在:', fullPath)
-        return new Response('File not found', { status: 404 })
-      }
-      
-      // 读取文件
-      const data = fs.readFileSync(fullPath)
-      
-      // 确定 MIME 类型
-      const ext = path.extname(fullPath).toLowerCase()
-      let mimeType = 'application/octet-stream'
-      switch (ext) {
-        case '.jpg':
-        case '.jpeg':
-          mimeType = 'image/jpeg'
-          break
-        case '.png':
-          mimeType = 'image/png'
-          break
-        case '.gif':
-          mimeType = 'image/gif'
-          break
-        case '.webp':
-          mimeType = 'image/webp'
-          break
-        case '.svg':
-          mimeType = 'image/svg+xml'
-          break
-      }
-      
-      console.log('[Protocol] 返回文件，MIME:', mimeType)
-      return new Response(data, {
-        headers: { 'Content-Type': mimeType }
-      })
-    } catch (error) {
-      console.error('[Protocol] 处理请求失败:', error)
-      return new Response('Internal Server Error', { status: 500 })
-    }
-  })
-  
-  await initializeServices()
-  // 数据库迁移已在 DatabaseManager.initialize() 中自动执行
-  
-  // 加载并应用代理配置
-  try {
-    const proxyConfig = services.proxyService.getConfig();
-    services.proxyService.applyConfig(proxyConfig);
-  } catch (error) {
-    console.error('[启动] 加载代理配置失败:', error)
-  }
-  
-  createWindow()
-  createTray()
-  
-  // 监听系统主题变化
-  nativeTheme.on('updated', () => {
-    console.log('[Main] 系统主题变化，当前主题:', nativeTheme.shouldUseDarkColors ? 'dark' : 'light')
-    
-    // 通知所有窗口主题变化
-    BrowserWindow.getAllWindows().forEach(win => {
-      if (win && !win.isDestroyed()) {
-        win.webContents.send('system-theme-changed', {
-          shouldUseDarkColors: nativeTheme.shouldUseDarkColors,
-          themeSource: nativeTheme.themeSource
+    // 注册 app:// 协议处理器
+    protocol.handle('app', async (request) => {
+      try {
+        const url = request.url
+        // app://images/abc.png -> images/abc.png
+        const relativePath = url.replace('app://', '')
+
+        console.log('[Protocol] 处理 app:// 请求:', relativePath)
+
+        // 获取完整路径
+        const fullPath = services.imageService.getImagePath(relativePath)
+        console.log('[Protocol] 完整路径:', fullPath)
+
+        // 检查文件是否存在
+        if (!fs.existsSync(fullPath)) {
+          console.error('[Protocol] 文件不存在:', fullPath)
+          return new Response('File not found', { status: 404 })
+        }
+
+        // 读取文件
+        const data = fs.readFileSync(fullPath)
+
+        // 确定 MIME 类型
+        const ext = path.extname(fullPath).toLowerCase()
+        let mimeType = 'application/octet-stream'
+        switch (ext) {
+          case '.jpg':
+          case '.jpeg':
+            mimeType = 'image/jpeg'
+            break
+          case '.png':
+            mimeType = 'image/png'
+            break
+          case '.gif':
+            mimeType = 'image/gif'
+            break
+          case '.webp':
+            mimeType = 'image/webp'
+            break
+          case '.svg':
+            mimeType = 'image/svg+xml'
+            break
+        }
+
+        console.log('[Protocol] 返回文件，MIME:', mimeType)
+        return new Response(data, {
+          headers: { 'Content-Type': mimeType }
         })
+      } catch (error) {
+        console.error('[Protocol] 处理请求失败:', error)
+        return new Response('Internal Server Error', { status: 500 })
       }
     })
-  })
-  
-  // 初始化开机自启状态
-  try {
-    const loginItemSettings = app.getLoginItemSettings()
-    const savedAutoLaunch = await services.settingsService.getSetting('autoLaunch')
-    
-    // 如果系统状态与保存的设置不一致，以系统状态为准
-    if (savedAutoLaunch.success && savedAutoLaunch.data !== loginItemSettings.openAtLogin) {
-      await services.settingsService.setSetting('autoLaunch', loginItemSettings.openAtLogin)
-      console.log('同步开机自启状态:', loginItemSettings.openAtLogin)
-    }
-  } catch (error) {
-    console.error('初始化开机自启状态失败:', error)
-  }
-  
-  // 设置快捷键服务的主窗口和窗口管理器引用
-  if (shortcutService && mainWindow) {
-    shortcutService.setMainWindow(mainWindow)
-    shortcutService.setWindowManager(windowManager)
-    
-    // 加载并注册快捷键
+
+    await initializeServices()
+    // 数据库迁移已在 DatabaseManager.initialize() 中自动执行
+
+    // 加载并应用代理配置
     try {
-      const { DEFAULT_SHORTCUTS } = require('./utils/shortcutUtils')
-      const shortcutsResult = await services.settingsService.getSetting('shortcuts')
-      let shortcuts = shortcutsResult.success ? shortcutsResult.data : null
-      
-      // 检查配置数据是否有效
-      const isValidConfig = shortcuts && 
-        typeof shortcuts === 'object' && 
-        !Array.isArray(shortcuts) &&
-        Object.keys(shortcuts).some(key => key.includes('.')) && // 检查是否有正确的快捷键ID格式
-        Object.values(shortcuts).some(config => config && config.type && config.currentKey)
-      
-      let registrationStats
-      
-      if (isValidConfig) {
-        console.log('使用已保存的快捷键配置')
-        registrationStats = await shortcutService.registerAllShortcuts(shortcuts)
-      } else {
-        console.log('快捷键配置无效或不存在，重置为默认配置')
-        // 强制重置为默认配置
-        await services.settingsService.setSetting('shortcuts', DEFAULT_SHORTCUTS)
-        registrationStats = await shortcutService.registerAllShortcuts(DEFAULT_SHORTCUTS)
-      }
-      
-      // 输出注册统计信息
-      if (registrationStats) {
-        console.log('快捷键注册统计:', {
-          总数: registrationStats.total,
-          成功: registrationStats.registered,
-          跳过: registrationStats.skipped,
-          失败: registrationStats.failed
-        })
-        
-        if (registrationStats.failed > 0) {
-          console.warn('部分快捷键注册失败，可能被其他应用占用')
+      const proxyConfig = services.proxyService.getConfig();
+      services.proxyService.applyConfig(proxyConfig);
+    } catch (error) {
+      console.error('[启动] 加载代理配置失败:', error)
+    }
+
+    createWindow()
+    createTray()
+
+    // 监听系统主题变化
+    nativeTheme.on('updated', () => {
+      console.log('[Main] 系统主题变化，当前主题:', nativeTheme.shouldUseDarkColors ? 'dark' : 'light')
+
+      // 通知所有窗口主题变化
+      BrowserWindow.getAllWindows().forEach(win => {
+        if (win && !win.isDestroyed()) {
+          win.webContents.send('system-theme-changed', {
+            shouldUseDarkColors: nativeTheme.shouldUseDarkColors,
+            themeSource: nativeTheme.themeSource
+          })
         }
+      })
+    })
+
+    // 初始化开机自启状态
+    try {
+      const loginItemSettings = app.getLoginItemSettings()
+      const savedAutoLaunch = await services.settingsService.getSetting('autoLaunch')
+
+      // 如果系统状态与保存的设置不一致，以系统状态为准
+      if (savedAutoLaunch.success && savedAutoLaunch.data !== loginItemSettings.openAtLogin) {
+        await services.settingsService.setSetting('autoLaunch', loginItemSettings.openAtLogin, 'boolean', '开机自启')
+        console.log('同步开机自启状态:', loginItemSettings.openAtLogin)
       }
     } catch (error) {
-      console.error('初始化快捷键失败:', error)
-      // 使用默认快捷键配置
+      console.error('初始化开机自启状态失败:', error)
+    }
+
+    // 设置快捷键服务的主窗口和窗口管理器引用
+    if (shortcutService && mainWindow) {
+      shortcutService.setMainWindow(mainWindow)
+      shortcutService.setWindowManager(windowManager)
+
+      // 加载并注册快捷键
       try {
         const { DEFAULT_SHORTCUTS } = require('./utils/shortcutUtils')
-        await services.settingsService.setSetting('shortcuts', DEFAULT_SHORTCUTS)
-        const fallbackStats = await shortcutService.registerAllShortcuts(DEFAULT_SHORTCUTS)
-        console.log('使用默认快捷键配置，注册统计:', fallbackStats)
-      } catch (fallbackError) {
-        console.error('使用默认快捷键配置也失败:', fallbackError)
+        const shortcutsResult = await services.settingsService.getSetting('shortcuts')
+        let shortcuts = shortcutsResult.success ? shortcutsResult.data : null
+
+        // 检查配置数据是否有效
+        const isValidConfig = shortcuts &&
+          typeof shortcuts === 'object' &&
+          !Array.isArray(shortcuts) &&
+          Object.keys(shortcuts).some(key => key.includes('.')) && // 检查是否有正确的快捷键ID格式
+          Object.values(shortcuts).some(config => config && config.type && config.currentKey)
+
+        let registrationStats
+
+        if (isValidConfig) {
+          console.log('使用已保存的快捷键配置')
+          registrationStats = await shortcutService.registerAllShortcuts(shortcuts)
+        } else {
+          console.log('快捷键配置无效或不存在，重置为默认配置')
+          // 强制重置为默认配置
+          await services.settingsService.setSetting('shortcuts', DEFAULT_SHORTCUTS)
+          registrationStats = await shortcutService.registerAllShortcuts(DEFAULT_SHORTCUTS)
+        }
+
+        // 输出注册统计信息
+        if (registrationStats) {
+          console.log('快捷键注册统计:', {
+            总数: registrationStats.total,
+            成功: registrationStats.registered,
+            跳过: registrationStats.skipped,
+            失败: registrationStats.failed
+          })
+
+          if (registrationStats.failed > 0) {
+            console.warn('部分快捷键注册失败，可能被其他应用占用')
+          }
+        }
+      } catch (error) {
+        console.error('初始化快捷键失败:', error)
+        // 使用默认快捷键配置
+        try {
+          const { DEFAULT_SHORTCUTS } = require('./utils/shortcutUtils')
+          await services.settingsService.setSetting('shortcuts', DEFAULT_SHORTCUTS)
+          const fallbackStats = await shortcutService.registerAllShortcuts(DEFAULT_SHORTCUTS)
+          console.log('使用默认快捷键配置，注册统计:', fallbackStats)
+        } catch (fallbackError) {
+          console.error('使用默认快捷键配置也失败:', fallbackError)
+        }
       }
     }
-  }
   })
 }
 
@@ -782,7 +821,7 @@ app.on('window-all-closed', () => {
 // 应用即将退出时的清理工作
 app.on('before-quit', () => {
   app.isQuiting = true
-  
+
   // 清理托盘
   if (tray) {
     tray.destroy()
@@ -937,7 +976,7 @@ ipcMain.handle('plugin-store:open-plugins-directory', async () => {
     const { shell } = require('electron')
     // 打开插件目录
     const isDev = process.env.NODE_ENV === 'development'
-    const localPluginsPath = isDev 
+    const localPluginsPath = isDev
       ? path.join(app.getAppPath(), 'plugins', 'examples')
       : path.join(process.resourcesPath, 'plugins', 'examples')
     await shell.openPath(localPluginsPath)
@@ -955,12 +994,12 @@ ipcMain.handle('plugin-store:load-plugin-file', async (event, pluginId, filePath
     if (!pluginPath) {
       return { success: false, error: '插件未安装' }
     }
-    
+
     const fullPath = path.join(pluginPath, filePath.replace(/^\//, ''))
     if (!fs.existsSync(fullPath)) {
       return { success: false, error: '文件不存在' }
     }
-    
+
     const content = fs.readFileSync(fullPath, 'utf8')
     return { success: true, content, baseUrl: `file://${pluginPath}/` }
   } catch (error) {
@@ -975,32 +1014,32 @@ ipcMain.handle('plugin-store:load-plugin-file', async (event, pluginId, filePath
 // 设置同步事件监听，将事件转发到渲染进程
 function setupSyncEventForwarding() {
   if (!services.cloudSyncManager) return
-  
+
   // 使用 getActiveService() 获取当前活跃的同步服务实例
   const activeService = services.cloudSyncManager.getActiveService()
   if (!activeService) return
-  
+
   // 监听同步开始事件
   activeService.on('syncStart', () => {
     if (mainWindow && !mainWindow.isDestroyed()) {
       mainWindow.webContents.send('sync:start')
     }
   })
-  
+
   // 监听同步完成事件
   activeService.on('syncComplete', (result) => {
     if (mainWindow && !mainWindow.isDestroyed()) {
       mainWindow.webContents.send('sync:complete', result)
     }
   })
-  
+
   // 监听同步错误事件
   activeService.on('syncError', (error) => {
     if (mainWindow && !mainWindow.isDestroyed()) {
       mainWindow.webContents.send('sync:error', { message: error.message })
     }
   })
-  
+
   // 监听冲突检测事件
   activeService.on('conflictDetected', (conflict) => {
     if (mainWindow && !mainWindow.isDestroyed()) {
@@ -1148,7 +1187,18 @@ ipcMain.handle('setting:get-editor', async (event) => {
 })
 
 ipcMain.handle('setting:set', async (event, key, value) => {
-  return await services.settingsService.setSetting(key, value)
+  // 自动推断类型
+  let type = 'string'
+  if (typeof value === 'boolean') {
+    type = 'boolean'
+  } else if (typeof value === 'number') {
+    type = 'number'
+  } else if (Array.isArray(value)) {
+    type = 'array'
+  } else if (typeof value === 'object' && value !== null) {
+    type = 'object'
+  }
+  return await services.settingsService.setSetting(key, value, type)
 })
 
 ipcMain.handle('setting:set-multiple', async (event, settings) => {
@@ -1198,7 +1248,7 @@ ipcMain.handle('setting:set-auto-launch', async (event, enabled) => {
       openAtLogin: enabled,
       path: process.execPath
     })
-    await services.settingsService.setSetting('autoLaunch', enabled)
+    await services.settingsService.setSetting('autoLaunch', enabled, 'boolean', '开机自启')
     return { success: true }
   } catch (error) {
     console.error('设置开机自启失败:', error)
@@ -1431,33 +1481,33 @@ ipcMain.handle('mem0:is-available', async (event) => {
 ipcMain.handle('mem0:migrate-historical', async (event) => {
   try {
     console.log('[Mem0] 开始分析历史数据...')
-    
+
     const userId = 'current_user'
     let memoryCount = 0
-    
+
     // 获取数据库实例
     const dbManager = DatabaseManager.getInstance()
     const db = dbManager.getDatabase()
-    
+
     // 1. 分析待办事项模式
     const todos = db.prepare(`
       SELECT * FROM todos 
       WHERE created_at >= date('now', '-90 days')
       ORDER BY created_at DESC
     `).all()
-    
+
     console.log(`[Mem0] 找到 ${todos.length} 个待办事项`)
-    
+
     if (todos.length > 0) {
       // 统计优先级偏好
       const importantCount = todos.filter(t => t.is_important === 1).length
       const urgentCount = todos.filter(t => t.is_urgent === 1).length
       const importantRatio = (importantCount / todos.length * 100).toFixed(0)
       const urgentRatio = (urgentCount / todos.length * 100).toFixed(0)
-      
+
       if (importantCount > todos.length * 0.3) {
-        await services.mem0Service.addMemory(userId, 
-          `用户在过去90天创建了${todos.length}个待办事项,其中${importantRatio}%标记为重要,显示出对重要任务的重视`, 
+        await services.mem0Service.addMemory(userId,
+          `用户在过去90天创建了${todos.length}个待办事项,其中${importantRatio}%标记为重要,显示出对重要任务的重视`,
           {
             category: 'task_planning',
             metadata: { source: 'historical_analysis', type: 'priority_pattern' }
@@ -1465,10 +1515,10 @@ ipcMain.handle('mem0:migrate-historical', async (event) => {
         )
         memoryCount++
       }
-      
+
       if (urgentCount > todos.length * 0.3) {
-        await services.mem0Service.addMemory(userId, 
-          `用户有${urgentRatio}%的任务标记为紧急,倾向于处理时间敏感的工作`, 
+        await services.mem0Service.addMemory(userId,
+          `用户有${urgentRatio}%的任务标记为紧急,倾向于处理时间敏感的工作`,
           {
             category: 'task_planning',
             metadata: { source: 'historical_analysis', type: 'urgency_pattern' }
@@ -1476,7 +1526,7 @@ ipcMain.handle('mem0:migrate-historical', async (event) => {
         )
         memoryCount++
       }
-      
+
       // 分析常见任务类型
       const taskTypes = new Map()
       todos.forEach(todo => {
@@ -1485,16 +1535,16 @@ ipcMain.handle('mem0:migrate-historical', async (event) => {
           taskTypes.set(kw, (taskTypes.get(kw) || 0) + 1)
         })
       })
-      
+
       const frequentKeywords = Array.from(taskTypes.entries())
         .filter(([_, count]) => count >= 5)
         .sort((a, b) => b[1] - a[1])
         .slice(0, 10)
         .map(([kw]) => kw)
-      
+
       if (frequentKeywords.length > 0) {
-        await services.mem0Service.addMemory(userId, 
-          `用户经常创建与这些主题相关的任务：${frequentKeywords.join('、')}`, 
+        await services.mem0Service.addMemory(userId,
+          `用户经常创建与这些主题相关的任务：${frequentKeywords.join('、')}`,
           {
             category: 'task_planning',
             metadata: { source: 'historical_analysis', type: 'frequent_topics' }
@@ -1503,7 +1553,7 @@ ipcMain.handle('mem0:migrate-historical', async (event) => {
         memoryCount++
       }
     }
-    
+
     // 2. 分析已完成任务
     const completedTodos = db.prepare(`
       SELECT 
@@ -1517,16 +1567,16 @@ ipcMain.handle('mem0:migrate-historical', async (event) => {
       WHERE is_completed = 1 
       AND completed_at >= date('now', '-90 days')
     `).all()
-    
+
     console.log(`[Mem0] 找到 ${completedTodos.length} 个已完成任务`)
-    
+
     if (completedTodos.length >= 10) {
       const avgCompletionDays = (
         completedTodos.reduce((sum, t) => sum + (t.completion_days || 0), 0) / completedTodos.length
       ).toFixed(1)
-      
-      await services.mem0Service.addMemory(userId, 
-        `用户平均在${avgCompletionDays}天内完成任务,显示出稳定的执行力`, 
+
+      await services.mem0Service.addMemory(userId,
+        `用户平均在${avgCompletionDays}天内完成任务,显示出稳定的执行力`,
         {
           category: 'task_planning',
           metadata: { source: 'historical_analysis', type: 'completion_speed' }
@@ -1534,7 +1584,7 @@ ipcMain.handle('mem0:migrate-historical', async (event) => {
       )
       memoryCount++
     }
-    
+
     // 3. 存储所有笔记内容为独立记忆
     const notes = db.prepare(`
       SELECT id, content, tags, created_at 
@@ -1543,26 +1593,26 @@ ipcMain.handle('mem0:migrate-historical', async (event) => {
       AND length(content) > 20
       ORDER BY created_at DESC
     `).all()
-    
+
     console.log(`[Mem0] 找到 ${notes.length} 篇笔记,开始存储完整内容...`)
-    
+
     // 将每条笔记的完整内容存储为独立记忆
     for (const note of notes) {
       try {
         // 存储完整笔记内容
         const fullContent = note.content.trim()
-        
+
         console.log(`[Mem0] 处理笔记 ${note.id}, 长度: ${fullContent.length} 字符`)
-        
+
         // 提取标签
         const tags = note.tags ? note.tags.split(',').map(t => t.trim()).filter(t => t) : []
-        
+
         // 使用 'knowledge' category 表示这是知识内容
-        const memoryId = await services.mem0Service.addMemory(userId, 
-          fullContent, 
+        const memoryId = await services.mem0Service.addMemory(userId,
+          fullContent,
           {
             category: 'knowledge',
-            metadata: { 
+            metadata: {
               source: 'user_note',
               note_id: note.id,
               created_at: note.created_at,
@@ -1571,10 +1621,10 @@ ipcMain.handle('mem0:migrate-historical', async (event) => {
             }
           }
         )
-        
+
         console.log(`[Mem0] 笔记 ${note.id} 存储成功, memory_id: ${memoryId}`)
         memoryCount++
-        
+
         // 每处理50条打印一次进度
         if (memoryCount % 50 === 0) {
           console.log(`[Mem0] 已处理 ${memoryCount} 条笔记...`)
@@ -1583,14 +1633,14 @@ ipcMain.handle('mem0:migrate-historical', async (event) => {
         console.error(`[Mem0] 存储笔记 ${note.id} 失败:`, err.message)
       }
     }
-    
+
     console.log(`[Mem0] 笔记存储完成,共 ${notes.length} 条`)
-    
+
     // 额外统计信息
     if (notes.length > 20) {
       const notesPerWeek = (notes.length / 13).toFixed(1)
-      await services.mem0Service.addMemory(userId, 
-        `用户保持着良好的笔记习惯,平均每周记录${notesPerWeek}篇笔记`, 
+      await services.mem0Service.addMemory(userId,
+        `用户保持着良好的笔记习惯,平均每周记录${notesPerWeek}篇笔记`,
         {
           category: 'note_taking',
           metadata: { source: 'historical_analysis', type: 'note_frequency' }
@@ -1598,9 +1648,9 @@ ipcMain.handle('mem0:migrate-historical', async (event) => {
       )
       memoryCount++
     }
-    
+
     console.log(`[Mem0] 历史数据分析完成,添加了 ${memoryCount} 条记忆`)
-    
+
     return { success: true, memoryCount }
   } catch (error) {
     console.error('[Mem0] 分析历史数据失败:', error)
@@ -1785,6 +1835,12 @@ ipcMain.handle('version:get-details', async (event, fileName) => {
 })
 
 // 窗口管理IPC处理
+ipcMain.handle('window:ready', async (event) => {
+  // 页面已准备就绪的通知（由 dom-ready 事件自动处理显示，此处仅作确认）
+  console.log('收到窗口准备就绪通知')
+  return true
+})
+
 ipcMain.handle('window:minimize', async (event) => {
   const window = BrowserWindow.fromWebContents(event.sender)
   if (window) window.minimize()
@@ -1914,12 +1970,27 @@ ipcMain.handle('window:close-window', async (event, id) => {
   return windowManager.closeWindow(id)
 })
 
-ipcMain.handle('window:ready', async (event) => {
-  const webContents = event.sender
-  const window = BrowserWindow.fromWebContents(webContents)
-  if (window) {
-    console.log('收到窗口准备就绪通知，触发ready-to-show事件')
-    window.emit('ready-to-show')
+ipcMain.handle('window:toggle-dev-tools', async (event) => {
+  try {
+    const window = BrowserWindow.fromWebContents(event.sender)
+    if (window) {
+      // 检查开发者工具是否已打开
+      if (window.webContents.isDevToolsOpened()) {
+        // 如果已打开，则关闭
+        window.webContents.closeDevTools()
+        console.log('[Main] 开发者工具已关闭')
+      } else {
+        // 如果未打开，则打开
+        window.webContents.openDevTools()
+        console.log('[Main] 开发者工具已打开')
+      }
+      return { success: true }
+    } else {
+      return { success: false, error: '窗口不存在' }
+    }
+  } catch (error) {
+    console.error('切换开发者工具失败:', error)
+    return { success: false, error: error.message }
   }
 })
 
@@ -1974,7 +2045,7 @@ ipcMain.handle('system:open-data-folder', async (event) => {
     const dbManager = DatabaseManager.getInstance()
     const dbPath = dbManager.getDatabasePath()
     const dbDir = path.dirname(dbPath)
-    
+
     await shell.openPath(dbDir)
     return { success: true }
   } catch (error) {
@@ -2042,7 +2113,7 @@ ipcMain.handle('system:read-image-as-base64', async (event, filePath) => {
       'bmp': 'bmp',
       'webp': 'webp'
     }[ext] || 'jpeg'
-    
+
     const base64Image = `data:image/${mimeType};base64,${imageData.toString('base64')}`
     return base64Image
   } catch (error) {
@@ -2069,8 +2140,8 @@ ipcMain.handle('tag:get-popular', async (event, limit) => {
 })
 
 ipcMain.handle('tags:getPopular', async (event, limit) => {
-    return await services.tagService.getPopularTags(limit);
-  });
+  return await services.tagService.getPopularTags(limit);
+});
 
 ipcMain.handle('tag:get-stats', async (event) => {
   return await services.tagService.getTagStats()
@@ -2103,7 +2174,7 @@ ipcMain.handle('shortcut:update', async (event, shortcutId, newShortcut, action)
     if (!shortcutService) {
       throw new Error('快捷键服务未初始化')
     }
-    
+
     const result = await shortcutService.updateShortcut(shortcutId, newShortcut, action)
     return { success: true, data: result }
   } catch (error) {
@@ -2117,7 +2188,7 @@ ipcMain.handle('shortcut:reset', async (event, shortcutId) => {
     if (!shortcutService) {
       throw new Error('快捷键服务未初始化')
     }
-    
+
     const result = await shortcutService.resetShortcut(shortcutId)
     return { success: true, data: result }
   } catch (error) {
@@ -2131,7 +2202,7 @@ ipcMain.handle('shortcut:reset-all', async (event) => {
     if (!shortcutService) {
       throw new Error('快捷键服务未初始化')
     }
-    
+
     const result = await shortcutService.resetAllShortcuts()
     return { success: true, data: result }
   } catch (error) {
@@ -2145,7 +2216,7 @@ ipcMain.handle('shortcut:get-all', async (event) => {
     if (!shortcutService) {
       throw new Error('快捷键服务未初始化')
     }
-    
+
     const shortcuts = await shortcutService.getAllShortcuts()
     return { success: true, data: shortcuts }
   } catch (error) {
@@ -2185,18 +2256,18 @@ ipcMain.handle('image:select-file', async () => {
         { name: '所有文件', extensions: ['*'] }
       ]
     })
-    
+
     if (result.canceled || !result.filePaths.length) {
       return { success: false, error: '用户取消选择' }
     }
-    
+
     const filePath = result.filePaths[0]
     const fileName = path.basename(filePath)
-    
+
     if (!services.imageService.isSupportedImageType(fileName)) {
       return { success: false, error: '不支持的图片格式' }
     }
-    
+
     const imagePath = await services.imageService.saveImageFromPath(filePath, fileName)
     return { success: true, data: { imagePath, fileName } }
   } catch (error) {
@@ -2209,7 +2280,7 @@ ipcMain.handle('image:get-path', async (event, relativePath) => {
   try {
     const fullPath = services.imageService.getImagePath(relativePath)
     const fs = require('fs')
-    
+
     // 检查文件是否存在
     if (fs.existsSync(fullPath)) {
       return { success: true, data: fullPath }
@@ -2294,14 +2365,14 @@ ipcMain.handle('sync:download-image', async (event, relativePath) => {
     if (!activeService || !activeService.downloadImage) {
       return { success: false, error: '云同步服务未启用或不支持图片同步' }
     }
-    
+
     const localPath = path.join(
       relativePath.startsWith('images/whiteboard/')
         ? path.join(app.getPath('userData'), 'images', 'whiteboard')
         : path.join(app.getPath('userData'), 'images'),
       path.basename(relativePath)
     )
-    
+
     await activeService.downloadImage(relativePath, localPath)
     return { success: true }
   } catch (error) {
@@ -2316,7 +2387,7 @@ ipcMain.handle('sync:upload-image', async (event, localPath, relativePath) => {
     if (!activeService || !activeService.uploadImage) {
       return { success: false, error: '云同步服务未启用或不支持图片同步' }
     }
-    
+
     const appUrl = await activeService.uploadImage(localPath, relativePath)
     return { success: true, data: appUrl }
   } catch (error) {
@@ -2331,7 +2402,7 @@ ipcMain.handle('sync:sync-images', async () => {
     if (!activeService || !activeService.syncImagesOnly) {
       return { success: false, error: '云同步服务未启用或不支持图片同步' }
     }
-    
+
     const result = await activeService.syncImagesOnly()
     return { success: true, data: result }
   } catch (error) {
@@ -2347,12 +2418,12 @@ ipcMain.handle('sync:cleanup-unused-images', async (event, retentionDays = 30) =
     const activeService = services.cloudSyncManager.getActiveService()
     console.log('[Main] activeService:', !!activeService);
     console.log('[Main] imageSync:', !!activeService?.imageSync);
-    
+
     if (!activeService || !activeService.imageSync) {
       console.log('[Main] 云同步服务未启用');
       return { success: false, error: '云同步服务未启用或不支持图片清理' }
     }
-    
+
     console.log('[Main] 开始调用 cleanupUnusedImages...');
     const result = await activeService.imageSync.cleanupUnusedImages(retentionDays)
     console.log('[Main] cleanupUnusedImages 完成, result:', result);
@@ -2371,65 +2442,65 @@ ipcMain.handle('sync:get-unused-images-stats', async (event, retentionDays = 30)
     if (!activeService || !activeService.imageSync) {
       return { success: false, error: '云同步服务未启用' }
     }
-    
+
     // 获取未引用图片列表（但不删除）
     const referencedImages = await activeService.imageSync.scanActiveNoteReferences()
     const localImages = await activeService.imageSync.scanLocalImages(false)  // 不需要 hash，加快速度
-    
+
     console.log('[Main] 引用图片数:', referencedImages.size);
     console.log('[Main] 本地图片数:', localImages.length);
-    
+
     const now = Date.now()
     const retentionMs = retentionDays * 24 * 60 * 60 * 1000
-    
+
     let orphanedCount = 0
     let totalSize = 0
     let skippedByReference = 0
     let skippedByAge = 0
-    
+
     for (const image of localImages) {
       // 使用与 cleanupUnusedImages 相同的匹配逻辑
       const relativePath = image.relativePath;
-      
+
       const pathVariants = [
         relativePath,
         relativePath.replace(/^images\//, ''),
         relativePath.replace(/^images\/whiteboard\//, 'whiteboard/'),
         image.fileName
       ];
-      
+
       const isReferenced = pathVariants.some(variant => referencedImages.has(variant));
-      
+
       if (isReferenced) {
         skippedByReference++;
         continue;
       }
-      
+
       const mtime = new Date(image.mtime).getTime();
       const fileAge = now - mtime;
       const fileAgeDays = Math.floor(fileAge / 86400000);
-      
+
       if (fileAge <= retentionMs) {
         skippedByAge++;
         continue;
       }
-      
+
       orphanedCount++;
       totalSize += image.size;
       if (orphanedCount <= 5) {
         console.log(`[Main] 孤立图片: ${relativePath}, 年龄: ${fileAgeDays}天`);
       }
     }
-    
+
     console.log(`[Main] 统计: 总计=${localImages.length}, 被引用=${skippedByReference}, 太新=${skippedByAge}, 孤立=${orphanedCount}, 总大小=${totalSize}`);
-    
-    return { 
-      success: true, 
-      data: { 
-        orphanedCount, 
+
+    return {
+      success: true,
+      data: {
+        orphanedCount,
         totalSize,
         totalSizeMB: (totalSize / 1024 / 1024).toFixed(2)
-      } 
+      }
     }
   } catch (error) {
     console.error('获取图片统计失败:', error)

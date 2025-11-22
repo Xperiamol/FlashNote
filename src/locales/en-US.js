@@ -42,7 +42,8 @@ const enUS = {
     todos: 'Todos',
     profile: 'Profile',
     help: 'Help',
-    about: 'About'
+    about: 'About',
+    minibar: 'Minibar'
   },
   common: {
     notes: 'Notes',
@@ -183,7 +184,9 @@ const enUS = {
     cleanupTagsFailed: 'Failed to cleanup tags',
     userName: 'User Name',
     userNamePlaceholder: 'Enter your name',
-    userNameHelper: 'This will be displayed in profile center'
+    userNameHelper: 'This will be displayed in profile center',
+    defaultMinibarMode: 'Default Minibar Mode for Standalone Windows',
+    defaultMinibarModeDesc: 'Enable minibar mode by default when opening standalone windows (hide toolbar, compact display)'
   },
   sidebar: {
     notes: 'Notes',
@@ -209,7 +212,14 @@ const enUS = {
     urgentAndImportant: 'Urgent & Important',
     importantNotUrgent: 'Important, Not Urgent',
     urgentNotImportant: 'Urgent, Not Important',
-    neitherUrgentNorImportant: 'Neither Urgent nor Important'
+    neitherUrgentNorImportant: 'Neither Urgent nor Important',
+    notesTooltip: 'Notes Management',
+    todosTooltip: 'Todos',
+    calendarTooltip: 'Calendar View',
+    pluginsTooltip: 'Plugin Store',
+    profile: 'Profile',
+    profileTooltip: 'Profile Center',
+    settingsTooltip: 'App Settings'
   },
   notes: {
     newNote: 'Jot',
@@ -299,6 +309,7 @@ const enUS = {
     hideCompleted: 'Hide Completed',
     quadrantView: 'Quadrant View',
     listView: 'List View',
+    focusView: 'Focus View',
     calendarView: 'Calendar View',
     noTodos: 'No todos yet',
     noTodosDesc: 'Click the + button to create your first todo',
@@ -555,15 +566,6 @@ const enUS = {
     done: 'Done',
     cancel: 'Cancel'
   },
-  sidebar: {
-    notesTooltip: 'Notes Management',
-    todosTooltip: 'Todos',
-    calendarTooltip: 'Calendar View',
-    pluginsTooltip: 'Plugin Store',
-    profile: 'Profile',
-    profileTooltip: 'Profile Center',
-    settingsTooltip: 'App Settings'
-  },
   quadrant: {
     urgentImportant: 'Urgent & Important',
     urgentImportantDesc: 'Handle immediately',
@@ -584,6 +586,7 @@ const enUS = {
     greetingEvening: 'Good evening',
     greetingNight: 'Late at night',
     defaultUser: 'User',
+    devModeEnabled: 'Developer mode enabled',
     noteStats: 'Note Statistics',
     activeNotes: 'Active notes',
     totalNotes: 'Total notes',

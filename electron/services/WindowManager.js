@@ -20,19 +20,19 @@ class WindowManager extends EventEmitter {
    */
   async checkViteServer() {
     if (!isDev) return true;
-    
+
     return new Promise((resolve) => {
       console.log('检查 Vite 服务器状态...');
       const req = http.get('http://localhost:5174/', (res) => {
         console.log(`Vite 服务器响应状态: ${res.statusCode}`);
         resolve(res.statusCode === 200);
       });
-      
+
       req.on('error', (error) => {
         console.error('Vite服务器连接失败:', error.message);
         resolve(false);
       });
-      
+
       req.setTimeout(8000, () => {
         console.error('Vite服务器连接超时 (8秒)');
         req.destroy();
@@ -49,7 +49,7 @@ class WindowManager extends EventEmitter {
       // 获取窗口设置
       const windowSettings = await this.settingsService.getWindowSettings();
       const bounds = this.calculateWindowBounds(windowSettings.data);
-      
+
       // 创建主窗口
       this.mainWindow = new BrowserWindow({
         ...bounds,
@@ -87,12 +87,12 @@ class WindowManager extends EventEmitter {
       // 窗口准备好后显示
       this.mainWindow.once('ready-to-show', () => {
         this.mainWindow.show();
-        
+
         // 开发模式下打开开发者工具
         if (isDev) {
           this.mainWindow.webContents.openDevTools();
         }
-        
+
         this.emit('main-window-ready', this.mainWindow);
       });
 
@@ -177,7 +177,7 @@ class WindowManager extends EventEmitter {
       // 获取鼠标位置附近的显示器
       const cursorPoint = screen.getCursorScreenPoint();
       const activeDisplay = screen.getDisplayNearestPoint(cursorPoint);
-      
+
       // 计算窗口位置（屏幕中央）
       const { width: screenWidth, height: screenHeight } = activeDisplay.workAreaSize;
       const { x: screenX, y: screenY } = activeDisplay.workArea;
@@ -265,11 +265,18 @@ class WindowManager extends EventEmitter {
           throw new Error('Vite开发服务器不可用，请确保npm run dev正在运行');
         }
       }
+
+      // 获取默认minibar模式设置
+      const settings = await this.settingsService.getAllSettings();
+      const defaultMinibarMode = settings.success && settings.data ? Boolean(settings.data.defaultMinibarMode) : false;
+
+      // 根据minibar模式设置窗口大小
+      const windowWidth = defaultMinibarMode ? 300 : 1000;
+      const windowHeight = defaultMinibarMode ? 280 : 700;
+
       const noteWindow = new BrowserWindow({
-        width: 1000,
-        height: 700,
-        minWidth: 600,
-        minHeight: 400,
+        width: windowWidth,
+        height: windowHeight,
         show: false,
         icon: this.getAppIcon(),
         webPreferences: {
@@ -293,21 +300,21 @@ class WindowManager extends EventEmitter {
       // 处理新窗口打开请求（阻止外部链接在新窗口中打开）
       noteWindow.webContents.setWindowOpenHandler(({ url }) => {
         console.log('[NoteWindow] 拦截新窗口请求:', url)
-        
+
         // 如果是 Excalidraw 素材库相关的 URL，在默认浏览器中打开
         if (url.includes('excalidraw.com') || url.includes('libraries.excalidraw.com')) {
           console.log('[NoteWindow] 在外部浏览器中打开 Excalidraw 链接')
           shell.openExternal(url)
           return { action: 'deny' }
         }
-        
+
         // 其他外部链接也在浏览器中打开
         if (url.startsWith('http://') || url.startsWith('https://')) {
           console.log('[NoteWindow] 在外部浏览器中打开链接:', url)
           shell.openExternal(url)
           return { action: 'deny' }
         }
-        
+
         // 阻止所有其他新窗口
         return { action: 'deny' }
       })
@@ -316,13 +323,39 @@ class WindowManager extends EventEmitter {
       const windowId = `note-${noteId}-${Date.now()}`;
       this.windows.set(windowId, noteWindow);
       this.noteWindows.set(noteId, windowId);
-      
+
+      // 设置超时显示窗口，防止事件不触发
+      let windowShown = false;
+      const showTimeout = setTimeout(() => {
+        if (!windowShown) {
+          console.log('窗口显示超时，强制显示');
+          noteWindow.show();
+          windowShown = true;
+          if (isDev) {
+            noteWindow.webContents.openDevTools();
+          }
+        }
+      }, 1000); // 1秒超时
+
+      // 优先使用 dom-ready 事件（最快）- 必须在 loadURL 之前注册
+      noteWindow.webContents.once('dom-ready', () => {
+        if (!windowShown) {
+          clearTimeout(showTimeout);
+          console.log('DOM准备就绪，显示窗口');
+          noteWindow.show();
+          windowShown = true;
+          if (isDev) {
+            noteWindow.webContents.openDevTools();
+          }
+        }
+      });
+
       // 加载独立窗口页面并传递笔记ID
       if (isDev) {
-        await noteWindow.loadURL(`http://localhost:5174/standalone.html?type=note&noteId=${noteId}`);
+        await noteWindow.loadURL(`http://localhost:5174/standalone.html?type=note&noteId=${noteId}&minibarMode=${defaultMinibarMode}`);
       } else {
         await noteWindow.loadFile(path.join(__dirname, '../../dist/standalone.html'), {
-          query: { type: 'note', noteId }
+          query: { type: 'note', noteId, minibarMode: defaultMinibarMode.toString() }
         });
       }
 
@@ -330,29 +363,39 @@ class WindowManager extends EventEmitter {
       noteWindow.on('close', async (event) => {
         // 阻止窗口立即关闭
         event.preventDefault();
-        
+
         try {
           console.log('笔记窗口关闭，执行保存前操作');
-          
-          // 方法1: 使用 executeJavaScript 直接在渲染进程中执行保存
-          await noteWindow.webContents.executeJavaScript(`
-            (async () => {
+
+          // 使用 Promise 等待保存完成通知
+          const savePromise = noteWindow.webContents.executeJavaScript(`
+            new Promise((resolve) => {
               console.log('[窗口关闭] 开始执行保存');
+              
+              // 监听保存完成事件
+              const handleComplete = () => {
+                console.log('[窗口关闭] 收到保存完成通知');
+                window.removeEventListener('standalone-save-complete', handleComplete);
+                resolve(true);
+              };
+              window.addEventListener('standalone-save-complete', handleComplete);
+              
               // 触发保存事件
               const saveEvent = new CustomEvent('standalone-window-save');
               window.dispatchEvent(saveEvent);
-              // 等待保存完成
-              await new Promise(resolve => setTimeout(resolve, 1500));
-              console.log('[窗口关闭] 保存完成');
-              return true;
-            })()
+              
+              // 500ms超时保护
+              setTimeout(() => {
+                console.log('[窗口关闭] 保存超时，强制完成');
+                window.removeEventListener('standalone-save-complete', handleComplete);
+                resolve(false);
+              }, 500);
+            })
           `);
-          
+
+          await savePromise;
           console.log('保存执行完成，准备关闭窗口');
-          
-          // 短暂延迟确保保存操作完全完成
-          await new Promise(resolve => setTimeout(resolve, 500));
-          
+
         } catch (error) {
           console.error('窗口关闭时保存失败:', error);
         } finally {
@@ -361,7 +404,7 @@ class WindowManager extends EventEmitter {
           noteWindow.close();
         }
       });
-      
+
       noteWindow.on('closed', () => {
         this.windows.delete(windowId);
         this.noteWindows.delete(noteId);
@@ -377,73 +420,6 @@ class WindowManager extends EventEmitter {
         const levelNames = ['verbose', 'info', 'warning', 'error'];
         const levelName = levelNames[level] || 'unknown';
         console.log(`[独立窗口-${levelName}] ${message} (${sourceId}:${line})`);
-      });
-
-      // 设置超时显示窗口，防止 ready-to-show 事件不触发
-      let windowShown = false;
-      const showTimeout = setTimeout(() => {
-        if (!windowShown) {
-          console.log('ready-to-show 事件超时，强制显示窗口');
-          noteWindow.show();
-          windowShown = true;
-          if (isDev) {
-            noteWindow.webContents.openDevTools();
-          }
-        }
-      }, 3000); // 3秒超时
-
-      noteWindow.once('ready-to-show', () => {
-        if (!windowShown) {
-          clearTimeout(showTimeout);
-          console.log('ready-to-show 事件触发，显示窗口');
-          noteWindow.show();
-          windowShown = true;
-          if (isDev) {
-            noteWindow.webContents.openDevTools();
-          }
-        }
-      });
-
-      // 添加页面加载完成事件
-      noteWindow.webContents.once('did-finish-load', () => {
-        console.log('独立窗口页面加载完成');
-        if (!windowShown) {
-          clearTimeout(showTimeout);
-          console.log('页面加载完成，显示窗口');
-          noteWindow.show();
-          windowShown = true;
-          if (isDev) {
-            noteWindow.webContents.openDevTools();
-          }
-        }
-      });
-      
-      // 添加DOM内容加载完成事件监听
-      noteWindow.webContents.once('dom-ready', () => {
-        console.log('独立窗口DOM准备就绪');
-        if (!windowShown) {
-          clearTimeout(showTimeout);
-          console.log('DOM准备就绪，显示窗口');
-          noteWindow.show();
-          windowShown = true;
-          if (isDev) {
-            noteWindow.webContents.openDevTools();
-          }
-        }
-      });
-      
-      // 添加页面标题更新事件监听
-      noteWindow.webContents.on('page-title-updated', () => {
-        console.log('独立窗口页面标题已更新');
-        if (!windowShown) {
-          clearTimeout(showTimeout);
-          console.log('页面标题更新，显示窗口');
-          noteWindow.show();
-          windowShown = true;
-          if (isDev) {
-            noteWindow.webContents.openDevTools();
-          }
-        }
       });
 
       console.log(`笔记窗口创建成功: ${windowId}`);
@@ -466,11 +442,18 @@ class WindowManager extends EventEmitter {
           throw new Error('Vite开发服务器不可用，请确保npm run dev正在运行');
         }
       }
+
+      // 获取默认minibar模式设置
+      const settings = await this.settingsService.getAllSettings();
+      const defaultMinibarMode = settings.success && settings.data ? Boolean(settings.data.defaultMinibarMode) : false;
+
+      // 根据minibar模式设置窗口大小
+      const windowWidth = defaultMinibarMode ? 300 : 800;
+      const windowHeight = defaultMinibarMode ? 280 : 600;
+
       const todoWindow = new BrowserWindow({
-        width: 800,
-        height: 600,
-        minWidth: 500,
-        minHeight: 400,
+        width: windowWidth,
+        height: windowHeight,
         show: false,
         icon: this.getAppIcon(),
         webPreferences: {
@@ -500,10 +483,10 @@ class WindowManager extends EventEmitter {
 
       // 加载独立窗口页面并传递Todo数据
       if (isDev) {
-        await todoWindow.loadURL(`http://localhost:5174/standalone.html?type=todo&todoData=${encodedTodoData}`);
+        await todoWindow.loadURL(`http://localhost:5174/standalone.html?type=todo&todoData=${encodedTodoData}&minibarMode=${defaultMinibarMode}`);
       } else {
         await todoWindow.loadFile(path.join(__dirname, '../../dist/standalone.html'), {
-          query: { type: 'todo', todoData: encodedTodoData }
+          query: { type: 'todo', todoData: encodedTodoData, minibarMode: defaultMinibarMode.toString() }
         });
       }
 
@@ -603,7 +586,7 @@ class WindowManager extends EventEmitter {
     // 阻止导航到外部URL
     this.mainWindow.webContents.on('will-navigate', (event, navigationUrl) => {
       const parsedUrl = new URL(navigationUrl);
-      
+
       if (parsedUrl.origin !== 'http://localhost:5174' && !navigationUrl.startsWith('file://')) {
         event.preventDefault();
         shell.openExternal(navigationUrl);
@@ -647,30 +630,30 @@ class WindowManager extends EventEmitter {
    */
   calculateWindowBounds(windowSettings) {
     const { window_width, window_height, window_x, window_y } = windowSettings;
-    
+
     // 获取主显示器信息
     const primaryDisplay = screen.getPrimaryDisplay();
     const { width: screenWidth, height: screenHeight } = primaryDisplay.workAreaSize;
-    
+
     // 默认尺寸
     const width = Math.min(window_width || 1200, screenWidth);
     const height = Math.min(window_height || 800, screenHeight);
-    
+
     // 计算位置
     let x, y;
-    
+
     if (window_x === 'center' || !window_x) {
       x = Math.round((screenWidth - width) / 2);
     } else {
       x = Math.max(0, Math.min(window_x, screenWidth - width));
     }
-    
+
     if (window_y === 'center' || !window_y) {
       y = Math.round((screenHeight - height) / 2);
     } else {
       y = Math.max(0, Math.min(window_y, screenHeight - height));
     }
-    
+
     return { width, height, x, y };
   }
 
@@ -680,7 +663,7 @@ class WindowManager extends EventEmitter {
   async saveWindowState(window) {
     try {
       if (!window || window.isDestroyed()) return;
-      
+
       const bounds = window.getBounds();
       await this.settingsService.saveWindowState(bounds);
     } catch (error) {

@@ -12,6 +12,7 @@ import TitleBar from './components/TitleBar'
 import NoteEditor from './components/NoteEditor'
 import TodoList from './components/TodoList'
 import StandaloneProvider, { useStandaloneContext } from './components/StandaloneProvider'
+import { useStandaloneStore } from './store/useStandaloneStore'
 
 /**
  * 独立窗口内容组件
@@ -19,13 +20,13 @@ import StandaloneProvider, { useStandaloneContext } from './components/Standalon
  */
 function StandaloneContent({ windowType }) {
   const { isLoading } = useStandaloneContext()
-  
+
   if (isLoading) {
     return (
-      <Box sx={{ 
-        display: 'flex', 
-        justifyContent: 'center', 
-        alignItems: 'center', 
+      <Box sx={{
+        display: 'flex',
+        justifyContent: 'center',
+        alignItems: 'center',
         height: '100%',
         flexDirection: 'column',
         gap: 2
@@ -35,7 +36,7 @@ function StandaloneContent({ windowType }) {
       </Box>
     )
   }
-  
+
   return (
     <>
       {windowType === 'note' && (
@@ -43,20 +44,20 @@ function StandaloneContent({ windowType }) {
           <NoteEditor />
         </Box>
       )}
-      
+
       {windowType === 'todo' && (
         <Box sx={{ flex: 1, display: 'flex', flexDirection: 'column', minHeight: 0 }}>
-          <TodoList 
-            onTodoSelect={() => {}} 
-            onViewModeChange={() => {}} 
-            onShowCompletedChange={() => {}} 
-            viewMode="list" 
+          <TodoList
+            onTodoSelect={() => { }}
+            onViewModeChange={() => { }}
+            onShowCompletedChange={() => { }}
+            viewMode="list"
             showCompleted={false}
-            onMultiSelectChange={() => {}} 
-            onMultiSelectRefChange={() => {}} 
-            refreshTrigger={0} 
-            sortBy="createdAt" 
-            onSortByChange={() => {}}
+            onMultiSelectChange={() => { }}
+            onMultiSelectRefChange={() => { }}
+            refreshTrigger={0}
+            sortBy="createdAt"
+            onSortByChange={() => { }}
           />
         </Box>
       )}
@@ -74,10 +75,11 @@ function StandaloneWindow() {
   const [isLoading, setIsLoading] = useState(true)
   const [error, setError] = useState(null)
   const [themeMode, setThemeMode] = useState('light')
-  
+  const store = useStandaloneStore()
+
   // 创建主题
   const appTheme = createAppTheme(themeMode)
-  
+
   // 检查是否在Electron环境中运行
   const isElectronEnvironment = useMemo(() => {
     return window.electronAPI !== undefined
@@ -88,21 +90,25 @@ function StandaloneWindow() {
       try {
         console.log('开始初始化独立窗口...')
         setIsLoading(true)
-        
+
         // 如果不在Electron环境中，直接返回，不进行参数解析
         if (!isElectronEnvironment) {
           setIsLoading(false)
           return
         }
-        
+
         // 解析URL参数
         const urlParams = new URLSearchParams(window.location.search)
         const type = urlParams.get('type')
         const noteIdParam = urlParams.get('noteId')
         const todoData = urlParams.get('todoData')
-        
-        console.log('独立窗口参数:', { type, noteId: noteIdParam, todoData })
-        
+        const minibarModeParam = urlParams.get('minibarMode')
+
+        console.log('独立窗口参数:', { type, noteId: noteIdParam, todoData, minibarMode: minibarModeParam })
+
+        // 将 minibarMode 参数传递给 StandaloneProvider 通过 windowData
+        const minibarFlag = minibarModeParam === 'true'
+
         if (type === 'note' && noteIdParam) {
           // 笔记独立窗口
           const parsedNoteId = Number(noteIdParam)
@@ -113,29 +119,30 @@ function StandaloneWindow() {
           }
           console.log('设置笔记窗口类型')
           setWindowType('note')
-          setWindowData({ noteId: parsedNoteId })
-          
+          setWindowData({ noteId: parsedNoteId, minibarMode: minibarFlag })
+
         } else if (type === 'todo' && todoData) {
           // Todo独立窗口
           console.log('设置Todo窗口类型')
           setWindowType('todo')
           try {
             const parsedTodoData = JSON.parse(decodeURIComponent(todoData))
-            setWindowData(parsedTodoData)
+            // 将 minibarFlag 添加到 todoData 传递给 Provider
+            setWindowData({ ...parsedTodoData, minibarMode: minibarFlag })
           } catch (parseError) {
             console.error('解析Todo数据失败:', parseError)
             setError('无效的Todo数据')
             return
           }
-          
+
         } else {
           console.error('无效的窗口参数:', { type, noteId: noteIdParam, todoData })
           setError('无效的窗口参数')
           return
         }
-        
+
         console.log('独立窗口初始化完成')
-        
+
       } catch (error) {
         console.error('初始化独立窗口失败:', error)
         setError('初始化失败: ' + error.message)
@@ -149,21 +156,21 @@ function StandaloneWindow() {
     const timer = setTimeout(() => {
       initializeWindow()
     }, 100)
-    
+
     return () => clearTimeout(timer)
   }, [isElectronEnvironment])
-  
+
   // 监听页面渲染完成，通知Electron窗口准备就绪
   useEffect(() => {
     if (!isLoading && !error && windowType) {
       console.log('页面渲染完成，通知窗口准备就绪')
-      
+
       // 检查是否在Electron环境中
       if (!isElectronEnvironment) {
         console.warn('独立窗口只能在Electron环境中运行')
         return
       }
-      
+
       // 通知 Electron 窗口页面已准备就绪
       const readyCaller = window.electronAPI?.window?.windowReady
       if (typeof readyCaller === 'function') {
@@ -185,7 +192,7 @@ function StandaloneWindow() {
       }
     }
   }, [isLoading, error, windowType, isElectronEnvironment])
-  
+
   // 窗口关闭时的保存逻辑由 WindowManager 通过 executeJavaScript 同步触发
   // 不需要在这里监听 IPC 事件或 beforeunload 事件
   // WindowManager 会直接在渲染进程中执行保存代码
@@ -195,10 +202,10 @@ function StandaloneWindow() {
     return (
       <ThemeProvider theme={appTheme}>
         <CssBaseline />
-        <Box sx={{ 
-          height: '100vh', 
-          display: 'flex', 
-          justifyContent: 'center', 
+        <Box sx={{
+          height: '100vh',
+          display: 'flex',
+          justifyContent: 'center',
           alignItems: 'center',
           flexDirection: 'column',
           gap: 2,
@@ -219,12 +226,30 @@ function StandaloneWindow() {
       <CssBaseline />
       <Box sx={{ height: '100vh', display: 'flex', flexDirection: 'column' }}>
         {/* 使用主应用的TitleBar组件 */}
-        <TitleBar />
+        <TitleBar 
+          isStandalone={true} 
+          isMinibarMode={store.minibarMode}
+          onMinibarClick={async () => {
+            if (store.minibarMode) {
+              // 退出minibar模式
+              store.setMinibarMode(false);
+              if (window.electronAPI) {
+                await window.electronAPI.window.setSize(800, 600); // 恢复默认大小
+              }
+            } else {
+              // 进入minibar模式
+              store.setMinibarMode(true);
+              if (window.electronAPI) {
+                await window.electronAPI.window.setSize(300, 280);
+              }
+            }
+          }}
+        />
         {isLoading && (
-          <Box sx={{ 
-            display: 'flex', 
-            justifyContent: 'center', 
-            alignItems: 'center', 
+          <Box sx={{
+            display: 'flex',
+            justifyContent: 'center',
+            alignItems: 'center',
             height: '100vh',
             flexDirection: 'column',
             gap: 2
@@ -233,12 +258,12 @@ function StandaloneWindow() {
             <Typography>正在加载独立窗口...</Typography>
           </Box>
         )}
-        
+
         {error && (
-          <Box sx={{ 
-            display: 'flex', 
-            justifyContent: 'center', 
-            alignItems: 'center', 
+          <Box sx={{
+            display: 'flex',
+            justifyContent: 'center',
+            alignItems: 'center',
             height: '100vh',
             flexDirection: 'column',
             gap: 2,
@@ -248,7 +273,7 @@ function StandaloneWindow() {
             <Typography sx={{ textAlign: 'center' }}>{error}</Typography>
           </Box>
         )}
-        
+
         {!isLoading && !error && windowType && windowData && (
           <StandaloneProvider windowType={windowType} windowData={windowData}>
             <StandaloneContent windowType={windowType} />

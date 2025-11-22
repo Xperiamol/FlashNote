@@ -22,6 +22,9 @@ export const useStandaloneStore = create((set, get) => ({
   // 主题模式
   themeMode: 'light',
   
+  // minibar模式
+  minibarMode: false,
+  
   // 设置窗口类型和数据
   setWindowConfig: (type, data) => set({ 
     windowType: type, 
@@ -189,6 +192,9 @@ export const useStandaloneStore = create((set, get) => ({
   
   // 设置编辑器模式
   setEditorMode: (mode) => set({ editorMode: mode }),
+  
+  // 设置minibar模式
+  setMinibarMode: (mode) => set({ minibarMode: mode }),
   
   // 重置状态
   reset: () => set({

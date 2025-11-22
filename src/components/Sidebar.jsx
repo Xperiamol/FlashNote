@@ -10,7 +10,8 @@ import {
   Folder,
   Store,
   MenuBook,
-  WavingHand
+  WavingHand,
+  Code
 } from '@mui/icons-material';
 import { useTheme } from '@mui/material/styles';
 import { useStore } from '../store/useStore';
@@ -22,6 +23,8 @@ const Sidebar = ({ open = true, onClose }) => {
   const { currentView, setCurrentView, userAvatar, userName } = useStore();
   const [showWelcome, setShowWelcome] = useState(false);
   const [avatarHover, setAvatarHover] = useState(false);
+  const [avatarClickCount, setAvatarClickCount] = useState(0);
+  const [showDevMode, setShowDevMode] = useState(false);
 
   // 主侧边栏始终显示，不受open prop控制
 
@@ -64,10 +67,40 @@ const Sidebar = ({ open = true, onClose }) => {
 
   // 处理头像点击
   const handleAvatarClick = () => {
-    setShowWelcome(true);
-    setTimeout(() => {
-      setShowWelcome(false);
-    }, 3000);
+    // 增加点击计数
+    const newCount = avatarClickCount + 1;
+    setAvatarClickCount(newCount);
+
+    // 点击7次启用开发者工具
+    if (newCount >= 7) {
+      // 显示开发者模式提示
+      setShowDevMode(true);
+      setTimeout(() => {
+        setShowDevMode(false);
+      }, 3000);
+      
+      // 切换开发者工具
+      if (window.electronAPI && window.electronAPI.window && window.electronAPI.window.toggleDevTools) {
+        window.electronAPI.window.toggleDevTools().then(result => {
+          if (result && result.success) {
+            console.log('开发者工具已切换');
+          } else if (result && result.error) {
+            console.warn('切换开发者工具失败:', result.error);
+          }
+        }).catch(error => {
+          console.error('调用开发者工具切换失败:', error);
+        });
+      }
+      
+      // 重置计数
+      setAvatarClickCount(0);
+    } else {
+      // 显示欢迎消息
+      setShowWelcome(true);
+      setTimeout(() => {
+        setShowWelcome(false);
+      }, 3000);
+    }
   };
 
   // 获取当前时间的问候语
@@ -193,6 +226,46 @@ const Sidebar = ({ open = true, onClose }) => {
               <WavingHand sx={{ fontSize: 18, color: theme.palette.primary.main }} />
               <Typography variant="body2" sx={{ fontWeight: 600 }}>
                 {getGreeting()}，{displayName}！
+              </Typography>
+            </Box>
+          </Box>
+        </Zoom>
+
+        {/* 开发者模式提示气泡 */}
+        <Zoom in={showDevMode}>
+          <Box
+            sx={{
+              position: 'absolute',
+              top: '0%',
+              left: '60px',
+              transform: 'translateY(-50%)',
+              bgcolor: theme.palette.mode === 'dark' ? '#2d2d2d' : '#fff',
+              color: theme.palette.mode === 'dark' ? '#fff' : '#000',
+              px: 2,
+              py: 1.5,
+              borderRadius: 2,
+              boxShadow: 3,
+              whiteSpace: 'nowrap',
+              border: `1px solid ${theme.palette.divider}`,
+              zIndex: 1000,
+              minWidth: '180px',
+              '&::before': {
+                content: '""',
+                position: 'absolute',
+                left: -8,
+                top: '12px',
+                width: 0,
+                height: 0,
+                borderTop: '8px solid transparent',
+                borderBottom: '8px solid transparent',
+                borderRight: `8px solid ${theme.palette.mode === 'dark' ? '#2d2d2d' : '#fff'}`,
+              },
+            }}
+          >
+            <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+              <Code sx={{ fontSize: 18, color: theme.palette.primary.main }} />
+              <Typography variant="body2" sx={{ fontWeight: 600 }}>
+                {t('profile.devModeEnabled')}
               </Typography>
             </Box>
           </Box>

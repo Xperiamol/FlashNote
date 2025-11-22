@@ -42,7 +42,8 @@ const zhCN = {
     todos: '待办',
     profile: '个人资料',
     help: '帮助',
-    about: '关于'
+    about: '关于',
+    minibar: '迷你栏'
   },
   common: {
     notes: '笔记',
@@ -182,9 +183,11 @@ const zhCN = {
     tagsCleaned: '已清理 {count} 个未使用的标签',
     cleanupFailed: '清理失败',
     cleanupTagsFailed: '清理标签失败',
-    userName: '用户名',
-    userNamePlaceholder: '输入您的名字',
-    userNameHelper: '这将在个人中心显示'
+    userName: '用户名称',
+    userNamePlaceholder: '输入您的姓名',
+    userNameHelper: '这将在个人中心显示',
+    defaultMinibarMode: '独立窗口默认迷你栏模式',
+    defaultMinibarModeDesc: '打开独立窗口时默认启用迷你栏模式（隐藏工具栏，紧凑显示）'
   },
   sidebar: {
     notes: '笔记',
@@ -210,7 +213,14 @@ const zhCN = {
     urgentAndImportant: '紧急且重要',
     importantNotUrgent: '重要不紧急',
     urgentNotImportant: '紧急不重要',
-    neitherUrgentNorImportant: '不紧急不重要'
+    neitherUrgentNorImportant: '不紧急不重要',
+    notesTooltip: '笔记管理',
+    todosTooltip: '待办事项',
+    calendarTooltip: '日历视图',
+    pluginsTooltip: '插件商店',
+    profile: '个人',
+    profileTooltip: '个人中心',
+    settingsTooltip: '应用设置'
   },
   notes: {
     newNote: '随记',
@@ -300,6 +310,7 @@ const zhCN = {
     hideCompleted: '隐藏已完成',
     quadrantView: '四象限视图',
     listView: '列表视图',
+    focusView: '专注视图',
     calendarView: '日历视图',
     noTodos: '暂无待办事项',
     noTodosDesc: '点击 + 按钮创建您的第一个待办事项',
@@ -568,15 +579,6 @@ const zhCN = {
     done: '完成',
     cancel: '取消'
   },
-  sidebar: {
-    notesTooltip: '笔记管理',
-    todosTooltip: '待办事项',
-    calendarTooltip: '日历视图',
-    pluginsTooltip: '插件商店',
-    profile: '个人',
-    profileTooltip: '个人中心',
-    settingsTooltip: '应用设置'
-  },
   quadrant: {
     urgentImportant: '重要且紧急',
     urgentImportantDesc: '立即处理',
@@ -597,6 +599,7 @@ const zhCN = {
     greetingEvening: '晚上好',
     greetingNight: '夜深了',
     defaultUser: '用户',
+    devModeEnabled: '开发者模式打开',
     noteStats: '笔记统计',
     activeNotes: '活跃笔记',
     totalNotes: '总笔记数',

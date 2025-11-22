@@ -238,7 +238,7 @@ const Toolbar = ({
               position: 'center',
               options: [
                 { value: 'quadrant', label: t('todos.quadrantView') },
-                { value: 'focus', label: t('todos.listView') }
+                { value: 'focus', label: t('todos.focusView') }
               ]
             },
             {

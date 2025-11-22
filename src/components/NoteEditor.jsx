@@ -73,7 +73,8 @@ const NoteEditor = () => {
     updateNote,
     togglePinNote,
     autoSaveNote,
-    editorMode
+    editorMode,
+    minibarMode
   } = store
 
   const [title, setTitle] = useState('')
@@ -91,7 +92,7 @@ const NoteEditor = () => {
   const [pendingNoteType, setPendingNoteType] = useState(null)
   const [whiteboardSaveFunc, setWhiteboardSaveFunc] = useState(null)
   const [whiteboardExportFunc, setWhiteboardExportFunc] = useState(null)
-  const [showToolbar, setShowToolbar] = useState(!isStandaloneMode) // 独立窗口默认隐藏工具栏
+  const [showToolbar, setShowToolbar] = useState(!isStandaloneMode && !minibarMode) // 独立窗口或minibar模式默认隐藏工具栏
   const [wikiLinkError, setWikiLinkError] = useState('') // wiki 链接错误提示
   const [isOpenInStandaloneWindow, setIsOpenInStandaloneWindow] = useState(false) // 是否在独立窗口中打开
   const contentRef = useRef(null)
@@ -198,8 +199,8 @@ const NoteEditor = () => {
       const newContent = currentNote.content || ''
       const newCategory = currentNote.category || ''
       // 处理 tags：可能是数组或逗号分隔的字符串
-      const newTags = Array.isArray(currentNote.tags) 
-        ? currentNote.tags.join(', ') 
+      const newTags = Array.isArray(currentNote.tags)
+        ? currentNote.tags.join(', ')
         : (currentNote.tags || '')
       const newNoteType = currentNote.note_type || 'markdown'
 
@@ -288,6 +289,7 @@ const NoteEditor = () => {
     }
   }, [])
 
+
   // 独立窗口模式：监听窗口关闭事件，触发保存
   useEffect(() => {
     if (!isStandaloneMode) return
@@ -317,9 +319,16 @@ const NoteEditor = () => {
             note_type: prevStateRef.current.noteType
           })
           console.log('独立窗口关闭前Markdown保存成功')
+          // 通知主进程保存完成
+          window.dispatchEvent(new CustomEvent('standalone-save-complete'))
         } catch (error) {
           console.error('独立窗口关闭前保存失败:', error)
+          // 即使失败也通知，避免主进程一直等待
+          window.dispatchEvent(new CustomEvent('standalone-save-complete'))
         }
+      } else {
+        // 没有未保存的更改，也通知完成
+        window.dispatchEvent(new CustomEvent('standalone-save-complete'))
       }
     }
 
@@ -767,7 +776,7 @@ const NoteEditor = () => {
     // 鼠标在整个工具栏区域内（包括触发区域）
     if (e.clientY < toolbarTotalHeight) {
       // 在触发区域或工具栏已展开
-      if (e.clientY < triggerAreaHeight || showToolbar) {
+      if ((e.clientY < triggerAreaHeight || showToolbar) && !minibarMode) {
         setShowToolbar(true)
         // 清除隐藏定时器
         if (toolbarTimeoutRef.current) {

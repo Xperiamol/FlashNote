@@ -1,12 +1,14 @@
 import React from 'react';
-import { Box, Typography } from '@mui/material';
+import { Box, Typography, Tooltip } from '@mui/material';
 import { useTheme } from '@mui/material/styles';
 import { createTransitionString, ANIMATIONS } from '../utils/animationConfig';
 import { useStore } from '../store/useStore';
+import { useTranslation } from 'react-i18next';
 import SyncStatusIndicator from './SyncStatusIndicator';
 
-const TitleBar = () => {
+const TitleBar = ({ isStandalone = false, onMinibarClick, isMinibarMode = false }) => {
   const theme = useTheme();
+  const { t } = useTranslation();
   const { currentView, titleBarStyle } = useStore();
 
   // 根据当前视图获取对应的标题
@@ -47,6 +49,14 @@ const TitleBar = () => {
     }
   };
 
+  const handleMinibar = async () => {
+    if (onMinibarClick) {
+      onMinibarClick();
+    } else if (window.electronAPI) {
+      await window.electronAPI.window.setSize(200, 40);
+    }
+  };
+
   return (
     <Box
       sx={{
@@ -68,6 +78,58 @@ const TitleBar = () => {
         borderBottom: `1px solid ${theme.palette.mode === 'dark' ? 'rgba(255,255,255,0.05)' : 'rgba(0,0,0,0.03)'}`,
       }}
     >
+      {/* Minibar按钮 - 独立窗口时在最左侧 */}
+      {isStandalone && titleBarStyle === 'windows' && (
+        <Box
+          sx={{
+            position: 'absolute',
+            left: '12px',
+            WebkitAppRegion: 'no-drag',
+          }}
+        >
+          <Tooltip title={t('toolbar.minibar')} placement="bottom">
+            <Box
+              onClick={handleMinibar}
+              sx={{
+                width: '32px',
+                height: '20px',
+                display: 'flex',
+                flexDirection: 'column',
+                alignItems: 'center',
+                justifyContent: 'center',
+                cursor: 'pointer',
+                borderRadius: '4px',
+                transition: createTransitionString(ANIMATIONS.button),
+                '&:hover': {
+                  backgroundColor: theme.palette.mode === 'dark' ? 'rgba(255, 255, 255, 0.1)' : 'rgba(0, 0, 0, 0.05)',
+                },
+                '&:active': {
+                  backgroundColor: theme.palette.mode === 'dark' ? 'rgba(255, 255, 255, 0.15)' : 'rgba(0, 0, 0, 0.1)',
+                },
+              }}
+            >
+              <Box
+                sx={{
+                  width: '10px',
+                  height: '2px',
+                  backgroundColor: theme.palette.mode === 'dark' ? '#ffffff' : '#1a1a1a',
+                  borderRadius: '1px',
+                  marginBottom: '2px',
+                }}
+              />
+              <Box
+                sx={{
+                  width: '10px',
+                  height: '2px',
+                  backgroundColor: theme.palette.mode === 'dark' ? '#ffffff' : '#1a1a1a',
+                  borderRadius: '1px',
+                }}
+              />
+            </Box>
+          </Tooltip>
+        </Box>
+      )}
+
       {titleBarStyle === 'mac' ? (
         /* Mac风格的窗口控制按钮 - 左侧 */
         <Box
@@ -273,26 +335,28 @@ const TitleBar = () => {
       )}
 
       {/* 应用标题 - 居中 */}
-      <Typography
-        variant="body2"
-        sx={{
-          fontSize: '13px',
-          fontWeight: 500,
-          color: theme.palette.text.primary,
-          opacity: 0.8,
-          letterSpacing: '0.3px',
-          textAlign: 'center',
-        }}
-      >
-        {getViewTitle()}
-      </Typography>
+      {!isMinibarMode && (
+        <Typography
+          variant="body2"
+          sx={{
+            fontSize: '13px',
+            fontWeight: 500,
+            color: theme.palette.text.primary,
+            opacity: 0.8,
+            letterSpacing: '0.3px',
+            textAlign: 'center',
+          }}
+        >
+          {getViewTitle()}
+        </Typography>
+      )}
 
       {/* 同步状态指示器 - 右侧（Windows样式时） */}
       {titleBarStyle === 'windows' && (
         <Box
           sx={{
             position: 'absolute',
-            right: '150px', // 留出空间给窗口控制按钮
+            right: '140px', // 留出空间给窗口控制按钮
             WebkitAppRegion: 'no-drag',
           }}
         >
