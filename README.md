@@ -6,7 +6,7 @@
 旧的1.x版本已经随风而逝了，迎接现在更开放更赏心悦目的新版本。
 <img width="1492" height="995" alt="image" src="https://github.com/user-attachments/assets/04957a50-7fdb-4d66-8271-337aaf85f8c6" />
 
-## 感谢百度文心快码（BAIDU COMATE）支持！🙏
+## 感谢百度文心快码（BAIDU COMATE）支持！🙏https://download.csdn.net/download/liberationit/92408931?spm=1001.2014.3001.5501
 
 ## 🌟 主要特性
 
