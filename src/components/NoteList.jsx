@@ -693,6 +693,7 @@ const NoteList = ({ showDeleted = false, onMultiSelectChange, onMultiSelectRefCh
                               </Typography>
                             </Box>
                           }
+                          secondaryTypographyProps={{ component: 'div' }}
                         />
                         {/* 菜单按钮 - 绝对定位在右上角 */}
                         {!multiSelect.isMultiSelectMode && (

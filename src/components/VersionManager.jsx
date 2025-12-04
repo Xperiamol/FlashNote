@@ -309,6 +309,7 @@ const VersionManager = ({ open, onClose }) => {
                           )}
                         </Box>
                       }
+                      secondaryTypographyProps={{ component: 'div' }}
                     />
                     <ListItemSecondaryAction>
                       <Tooltip title="更多操作">

@@ -284,6 +284,8 @@ const TodoView = ({ viewMode, showCompleted, onViewModeChange, onShowCompletedCh
         celebratingTodos={celebratingTodos}
         isMultiSelectMode={multiSelectMode}
         isSelected={selectedTodos.includes(todo.id)}
+        onDragStart={handleDragStart}
+        onDragEnd={handleDragEnd}
         onClick={(e, todo) => {
           if (multiSelectMode) {
             // 多选模式下的点击处理

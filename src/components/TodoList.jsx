@@ -770,25 +770,24 @@ const TodoList = ({ onTodoSelect, onViewModeChange, onShowCompletedChange, viewM
                         </Typography>
                       }
                       secondary={
-                        <Typography component="div" variant="body2" color="textSecondary">
-                          <Box sx={{
-                            display: 'flex',
-                            alignItems: 'center',
-                            gap: 1,
-                            mt: 0.5,
-                            flexWrap: 'wrap',
-                            maxWidth: 'calc(100% - 60px)' // 为右侧图标预留空间
-                          }}>
-                            <Chip
-                              label={getPriorityText(todo.priority)}
-                              size="small"
-                              sx={{
-                                backgroundColor: `${getPriorityColor(todo.priority)}20`,
-                                color: getPriorityColor(todo.priority),
-                                fontSize: '0.7rem',
-                                height: 20
-                              }}
-                            />
+                        <Box sx={{
+                          display: 'flex',
+                          alignItems: 'center',
+                          gap: 1,
+                          mt: 0.5,
+                          flexWrap: 'wrap',
+                          maxWidth: 'calc(100% - 60px)' // 为右侧图标预留空间
+                        }}>
+                          <Chip
+                            label={getPriorityText(todo.priority)}
+                            size="small"
+                            sx={{
+                              backgroundColor: `${getPriorityColor(todo.priority)}20`,
+                              color: getPriorityColor(todo.priority),
+                              fontSize: '0.7rem',
+                              height: 20
+                            }}
+                          />
                             {todo.due_date && (
                               <Chip
                                 label={formatDate(todo.due_date)}
@@ -815,8 +814,8 @@ const TodoList = ({ onTodoSelect, onViewModeChange, onShowCompletedChange, viewM
                               />
                             ))}
                           </Box>
-                        </Typography>
                       }
+                      secondaryTypographyProps={{ component: 'div' }}
                     />
 
                     <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
