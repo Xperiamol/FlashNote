@@ -130,8 +130,9 @@
       "allowToChangeInstallationDirectory": true,
       "createDesktopShortcut": true,
       "createStartMenuShortcut": true,
-      "deleteAppDataOnUninstall": true,
-      "uninstallDisplayName": "FlashNote 2.2.2 Zeta"
+      "deleteAppDataOnUninstall": false,
+      "uninstallDisplayName": "FlashNote 2.2.2 Zeta",
+      "include": "build/installer.nsh"
     }
   }
 }
