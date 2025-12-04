@@ -32,7 +32,7 @@ export const useMultiSelectManager = ({
     // 使用setTimeout延迟回调，避免在渲染过程中调用setState
     setTimeout(() => {
       onMultiSelectChangeRef.current?.({
-        isActive: true,
+        isActive: true, // 有选中项时，多选模式应该是激活的
         selectedIds,
         selectedCount: selectedIds.length,
         totalCount: itemsRef.current.length,
@@ -44,13 +44,17 @@ export const useMultiSelectManager = ({
   const stableOnModeChange = useCallback((isActive) => {
     // 使用setTimeout延迟回调，避免在渲染过程中调用setState
     setTimeout(() => {
-      onMultiSelectChangeRef.current?.({
-        isActive,
-        selectedIds: [],
-        selectedCount: 0,
-        totalCount: itemsRef.current.length,
-        itemType: itemTypeRef.current
-      });
+      // 只在退出多选模式时更新状态
+      // 进入多选模式时，状态由 stableOnSelectionChange 管理
+      if (!isActive) {
+        onMultiSelectChangeRef.current?.({
+          isActive: false,
+          selectedIds: [],
+          selectedCount: 0,
+          totalCount: itemsRef.current.length,
+          itemType: itemTypeRef.current
+        });
+      }
     }, 0);
   }, []); // 空依赖数组，避免无限循环
   

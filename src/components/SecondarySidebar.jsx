@@ -34,12 +34,25 @@ const SecondarySidebar = ({ open, onClose, width = 320, onTodoSelect, onViewMode
   const theme = useTheme();
   const isMobile = useMediaQuery(theme.breakpoints.down('md'));
   const currentView = useStore((state) => state.currentView);
+  const maskOpacity = useStore((state) => state.maskOpacity);
   const pluginStoreFilters = useStore((state) => state.pluginStoreFilters);
   const pluginStoreCategories = useStore((state) => state.pluginStoreCategories);
   const setPluginStoreCategory = useStore((state) => state.setPluginStoreCategory);
   const setPluginStoreTab = useStore((state) => state.setPluginStoreTab);
   const settingsTabValue = useStore((state) => state.settingsTabValue);
   const setSettingsTabValue = useStore((state) => state.setSettingsTabValue);
+
+  // 根据遮罩透明度设置获取对应的透明度值
+  const getMaskOpacityValue = (isDark) => {
+    const opacityMap = {
+      none: { dark: 0, light: 0 },
+      light: { dark: 0.45, light: 0.4 },
+      medium: { dark: 0.65, light: 0.65 },
+      heavy: { dark: 0.88, light: 0.88 }
+    }
+    const values = opacityMap[maskOpacity] || opacityMap.medium
+    return isDark ? values.dark : values.light
+  }
 
   // 根据当前视图渲染不同的侧边栏内容
   const renderSidebarContent = () => {
@@ -81,7 +94,17 @@ const SecondarySidebar = ({ open, onClose, width = 320, onTodoSelect, onViewMode
         ]
 
         return (
-          <Box sx={{ p: 2, display: 'flex', flexDirection: 'column', height: '100%' }}>
+          <Box sx={(theme) => ({ 
+            p: 2, 
+            display: 'flex', 
+            flexDirection: 'column', 
+            height: '100%',
+            backgroundColor: theme.palette.mode === 'dark'
+              ? 'rgba(30, 41, 59, 0.85)'
+              : 'rgba(255, 255, 255, 0.85)',
+            backdropFilter: 'blur(12px) saturate(150%)',
+            WebkitBackdropFilter: 'blur(12px) saturate(150%)'
+          })}>
             <Typography variant="h6" sx={{ mb: 2 }}>
               {t('sidebar.plugins')}
             </Typography>
@@ -142,7 +165,17 @@ const SecondarySidebar = ({ open, onClose, width = 320, onTodoSelect, onViewMode
         ]
 
         return (
-          <Box sx={{ p: 2, display: 'flex', flexDirection: 'column', height: '100%' }}>
+          <Box sx={(theme) => ({ 
+            p: 2, 
+            display: 'flex', 
+            flexDirection: 'column', 
+            height: '100%',
+            backgroundColor: theme.palette.mode === 'dark'
+              ? 'rgba(30, 41, 59, 0.85)'
+              : 'rgba(255, 255, 255, 0.85)',
+            backdropFilter: 'blur(12px) saturate(150%)',
+            WebkitBackdropFilter: 'blur(12px) saturate(150%)'
+          })}>
             <Typography variant="h6" sx={{ mb: 2 }}>
               {t('settings.settings')}
             </Typography>
@@ -202,15 +235,22 @@ const SecondarySidebar = ({ open, onClose, width = 320, onTodoSelect, onViewMode
       }}
     >
       <Box
-        sx={{
-          width: width,
-          height: '100%',
-          backgroundColor: 'background.paper',
-          borderRight: 1,
-          borderColor: 'divider',
-          display: 'flex',
-          flexDirection: 'column',
-          overflow: 'hidden',
+        sx={(themeObj) => {
+          const opacity = getMaskOpacityValue(themeObj.palette.mode === 'dark')
+          return {
+            width: width,
+            height: '100%',
+            backgroundColor: themeObj.palette.mode === 'dark'
+              ? `rgba(15, 23, 42, ${opacity})`
+              : `rgba(240, 244, 248, ${opacity})`,
+            backdropFilter: opacity > 0 ? 'blur(12px)' : 'none',
+            WebkitBackdropFilter: opacity > 0 ? 'blur(12px)' : 'none',
+            borderRight: 1,
+            borderColor: 'divider',
+            display: 'flex',
+            flexDirection: 'column',
+            overflow: 'hidden',
+          }
         }}
       >
         {sidebarContent}

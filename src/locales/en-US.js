@@ -554,9 +554,9 @@ const enUS = {
     ]
   },
   about: {
-    appName: 'FlashNote 2.2.2 Epsilon',
+    appName: 'FlashNote 2.2.2 Zeta',
     description: 'A simple and efficient note-taking app',
-    version: 'Version 2.2.2 Epsilon',
+    version: 'Version 2.2.2 Zeta',
     githubRepo: 'GitHub Repository',
     copyright: '© 2025 FlashNote. All rights reserved.'
   },

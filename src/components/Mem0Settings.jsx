@@ -217,9 +217,12 @@ const Mem0Settings = () => {
       if (window.electronAPI?.invoke) {
         const result = await window.electronAPI.invoke('mem0:migrate-historical');
         if (result?.success) {
+          const skippedText = result.skippedCount > 0 
+            ? `，跳过 ${result.skippedCount} 条重复` 
+            : '';
           setMessage({
             type: 'success',
-            text: `完成!已添加 ${result.memoryCount || 0} 条记忆(包含笔记内容和行为模式)`
+            text: `完成! 新增 ${result.memoryCount || 0} 条记忆${skippedText}`
           });
           await loadStats();
           await loadMemories();
@@ -360,9 +363,9 @@ const Mem0Settings = () => {
               <Typography variant="subtitle2" gutterBottom>
                 {t('mem0.semanticSearch')}
               </Typography>
-              <Box sx={{ display: 'flex', gap: 1, mb: 2 }}>
+              <Box sx={{ display: 'flex', gap: 1, mb: 2, alignItems: 'center' }}>
                 <TextField
-                  fullWidth
+                  sx={{ flex: 1 }}
                   size="small"
                   placeholder={t('mem0.searchPlaceholder')}
                   value={searchQuery}
@@ -370,6 +373,7 @@ const Mem0Settings = () => {
                   onKeyPress={(e) => e.key === 'Enter' && handleSearch()}
                 />
                 <Button
+                  sx={{ whiteSpace: 'nowrap' }}
                   variant="contained"
                   size="small"
                   startIcon={<SearchIcon />}

@@ -120,7 +120,7 @@ const TodoList = ({ onTodoSelect, onViewModeChange, onShowCompletedChange, viewM
   // 使用多选管理hook
   const multiSelect = useMultiSelectManager({
     items: todos,
-    itemType: t('todos.newTodo'),
+    itemType: '待办事项',
     onMultiSelectChange,
     onMultiSelectRefChange
   })
@@ -530,12 +530,20 @@ const TodoList = ({ onTodoSelect, onViewModeChange, onShowCompletedChange, viewM
   );
 
   return (
-    <Box sx={{
+    <Box sx={(theme) => ({
       height: '100%',
       display: 'flex',
       flexDirection: 'column',
-      overflow: 'hidden'
-    }}>
+      overflow: 'hidden',
+      // 当作为外部数据源（如 MyDayPanel）的子组件时，不添加背景，避免效果叠加
+      ...(isExternalData ? {} : {
+        backgroundColor: theme.palette.mode === 'dark'
+          ? 'rgba(30, 41, 59, 0.85)'
+          : 'rgba(255, 255, 255, 0.85)',
+        backdropFilter: 'blur(12px) saturate(150%)',
+        WebkitBackdropFilter: 'blur(12px) saturate(150%)'
+      })
+    })}>
       {/* 搜索框和筛选区域 */}
       <Box sx={{ p: 2, borderBottom: 1, borderColor: 'divider' }}>
         <TextField
@@ -643,32 +651,15 @@ const TodoList = ({ onTodoSelect, onViewModeChange, onShowCompletedChange, viewM
         ) : todos.length === 0 ? (
           renderEmptyState()
         ) : (
-          <List sx={{ p: 0 }}>
+          <List sx={{ p: 0, overflow: 'visible' }}>
             {todos.map((todo) => (
               <Fade key={todo.id} in timeout={200}>
                 <ListItem
                   disablePadding
                   sx={{
-                    mb: 0.1,
+                    mb: 1,
                     position: 'relative',
-                    overflow: 'visible', // Allow hover effects to show
-                    ...(celebratingTodos.has(todo.id) && {
-                      '&::before': {
-                        content: '""',
-                        position: 'absolute',
-                        top: 0,
-                        left: 0,
-                        right: 0,
-                        bottom: 0,
-                        background: 'rgba(76, 175, 80, 0.4)',
-                        transform: 'translateX(-100%)',
-                        animation: createAnimationString(ANIMATIONS.completion),
-                        zIndex: 1,
-                        pointerEvents: 'none',
-                        borderRadius: '12px'
-                      },
-                      ...GREEN_SWEEP_KEYFRAMES
-                    })
+                    overflow: 'visible'
                   }}
                 >
                   <ListItemButton
@@ -676,11 +667,31 @@ const TodoList = ({ onTodoSelect, onViewModeChange, onShowCompletedChange, viewM
                     onContextMenu={(e) => multiSelect.handleContextMenu(e, todo.id, multiSelect.isMultiSelectMode)}
                     selected={multiSelect.isMultiSelectMode && multiSelect.isSelected(todo.id)}
                     sx={{
-                      py: 1.5,
+                      py: 0.6,
                       borderRadius: '12px',
                       border: '1px solid transparent',
                       backgroundColor: (theme) => theme.palette.mode === 'dark' ? 'rgba(255,255,255,0.02)' : 'rgba(255,255,255,0.6)',
                       transition: 'all 0.2s cubic-bezier(0.4, 0, 0.2, 1)',
+                      position: 'relative',
+                      overflow: 'hidden',
+                      // 完成动画作用于按钮本身
+                      ...(celebratingTodos.has(todo.id) && {
+                        '&::before': {
+                          content: '""',
+                          position: 'absolute',
+                          top: 0,
+                          left: 0,
+                          right: 0,
+                          bottom: 0,
+                          background: 'rgba(76, 175, 80, 0.4)',
+                          transform: 'translateX(-100%)',
+                          animation: createAnimationString(ANIMATIONS.completion),
+                          zIndex: 0,
+                          pointerEvents: 'none',
+                          borderRadius: '12px'
+                        },
+                        ...GREEN_SWEEP_KEYFRAMES
+                      }),
                       '&:hover': {
                         backgroundColor: (theme) => theme.palette.action.hover,
                         boxShadow: '0 4px 12px rgba(0,0,0,0.08)',
@@ -812,7 +823,15 @@ const TodoList = ({ onTodoSelect, onViewModeChange, onShowCompletedChange, viewM
                       {getPriorityIcon(todo.priority)}
                       <IconButton
                         size="small"
-                        onClick={(e) => handleMenuClick(e, todo)}
+                        onClick={(e) => {
+                          e.preventDefault();
+                          e.stopPropagation();
+                          handleMenuClick(e, todo);
+                        }}
+                        onMouseDown={(e) => {
+                          e.preventDefault();
+                          e.stopPropagation();
+                        }}
                       >
                         <MoreVertIcon />
                       </IconButton>

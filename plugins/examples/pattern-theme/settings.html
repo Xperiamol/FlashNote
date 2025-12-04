@@ -3,7 +3,7 @@
 <head>
 	<meta charset="UTF-8">
 	<meta name="viewport" content="width=device-width, initial-scale=1.0">
-	<title>花纹主题设置</title>
+	<title>主题外观设置</title>
 	<style>
 		* {
 			box-sizing: border-box;
@@ -31,7 +31,7 @@
 </head>
 <body>
 	<div id="root">
-		<div class="loading">正在加载花纹主题设置...</div>
+		<div class="loading">正在加载主题外观设置...</div>
 	</div>
 
 	<script>
@@ -130,7 +130,6 @@
 					const [tempOpacity, setTempOpacity] = useState(1.0)
 					const [tempEnabled, setTempEnabled] = useState(true)
 					const [tempStyle, setTempStyle] = useState('dots')
-					const [tempMaskMode, setTempMaskMode] = useState('edge')
 					const [customImage, setCustomImage] = useState(null)
 					const [uploadingImage, setUploadingImage] = useState(false)
 					const fileInputRef = useRef(null)				// 加载当前设置
@@ -180,7 +179,6 @@
 							setTempOpacity(current.opacity || 1.0)
 							setTempEnabled(current.enabled !== false)
 							setTempStyle(current.style || 'dots')
-							setTempMaskMode(current.maskMode || 'edge')
 							setCustomImage(current.customImageUrl || null)
 							console.log('[PatternSettings] ✅ 设置加载成功:', current)
 						} else {
@@ -195,7 +193,6 @@
 						setTempOpacity(1.0)
 						setTempEnabled(true)
 						setTempStyle('dots')
-						setTempMaskMode('edge')
 					}
 					setLoading(false)
 				}
@@ -216,7 +213,6 @@
 							enabled: tempEnabled,
 							style: tempStyle,
 							opacity: tempOpacity,
-							maskMode: tempMaskMode,
 							customImage: customImage ? '(有图片)' : '(无图片)'
 						})
 
@@ -229,7 +225,7 @@
 								enabled: tempEnabled,
 								style: tempStyle,
 								opacity: tempOpacity,
-								maskMode: tempMaskMode,
+								maskMode: 'full',
 								customImage: customImage
 							}
 						)
@@ -343,7 +339,7 @@
 										}
 									},
 										React.createElement(PaletteIcon, { color: 'primary', fontSize: 'large' }),
-										'花纹主题设置'
+										'主题外观设置'
 									),
 									React.createElement(Typography, {
 										variant: 'body2',
@@ -415,83 +411,6 @@
 											color: 'text.secondary',
 											sx: { mt: 1 }
 										}, '调整花纹的显眼程度，0% 为完全透明，200% 为加倍浓度')
-									)
-								),
-
-								// 显示模式选择
-								React.createElement(Card, { sx: { mb: 3 } },
-									React.createElement(CardContent, null,
-										React.createElement(Typography, { variant: 'h6', sx: { mb: 2 } },
-											'显示模式'
-										),
-										React.createElement(Grid, { container: true, spacing: 2 },
-											// 边缘显示模式（壁纸效果）
-											React.createElement(Grid, { item: true, xs: 12, sm: 6 },
-												React.createElement(Card, {
-													sx: {
-														cursor: 'pointer',
-														border: 2,
-														borderColor: tempMaskMode === 'edge' ? 'primary.main' : 'transparent',
-														transition: 'all 0.2s',
-														'&:hover': {
-															borderColor: 'primary.light',
-															transform: 'translateY(-2px)',
-															boxShadow: 3
-														}
-													},
-													onClick: () => {
-														setTempMaskMode('edge')
-														setMessage(null)
-													}
-												},
-													React.createElement(CardContent, null,
-														React.createElement(Box, { sx: { display: 'flex', alignItems: 'center', justifyContent: 'space-between', mb: 1 } },
-															React.createElement(Typography, { variant: 'subtitle1', fontWeight: 'bold' },
-																'壁纸效果'
-															),
-															tempMaskMode === 'edge' && React.createElement(CheckIcon, { color: 'primary' })
-														),
-														React.createElement(Typography, {
-															variant: 'caption',
-															color: 'text.secondary'
-														}, '花纹仅显示在屏幕边缘，中间保持透明，类似墙纸装饰')
-													)
-												)
-											),
-											// 全屏显示模式
-											React.createElement(Grid, { item: true, xs: 12, sm: 6 },
-												React.createElement(Card, {
-													sx: {
-														cursor: 'pointer',
-														border: 2,
-														borderColor: tempMaskMode === 'full' ? 'primary.main' : 'transparent',
-														transition: 'all 0.2s',
-														'&:hover': {
-															borderColor: 'primary.light',
-															transform: 'translateY(-2px)',
-															boxShadow: 3
-														}
-													},
-													onClick: () => {
-														setTempMaskMode('full')
-														setMessage(null)
-													}
-												},
-													React.createElement(CardContent, null,
-														React.createElement(Box, { sx: { display: 'flex', alignItems: 'center', justifyContent: 'space-between', mb: 1 } },
-															React.createElement(Typography, { variant: 'subtitle1', fontWeight: 'bold' },
-																'全屏显示'
-															),
-															tempMaskMode === 'full' && React.createElement(CheckIcon, { color: 'primary' })
-														),
-														React.createElement(Typography, {
-															variant: 'caption',
-															color: 'text.secondary'
-														}, '花纹均匀覆盖整个屏幕，营造沉浸式背景氛围')
-													)
-												)
-											)
-										)
 									)
 								),
 

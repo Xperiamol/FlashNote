@@ -369,13 +369,18 @@ const Profile = () => {
         }}
       >
         {/* 笔记统计卡片 */}
-        <Card sx={{
+        <Card sx={(muiTheme) => ({
           transition: createTransitionString(ANIMATIONS.card),
+          backgroundColor: muiTheme.palette.mode === 'dark'
+            ? 'rgba(30, 41, 59, 0.85)'
+            : 'rgba(255, 255, 255, 0.85)',
+          backdropFilter: 'blur(12px) saturate(150%)',
+          WebkitBackdropFilter: 'blur(12px) saturate(150%)',
           '&:hover': {
             transform: 'translateY(-4px)',
             boxShadow: 4
           }
-        }}>
+        })}>
           <CardContent>
             <Box sx={{ display: 'flex', alignItems: 'center', mb: 2 }}>
               <NotesIcon sx={{ fontSize: 32, color: primaryColor, mr: 2 }} />
@@ -411,13 +416,18 @@ const Profile = () => {
         </Card>
 
         {/* 待办事项统计卡片 */}
-        <Card sx={{
+        <Card sx={(muiTheme) => ({
           transition: createTransitionString(ANIMATIONS.card),
+          backgroundColor: muiTheme.palette.mode === 'dark'
+            ? 'rgba(30, 41, 59, 0.85)'
+            : 'rgba(255, 255, 255, 0.85)',
+          backdropFilter: 'blur(12px) saturate(150%)',
+          WebkitBackdropFilter: 'blur(12px) saturate(150%)',
           '&:hover': {
             transform: 'translateY(-4px)',
             boxShadow: 4
           }
-        }}>
+        })}>
           <CardContent>
             <Box sx={{ display: 'flex', alignItems: 'center', mb: 2 }}>
               <CheckCircleIcon sx={{ fontSize: 32, color: 'success.main', mr: 2 }} />
@@ -519,13 +529,18 @@ const Profile = () => {
         </Card>
 
         {/* 今日待办卡片 */}
-        <Card sx={{
+        <Card sx={(muiTheme) => ({
           transition: createTransitionString(ANIMATIONS.card),
+          backgroundColor: muiTheme.palette.mode === 'dark'
+            ? 'rgba(30, 41, 59, 0.85)'
+            : 'rgba(255, 255, 255, 0.85)',
+          backdropFilter: 'blur(12px) saturate(150%)',
+          WebkitBackdropFilter: 'blur(12px) saturate(150%)',
           '&:hover': {
             transform: 'translateY(-4px)',
             boxShadow: 4
           }
-        }}>
+        })}>
           <CardContent>
             <Box sx={{ display: 'flex', alignItems: 'center', mb: 2 }}>
               <TodayIcon sx={{ fontSize: 32, color: 'info.main', mr: 2 }} />
@@ -559,13 +574,18 @@ const Profile = () => {
         </Card>
 
         {/* 逾期待办卡片 */}
-        <Card sx={{
+        <Card sx={(muiTheme) => ({
           transition: createTransitionString(ANIMATIONS.card),
+          backgroundColor: muiTheme.palette.mode === 'dark'
+            ? 'rgba(30, 41, 59, 0.85)'
+            : 'rgba(255, 255, 255, 0.85)',
+          backdropFilter: 'blur(12px) saturate(150%)',
+          WebkitBackdropFilter: 'blur(12px) saturate(150%)',
           '&:hover': {
             transform: 'translateY(-4px)',
             boxShadow: 4
           }
-        }}>
+        })}>
           <CardContent>
             <Box sx={{ display: 'flex', alignItems: 'center', mb: 2 }}>
               <WarningIcon sx={{ fontSize: 32, color: 'error.main', mr: 2 }} />
@@ -600,13 +620,18 @@ const Profile = () => {
         </Card>
 
         {/* 插件统计卡片 */}
-        <Card sx={{
+        <Card sx={(muiTheme) => ({
           transition: createTransitionString(ANIMATIONS.card),
+          backgroundColor: muiTheme.palette.mode === 'dark'
+            ? 'rgba(30, 41, 59, 0.85)'
+            : 'rgba(255, 255, 255, 0.85)',
+          backdropFilter: 'blur(12px) saturate(150%)',
+          WebkitBackdropFilter: 'blur(12px) saturate(150%)',
           '&:hover': {
             transform: 'translateY(-4px)',
             boxShadow: 4
           }
-        }}>
+        })}>
           <CardContent>
             <Box sx={{ display: 'flex', alignItems: 'center', mb: 2 }}>
               <ExtensionIcon sx={{ fontSize: 32, color: primaryColor, mr: 2 }} />
@@ -643,13 +668,18 @@ const Profile = () => {
         </Card>
 
         {/* 使用概览卡片 */}
-        <Card sx={{
+        <Card sx={(muiTheme) => ({
           transition: createTransitionString(ANIMATIONS.card),
+          backgroundColor: muiTheme.palette.mode === 'dark'
+            ? 'rgba(30, 41, 59, 0.85)'
+            : 'rgba(255, 255, 255, 0.85)',
+          backdropFilter: 'blur(12px) saturate(150%)',
+          WebkitBackdropFilter: 'blur(12px) saturate(150%)',
           '&:hover': {
             transform: 'translateY(-4px)',
             boxShadow: 4
           }
-        }}>
+        })}>
           <CardContent>
             <Box sx={{ display: 'flex', alignItems: 'center', mb: 2 }}>
               <TrendingUpIcon sx={{ fontSize: 32, color: 'success.main', mr: 2 }} />
@@ -684,13 +714,18 @@ const Profile = () => {
         </Card>
 
         {/* 笔记详细信息卡片 */}
-        <Card sx={{
+        <Card sx={(muiTheme) => ({
           transition: createTransitionString(ANIMATIONS.card),
+          backgroundColor: muiTheme.palette.mode === 'dark'
+            ? 'rgba(30, 41, 59, 0.85)'
+            : 'rgba(255, 255, 255, 0.85)',
+          backdropFilter: 'blur(12px) saturate(150%)',
+          WebkitBackdropFilter: 'blur(12px) saturate(150%)',
           '&:hover': {
             transform: 'translateY(-4px)',
             boxShadow: 4
           }
-        }}>
+        })}>
           <CardContent>
             <Typography variant="h6" sx={{ mb: 2, fontWeight: 600, display: 'flex', alignItems: 'center' }}>
               <NotesIcon sx={{ mr: 1, color: primaryColor }} />
@@ -718,13 +753,18 @@ const Profile = () => {
         </Card>
 
         {/* 待办详细信息卡片 */}
-        <Card sx={{
+        <Card sx={(muiTheme) => ({
           transition: createTransitionString(ANIMATIONS.card),
+          backgroundColor: muiTheme.palette.mode === 'dark'
+            ? 'rgba(30, 41, 59, 0.85)'
+            : 'rgba(255, 255, 255, 0.85)',
+          backdropFilter: 'blur(12px) saturate(150%)',
+          WebkitBackdropFilter: 'blur(12px) saturate(150%)',
           '&:hover': {
             transform: 'translateY(-4px)',
             boxShadow: 4
           }
-        }}>
+        })}>
           <CardContent>
             <Typography variant="h6" sx={{ mb: 2, fontWeight: 600, display: 'flex', alignItems: 'center' }}>
               <CheckCircleIcon sx={{ mr: 1, color: 'success.main' }} />
@@ -756,13 +796,18 @@ const Profile = () => {
         </Card>
 
         {/* 笔记活动热力图卡片 */}
-        <Card sx={{
+        <Card sx={(muiTheme) => ({
           transition: createTransitionString(ANIMATIONS.card),
+          backgroundColor: muiTheme.palette.mode === 'dark'
+            ? 'rgba(30, 41, 59, 0.85)'
+            : 'rgba(255, 255, 255, 0.85)',
+          backdropFilter: 'blur(12px) saturate(150%)',
+          WebkitBackdropFilter: 'blur(12px) saturate(150%)',
           '&:hover': {
             transform: 'translateY(-4px)',
             boxShadow: 4
           }
-        }}>
+        })}>
           <CardContent>
             <Box sx={{ display: 'flex', alignItems: 'center', mb: 2 }}>
               <CalendarMonthIcon sx={{ fontSize: 32, color: primaryColor, mr: 2 }} />
@@ -867,13 +912,18 @@ const Profile = () => {
         </Card>
 
         {/* 高频词统计卡片 */}
-        <Card sx={{
+        <Card sx={(muiTheme) => ({
           transition: createTransitionString(ANIMATIONS.card),
+          backgroundColor: muiTheme.palette.mode === 'dark'
+            ? 'rgba(30, 41, 59, 0.85)'
+            : 'rgba(255, 255, 255, 0.85)',
+          backdropFilter: 'blur(12px) saturate(150%)',
+          WebkitBackdropFilter: 'blur(12px) saturate(150%)',
           '&:hover': {
             transform: 'translateY(-4px)',
             boxShadow: 4
           }
-        }}>
+        })}>
           <CardContent>
             <Box sx={{ display: 'flex', alignItems: 'center', mb: 2 }}>
               <TagIcon sx={{ fontSize: 32, color: 'info.main', mr: 2 }} />

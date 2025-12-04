@@ -242,13 +242,13 @@ const TitleBar = ({ isStandalone = false, onMinibarClick, isMinibarMode = false 
               },
             }}
           >
-            <Box
-              sx={{
-                width: '10px',
-                height: '2px',
-                backgroundColor: theme.palette.mode === 'dark' ? '#ffffff' : '#1a1a1a',
-              }}
-            />
+            <svg width="10" height="1" viewBox="0 0 10 1" fill="none" xmlns="http://www.w3.org/2000/svg">
+              <rect
+                width="10"
+                height="1"
+                fill={theme.palette.mode === 'dark' ? '#ffffff' : '#333333'}
+              />
+            </svg>
           </Box>
 
           {/* 最大化按钮 */}
@@ -270,14 +270,14 @@ const TitleBar = ({ isStandalone = false, onMinibarClick, isMinibarMode = false 
               },
             }}
           >
-            <Box
-              sx={{
-                width: '9px',
-                height: '9px',
-                border: `2px solid ${theme.palette.mode === 'dark' ? '#ffffff' : '#1a1a1a'}`,
-                borderRadius: '1px',
-              }}
-            />
+            <svg width="10" height="10" viewBox="0 0 10 10" fill="none" xmlns="http://www.w3.org/2000/svg">
+              <path
+                d="M1 1h8v8H1V1z"
+                stroke={theme.palette.mode === 'dark' ? '#ffffff' : '#333333'}
+                strokeWidth="1.2"
+                fill="none"
+              />
+            </svg>
           </Box>
 
           {/* 关闭按钮 */}
@@ -295,8 +295,8 @@ const TitleBar = ({ isStandalone = false, onMinibarClick, isMinibarMode = false 
               transition: createTransitionString(ANIMATIONS.button),
               '&:hover': {
                 backgroundColor: '#e81123',
-                '& .close-icon': {
-                  backgroundColor: '#fff !important',
+                '& svg path': {
+                  stroke: '#ffffff',
                 }
               },
               '&:active': {
@@ -304,32 +304,14 @@ const TitleBar = ({ isStandalone = false, onMinibarClick, isMinibarMode = false 
               },
             }}
           >
-            <Box sx={{ position: 'relative', width: '12px', height: '12px' }}>
-              <Box
-                className="close-icon"
-                sx={{
-                  position: 'absolute',
-                  width: '12px',
-                  height: '1.5px',
-                  backgroundColor: '#e81123',
-                  top: '5.25px',
-                  left: '-3px',
-                  transform: 'rotate(45deg)',
-                }}
+            <svg width="10" height="10" viewBox="0 0 10 10" fill="none" xmlns="http://www.w3.org/2000/svg">
+              <path
+                d="M1 1l8 8M9 1L1 9"
+                stroke={theme.palette.mode === 'dark' ? '#ffffff' : '#333333'}
+                strokeWidth="1.2"
+                strokeLinecap="round"
               />
-              <Box
-                className="close-icon"
-                sx={{
-                  position: 'absolute',
-                  width: '12px',
-                  height: '1.5px',
-                  backgroundColor: '#e81123',
-                  top: '5.25px',
-                  left: '-3px',
-                  transform: 'rotate(-45deg)',
-                }}
-              />
-            </Box>
+            </svg>
           </Box>
         </Box>
       )}

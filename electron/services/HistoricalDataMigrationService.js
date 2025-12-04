@@ -3,6 +3,9 @@ const DatabaseManager = require('../dao/DatabaseManager');
 /**
  * 历史数据迁移到 Mem0 服务
  * 符合 SOLID 原则：单一职责 - 只负责历史数据分析和迁移
+ * 
+ * 去重策略：直接查询 mem0_memories 表中的 metadata，检查 note_id 是否已存在
+ * 无需额外的 JSON 状态文件，数据库是唯一真实来源(Single Source of Truth)
  */
 class HistoricalDataMigrationService {
   constructor(mem0Service) {
@@ -18,38 +21,147 @@ class HistoricalDataMigrationService {
       priorityThreshold: 0.3,
       minKeywordFrequency: 5,
       maxFrequentKeywords: 10,
-      batchSize: 50
+      batchSize: 50,
+      autoMigrateIntervalHours: 24 // 每24小时自动执行一次
     };
+    
+    // 上次迁移时间(从数据库推断)
+    this.lastMigrateTime = null;
   }
 
   /**
-   * 执行完整的历史数据迁移
+   * 从数据库获取已迁移的笔记ID列表
+   * @private
+   */
+  _getMigratedNoteIds() {
+    try {
+      // 查询 mem0_memories 表中所有来源为 user_note 的记忆
+      const rows = this.db.prepare(`
+        SELECT metadata FROM mem0_memories 
+        WHERE metadata LIKE '%"source":"user_note"%'
+      `).all();
+      
+      const noteIds = new Set();
+      for (const row of rows) {
+        try {
+          const metadata = JSON.parse(row.metadata);
+          if (metadata.note_id) {
+            noteIds.add(String(metadata.note_id));
+          }
+        } catch (e) {
+          // 忽略解析失败的记录
+        }
+      }
+      
+      console.log(`[Migration] 数据库中已有 ${noteIds.size} 篇笔记的记忆`);
+      return noteIds;
+    } catch (error) {
+      console.error('[Migration] 查询已迁移笔记ID失败:', error);
+      return new Set();
+    }
+  }
+
+  /**
+   * 检查是否需要自动迁移
+   * 基于数据库中最新记忆的时间来判断
+   */
+  shouldAutoMigrate() {
+    try {
+      // 查询最近一条来自笔记迁移的记忆时间
+      const row = this.db.prepare(`
+        SELECT created_at FROM mem0_memories 
+        WHERE metadata LIKE '%"source":"user_note"%'
+        ORDER BY created_at DESC
+        LIMIT 1
+      `).get();
+      
+      if (!row) {
+        return true; // 没有迁移记录，需要迁移
+      }
+      
+      const lastTime = row.created_at;
+      const now = Date.now();
+      const hoursSinceLastMigrate = (now - lastTime) / (1000 * 60 * 60);
+      
+      return hoursSinceLastMigrate >= this.config.autoMigrateIntervalHours;
+    } catch (error) {
+      console.error('[Migration] 检查自动迁移状态失败:', error);
+      return true; // 出错时执行迁移
+    }
+  }
+
+  /**
+   * 启动自动迁移定时器
+   */
+  startAutoMigration(userId) {
+    // 先检查是否需要立即执行
+    if (this.shouldAutoMigrate()) {
+      console.log('[Migration] 需要执行自动迁移...');
+      this.migrateAll(userId).catch(err => {
+        console.error('[Migration] 自动迁移失败:', err);
+      });
+    }
+
+    // 设置定时器,每小时检查一次是否需要迁移
+    this.autoMigrateTimer = setInterval(() => {
+      if (this.shouldAutoMigrate()) {
+        console.log('[Migration] 定时执行自动迁移...');
+        this.migrateAll(userId).catch(err => {
+          console.error('[Migration] 定时自动迁移失败:', err);
+        });
+      }
+    }, 60 * 60 * 1000); // 每小时检查一次
+
+    console.log('[Migration] 自动迁移已启动,每24小时执行一次');
+  }
+
+  /**
+   * 停止自动迁移
+   */
+  stopAutoMigration() {
+    if (this.autoMigrateTimer) {
+      clearInterval(this.autoMigrateTimer);
+      this.autoMigrateTimer = null;
+      console.log('[Migration] 自动迁移已停止');
+    }
+  }
+
+  /**
+   * 执行完整的历史数据迁移(增量,去重)
    * @param {string} userId - 用户ID
-   * @returns {Promise<{success: boolean, memoryCount: number, errors: Array}>}
+   * @returns {Promise<{success: boolean, memoryCount: number, skippedCount: number, errors: Array}>}
    */
   async migrateAll(userId) {
-    console.log('[Migration] 开始分析历史数据...');
+    console.log('[Migration] 开始分析历史数据(增量模式)...');
     
     const results = {
       memoryCount: 0,
+      skippedCount: 0,
       errors: []
     };
 
     try {
-      // 1. 分析待办事项模式
-      results.memoryCount += await this._analyzeTodoPatterns(userId);
+      // 检查是否是首次迁移（数据库中没有用户笔记记忆）
+      const migratedNoteIds = this._getMigratedNoteIds();
+      const isFirstMigration = migratedNoteIds.size === 0;
       
-      // 2. 分析完成任务速度
-      results.memoryCount += await this._analyzeCompletionSpeed(userId);
+      // 1. 分析待办事项模式(只在首次执行)
+      if (isFirstMigration) {
+        results.memoryCount += await this._analyzeTodoPatterns(userId);
+        results.memoryCount += await this._analyzeCompletionSpeed(userId);
+      }
       
-      // 3. 迁移笔记内容
-      results.memoryCount += await this._migrateNotes(userId);
+      // 2. 迁移笔记内容(增量,去重)
+      const noteResult = await this._migrateNotes(userId);
+      results.memoryCount += noteResult.added;
+      results.skippedCount += noteResult.skipped;
       
-      console.log(`[Migration] 迁移完成，共创建 ${results.memoryCount} 条记忆`);
+      console.log(`[Migration] 迁移完成，新增 ${results.memoryCount} 条记忆，跳过 ${results.skippedCount} 条重复`);
       
       return {
         success: true,
         memoryCount: results.memoryCount,
+        skippedCount: results.skippedCount,
         errors: results.errors
       };
     } catch (error) {
@@ -57,6 +169,7 @@ class HistoricalDataMigrationService {
       return {
         success: false,
         memoryCount: results.memoryCount,
+        skippedCount: results.skippedCount,
         errors: [...results.errors, error.message]
       };
     }
@@ -180,39 +293,53 @@ class HistoricalDataMigrationService {
   }
 
   /**
-   * 迁移笔记内容
+   * 迁移笔记内容(增量,去重)
+   * 去重策略：直接查询数据库，确保数据一致性
    * @private
    */
   async _migrateNotes(userId) {
     const notes = this._getNotesInPeriod(this.config.daysToAnalyze);
-    console.log(`[Migration] 找到 ${notes.length} 篇笔记，开始存储完整内容...`);
     
-    let memoryCount = 0;
+    // 从数据库获取已迁移的笔记ID（Single Source of Truth）
+    const migratedNoteIds = this._getMigratedNoteIds();
+    
+    console.log(`[Migration] 找到 ${notes.length} 篇笔记，数据库中已有 ${migratedNoteIds.size} 篇，检查去重...`);
+    
+    let addedCount = 0;
+    let skippedCount = 0;
 
     // 批量处理笔记
     for (const note of notes) {
       try {
+        // 去重检查：直接用数据库查询结果
+        const noteIdStr = String(note.id);
+        if (migratedNoteIds.has(noteIdStr)) {
+          skippedCount++;
+          continue;
+        }
+        
         await this._storeNoteAsMemory(userId, note);
-        memoryCount++;
+        addedCount++;
         
         // 进度日志
-        if (memoryCount % this.config.batchSize === 0) {
-          console.log(`[Migration] 已处理 ${memoryCount}/${notes.length} 条笔记...`);
+        if (addedCount % this.config.batchSize === 0) {
+          console.log(`[Migration] 已处理 ${addedCount} 条新笔记...`);
         }
       } catch (err) {
         console.error(`[Migration] 存储笔记 ${note.id} 失败:`, err.message);
       }
     }
 
-    console.log(`[Migration] 笔记存储完成，共 ${notes.length} 条`);
+    console.log(`[Migration] 笔记存储完成，新增 ${addedCount} 条，跳过 ${skippedCount} 条重复`);
 
-    // 笔记频率分析
-    if (notes.length > this.config.minNotesForFrequencyAnalysis) {
+    // 笔记频率分析(只在首次有大量笔记时执行)
+    const isFirstMigration = migratedNoteIds.size === 0;
+    if (isFirstMigration && notes.length > this.config.minNotesForFrequencyAnalysis) {
       await this._analyzeNoteFrequency(userId, notes.length);
-      memoryCount++;
+      addedCount++;
     }
 
-    return memoryCount;
+    return { added: addedCount, skipped: skippedCount };
   }
 
   /**

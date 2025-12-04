@@ -108,6 +108,16 @@ code {
   }
 }
 
+/* 光标呼吸动画 */
+@keyframes cursor-breath {
+  0%, 100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.3;
+  }
+}
+
 /* 禁用文本选择（在某些UI元素上） */
 .no-select {
   -webkit-user-select: none;

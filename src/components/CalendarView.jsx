@@ -235,16 +235,21 @@ const CalendarView = ({ currentDate, onDateChange, onTodoSelect, selectedDate, o
       >
         {/* 星期标题 */}
         <Box
-          sx={{
+          sx={(muiTheme) => ({
             display: 'grid',
-            gridTemplateColumns: 'repeat(7, minmax(80px, 1fr))', // 设置最小列宽
+            gridTemplateColumns: 'repeat(7, minmax(80px, 1fr))',
             gap: 0,
             mb: 2,
             border: `1px solid ${theme.palette.divider}`,
-            borderRadius: 1,
+            borderRadius: '8px',
             overflow: 'hidden',
-            minWidth: '560px' // 7列 * 80px = 560px 最小宽度
-          }}
+            minWidth: '560px',
+            backgroundColor: muiTheme.palette.mode === 'dark'
+              ? 'rgba(30, 41, 59, 0.85)'
+              : 'rgba(255, 255, 255, 0.85)',
+            backdropFilter: 'blur(12px) saturate(150%)',
+            WebkitBackdropFilter: 'blur(12px) saturate(150%)'
+          })}
         >
           {weekDays.map((day, index) => (
             <Box
@@ -252,9 +257,6 @@ const CalendarView = ({ currentDate, onDateChange, onTodoSelect, selectedDate, o
               sx={{
                 textAlign: 'center',
                 py: 1.5,
-                backgroundColor: theme.palette.mode === 'dark' 
-                  ? theme.palette.grey[800] 
-                  : theme.palette.grey[50],
                 borderRight: index < 6 ? `1px solid ${theme.palette.divider}` : 'none'
               }}
             >
@@ -276,7 +278,7 @@ const CalendarView = ({ currentDate, onDateChange, onTodoSelect, selectedDate, o
         <Box 
           sx={{ 
             border: `1px solid ${theme.palette.divider}`,
-            borderRadius: 1,
+            borderRadius: '8px',
             overflow: 'hidden'
           }}
         >

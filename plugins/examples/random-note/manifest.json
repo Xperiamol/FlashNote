@@ -19,7 +19,7 @@
 		"notes",
 		"productivity"
 	],
-	"icon": null,
+	"icon": "icon.svg",
 	"entry": "index.js",
 	"permissions": {
 		"notes:read": true,

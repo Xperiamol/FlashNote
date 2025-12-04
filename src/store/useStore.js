@@ -42,6 +42,7 @@ const useStore = create(
                 userName: '', // 用户名称
                 editorMode: 'markdown', // 编辑器模式：'markdown' | 'wysiwyg'
                 defaultMinibarMode: false, // 独立窗口默认minibar模式
+                maskOpacity: 'medium', // 遮罩透明度：'none' | 'light' | 'medium' | 'heavy'
 
                 // 插件商店相关 UI 状态
                 pluginStoreFilters: {
@@ -73,6 +74,8 @@ const useStore = create(
                 setEditorMode: (mode) => set({ editorMode: mode }),
 
                 setDefaultMinibarMode: (enabled) => set({ defaultMinibarMode: enabled }),
+
+                setMaskOpacity: (opacity) => set({ maskOpacity: opacity }),
 
                 setLanguage: (language) => set({ language }),
 

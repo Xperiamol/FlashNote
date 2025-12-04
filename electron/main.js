@@ -251,7 +251,7 @@ function createTray() {
     tray = new Tray(trayIcon)
 
     // 设置托盘提示文本
-    tray.setToolTip('FlashNote 2.2.2 Epsilon - 快速笔记应用')
+    tray.setToolTip('FlashNote 2.2.2 Zeta - 快速笔记应用')
 
     // 创建托盘菜单
     const contextMenu = Menu.buildFromTemplate([
@@ -376,6 +376,9 @@ async function initializeServices() {
     // 初始化数据库
     const dbManager = DatabaseManager.getInstance()
     await dbManager.initialize()
+    
+    // 将 dbManager 加入 services，供 PluginManager 等使用
+    services.dbManager = dbManager
 
     // 初始化服务
     services.noteService = new NoteService()
@@ -411,6 +414,8 @@ async function initializeServices() {
     services.mem0Service.initialize().then(result => {
       if (result.success) {
         console.log('[Main] Mem0 service initialized')
+        // Mem0 初始化成功后，启动自动迁移(每天执行一次)
+        services.migrationService.startAutoMigration('current_user')
       } else {
         console.warn('[Main] Mem0 service initialization failed:', result.error)
       }
@@ -521,7 +526,7 @@ async function initializeServices() {
       if (notesResult.success && notesResult.data && notesResult.data.notes && notesResult.data.notes.length === 0) {
         console.log('检测到首次启动，创建示例笔记')
         const welcomeNote = {
-          title: '欢迎使用 FlashNote 2.2.2 Epsilon！',
+          title: '欢迎使用 FlashNote 2.2.2 Zeta！',
           content: `# 欢迎使用 FlashNote 2.3！ 🎉
 
 恭喜你成功安装了 FlashNote，这是一个现代化的本地笔记应用。
@@ -1453,6 +1458,7 @@ ipcMain.handle('mem0:delete', async (event, { memoryId }) => {
 ipcMain.handle('mem0:clear', async (event, { userId }) => {
   try {
     const count = await services.mem0Service.clearUserMemories(userId)
+    // 无需额外清理：数据库是唯一真实来源，清空记忆后去重自动生效
     return { success: true, count }
   } catch (error) {
     console.error('清除记忆失败:', error)
@@ -1478,183 +1484,17 @@ ipcMain.handle('mem0:is-available', async (event) => {
   }
 })
 
+// 历史数据迁移 - 使用 migrationService 实现去重
 ipcMain.handle('mem0:migrate-historical', async (event) => {
   try {
-    console.log('[Mem0] 开始分析历史数据...')
-
+    console.log('[Mem0] 开始迁移历史数据(使用去重服务)...')
     const userId = 'current_user'
-    let memoryCount = 0
-
-    // 获取数据库实例
-    const dbManager = DatabaseManager.getInstance()
-    const db = dbManager.getDatabase()
-
-    // 1. 分析待办事项模式
-    const todos = db.prepare(`
-      SELECT * FROM todos 
-      WHERE created_at >= date('now', '-90 days')
-      ORDER BY created_at DESC
-    `).all()
-
-    console.log(`[Mem0] 找到 ${todos.length} 个待办事项`)
-
-    if (todos.length > 0) {
-      // 统计优先级偏好
-      const importantCount = todos.filter(t => t.is_important === 1).length
-      const urgentCount = todos.filter(t => t.is_urgent === 1).length
-      const importantRatio = (importantCount / todos.length * 100).toFixed(0)
-      const urgentRatio = (urgentCount / todos.length * 100).toFixed(0)
-
-      if (importantCount > todos.length * 0.3) {
-        await services.mem0Service.addMemory(userId,
-          `用户在过去90天创建了${todos.length}个待办事项,其中${importantRatio}%标记为重要,显示出对重要任务的重视`,
-          {
-            category: 'task_planning',
-            metadata: { source: 'historical_analysis', type: 'priority_pattern' }
-          }
-        )
-        memoryCount++
-      }
-
-      if (urgentCount > todos.length * 0.3) {
-        await services.mem0Service.addMemory(userId,
-          `用户有${urgentRatio}%的任务标记为紧急,倾向于处理时间敏感的工作`,
-          {
-            category: 'task_planning',
-            metadata: { source: 'historical_analysis', type: 'urgency_pattern' }
-          }
-        )
-        memoryCount++
-      }
-
-      // 分析常见任务类型
-      const taskTypes = new Map()
-      todos.forEach(todo => {
-        const keywords = todo.content.split(/[,，、\s]+/).filter(w => w.length > 1)
-        keywords.forEach(kw => {
-          taskTypes.set(kw, (taskTypes.get(kw) || 0) + 1)
-        })
-      })
-
-      const frequentKeywords = Array.from(taskTypes.entries())
-        .filter(([_, count]) => count >= 5)
-        .sort((a, b) => b[1] - a[1])
-        .slice(0, 10)
-        .map(([kw]) => kw)
-
-      if (frequentKeywords.length > 0) {
-        await services.mem0Service.addMemory(userId,
-          `用户经常创建与这些主题相关的任务：${frequentKeywords.join('、')}`,
-          {
-            category: 'task_planning',
-            metadata: { source: 'historical_analysis', type: 'frequent_topics' }
-          }
-        )
-        memoryCount++
-      }
-    }
-
-    // 2. 分析已完成任务
-    const completedTodos = db.prepare(`
-      SELECT 
-        content,
-        is_important,
-        is_urgent,
-        created_at,
-        completed_at,
-        JULIANDAY(completed_at) - JULIANDAY(created_at) as completion_days
-      FROM todos 
-      WHERE is_completed = 1 
-      AND completed_at >= date('now', '-90 days')
-    `).all()
-
-    console.log(`[Mem0] 找到 ${completedTodos.length} 个已完成任务`)
-
-    if (completedTodos.length >= 10) {
-      const avgCompletionDays = (
-        completedTodos.reduce((sum, t) => sum + (t.completion_days || 0), 0) / completedTodos.length
-      ).toFixed(1)
-
-      await services.mem0Service.addMemory(userId,
-        `用户平均在${avgCompletionDays}天内完成任务,显示出稳定的执行力`,
-        {
-          category: 'task_planning',
-          metadata: { source: 'historical_analysis', type: 'completion_speed' }
-        }
-      )
-      memoryCount++
-    }
-
-    // 3. 存储所有笔记内容为独立记忆
-    const notes = db.prepare(`
-      SELECT id, content, tags, created_at 
-      FROM notes 
-      WHERE created_at >= date('now', '-90 days')
-      AND length(content) > 20
-      ORDER BY created_at DESC
-    `).all()
-
-    console.log(`[Mem0] 找到 ${notes.length} 篇笔记,开始存储完整内容...`)
-
-    // 将每条笔记的完整内容存储为独立记忆
-    for (const note of notes) {
-      try {
-        // 存储完整笔记内容
-        const fullContent = note.content.trim()
-
-        console.log(`[Mem0] 处理笔记 ${note.id}, 长度: ${fullContent.length} 字符`)
-
-        // 提取标签
-        const tags = note.tags ? note.tags.split(',').map(t => t.trim()).filter(t => t) : []
-
-        // 使用 'knowledge' category 表示这是知识内容
-        const memoryId = await services.mem0Service.addMemory(userId,
-          fullContent,
-          {
-            category: 'knowledge',
-            metadata: {
-              source: 'user_note',
-              note_id: note.id,
-              created_at: note.created_at,
-              tags: tags,
-              content_length: fullContent.length
-            }
-          }
-        )
-
-        console.log(`[Mem0] 笔记 ${note.id} 存储成功, memory_id: ${memoryId}`)
-        memoryCount++
-
-        // 每处理50条打印一次进度
-        if (memoryCount % 50 === 0) {
-          console.log(`[Mem0] 已处理 ${memoryCount} 条笔记...`)
-        }
-      } catch (err) {
-        console.error(`[Mem0] 存储笔记 ${note.id} 失败:`, err.message)
-      }
-    }
-
-    console.log(`[Mem0] 笔记存储完成,共 ${notes.length} 条`)
-
-    // 额外统计信息
-    if (notes.length > 20) {
-      const notesPerWeek = (notes.length / 13).toFixed(1)
-      await services.mem0Service.addMemory(userId,
-        `用户保持着良好的笔记习惯,平均每周记录${notesPerWeek}篇笔记`,
-        {
-          category: 'note_taking',
-          metadata: { source: 'historical_analysis', type: 'note_frequency' }
-        }
-      )
-      memoryCount++
-    }
-
-    console.log(`[Mem0] 历史数据分析完成,添加了 ${memoryCount} 条记忆`)
-
-    return { success: true, memoryCount }
+    const result = await services.migrationService.migrateAll(userId)
+    console.log('[Mem0] 迁移完成:', result)
+    return result
   } catch (error) {
-    console.error('[Mem0] 分析历史数据失败:', error)
-    return { success: false, error: error.message }
+    console.error('[Mem0] 迁移历史数据失败:', error)
+    return { success: false, error: error.message, memoryCount: 0, skippedCount: 0 }
   }
 })
 
@@ -2509,13 +2349,55 @@ ipcMain.handle('sync:get-unused-images-stats', async (event, retentionDays = 30)
 })
 
 // 应用退出时清理资源
-app.on('before-quit', async () => {
-  try {
-    // 关闭数据库连接
-    const dbManager = DatabaseManager.getInstance()
-    await dbManager.close()
-    console.log('应用资源清理完成')
-  } catch (error) {
-    console.error('应用退出清理失败:', error)
+let isQuittingApp = false;
+app.on('before-quit', async (event) => {
+  if (!isQuittingApp) {
+    event.preventDefault();
+    isQuittingApp = true;
+
+    try {
+      console.log('[App] 开始应用退出流程...');
+
+      // 1. 通知所有窗口保存数据
+      const allWindows = BrowserWindow.getAllWindows();
+      const savePromises = allWindows.map(async (window) => {
+        if (!window.isDestroyed()) {
+          try {
+            await window.webContents.executeJavaScript(`
+              (async () => {
+                if (window.__saveBeforeClose) {
+                  await window.__saveBeforeClose();
+                  return true;
+                }
+                return false;
+              })();
+            `);
+          } catch (error) {
+            console.error('[App] 窗口保存失败:', error);
+          }
+        }
+      });
+
+      await Promise.all(savePromises);
+      console.log('[App] 所有窗口数据已保存');
+
+      // 2. 等待一些额外时间确保保存完成
+      await new Promise(resolve => setTimeout(resolve, 500));
+
+      // 3. 关闭所有窗口
+      await windowManager.closeAllWindows();
+
+      // 4. 关闭数据库连接
+      const dbManager = DatabaseManager.getInstance();
+      await dbManager.close();
+      console.log('[App] 应用资源清理完成');
+
+      // 5. 真正退出应用
+      app.quit();
+    } catch (error) {
+      console.error('[App] 应用退出清理失败:', error);
+      // 即使失败也退出
+      app.quit();
+    }
   }
-})
+});

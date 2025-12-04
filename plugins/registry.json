@@ -33,8 +33,8 @@
       "notifications:show"
     ],
     "minAppVersion": "2.1.0",
-    "shortDescription": "炫酷几何花纹背景主题",
-    "icon": null
+    "shortDescription": "炒酷几何花纹背景主题",
+    "icon": "icon.svg"
   },
   {
     "id": "random-note",
@@ -66,7 +66,7 @@
     ],
     "minAppVersion": "2.0.0",
     "shortDescription": "抽一篇旧笔记立即回顾",
-    "icon": null
+    "icon": "icon.svg"
   },
   {
     "id": "auto-tag-creator",
@@ -104,7 +104,7 @@
     ],
     "minAppVersion": "2.0.0",
     "shortDescription": "智能提取关键词自动创建标签",
-    "icon": null
+    "icon": "icon.svg"
   },
   {
     "id": "ai-task-planner",

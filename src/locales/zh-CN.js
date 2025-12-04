@@ -567,9 +567,9 @@ const zhCN = {
     ]
   },
   about: {
-    appName: 'FlashNote 2.2.2 Epsilon',
+    appName: 'FlashNote 2.2.2 Zeta',
     description: '一个简洁高效的笔记应用',
-    version: '版本 2.2.2 Epsilon',
+    version: '版本 2.2.2 Zeta',
     githubRepo: 'GitHub 仓库',
     copyright: '© 2025 FlashNote. All rights reserved.'
   },

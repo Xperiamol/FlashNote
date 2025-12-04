@@ -420,13 +420,18 @@ const NoteList = ({ showDeleted = false, onMultiSelectChange, onMultiSelectRefCh
   }
 
   return (
-    <Box sx={{
+    <Box sx={(theme) => ({
       flex: 1,
       display: 'flex',
       flexDirection: 'column',
       overflow: 'hidden',
-      minHeight: 0
-    }}>
+      minHeight: 0,
+      backgroundColor: theme.palette.mode === 'dark'
+        ? 'rgba(30, 41, 59, 0.85)'
+        : 'rgba(255, 255, 255, 0.85)',
+      backdropFilter: 'blur(12px) saturate(150%)',
+      WebkitBackdropFilter: 'blur(12px) saturate(150%)'
+    })}>
       {/* 搜索框 */}
       <Box sx={{ p: 2, pb: 1, flexShrink: 0 }}>
         <TextField
@@ -599,7 +604,7 @@ const NoteList = ({ showDeleted = false, onMultiSelectChange, onMultiSelectRefCh
                           borderColor: 'transparent',
                           backgroundColor: theme.palette.mode === 'dark' ? 'rgba(255,255,255,0.02)' : 'rgba(255,255,255,0.6)',
                           transition: 'all 0.2s cubic-bezier(0.4, 0, 0.2, 1)',
-                          py: 1.5,
+                          py: 1,
                           pr: multiSelect.isMultiSelectMode ? 2 : 6,
                           '&:hover': {
                             backgroundColor: theme.palette.action.hover,

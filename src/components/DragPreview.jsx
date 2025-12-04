@@ -1,114 +1,45 @@
 import React, { useState, useEffect } from 'react';
-import { Box, Paper, Typography, Fade, Zoom } from '@mui/material';
-import { styled, keyframes } from '@mui/material/styles';
+import { Box, Typography } from '@mui/material';
+import { keyframes, useTheme } from '@mui/material/styles';
 import NoteIcon from '@mui/icons-material/Note';
 import ChecklistIcon from '@mui/icons-material/Checklist';
 import LaunchIcon from '@mui/icons-material/Launch';
 import { useStore } from '../store/useStore';
 
-// 拖拽预览动画
-const dragFloat = keyframes`
+// 优雅的浮动动画 - 更轻柔的幅度
+const elegantFloat = keyframes`
   0%, 100% {
-    transform: translateY(0px) rotate(0deg);
+    transform: translate(-50%, -50%) translateY(0px) scale(1);
   }
   50% {
-    transform: translateY(-5px) rotate(2deg);
+    transform: translate(-50%, -50%) translateY(-3px) scale(1.01);
   }
 `;
 
-// 边界提示动画
-const boundaryPulse = keyframes`
+// 呼吸光晕动画 - 用于边界提示
+const glowPulse = keyframes`
   0%, 100% {
-    box-shadow: 0 0 0 0 rgba(25, 118, 210, 0.7);
+    box-shadow: 0 8px 32px rgba(0, 0, 0, 0.12), 0 0 0 0 var(--glow-color);
   }
   50% {
-    box-shadow: 0 0 0 10px rgba(25, 118, 210, 0);
+    box-shadow: 0 12px 40px rgba(0, 0, 0, 0.16), 0 0 24px 4px var(--glow-color);
   }
 `;
 
-// 样式化的拖拽预览容器
-const DragPreviewContainer = styled(Paper, {
-  shouldForwardProp: (prop) => !['isDragging', 'isNearBoundary', 'primaryColor'].includes(prop),
-})(({ theme, isDragging, isNearBoundary, primaryColor }) => ({
-  position: 'fixed',
-  pointerEvents: 'none',
-  zIndex: 99999, // 增加 z-index
-  padding: theme.spacing(1.5),
-  minWidth: 200,
-  maxWidth: 280,
-  backgroundColor: theme.palette.background.paper,
-  border: `2px solid ${primaryColor}`,
-  borderRadius: theme.spacing(1),
-  transform: 'translate(-50%, -50%)',
-  transition: 'transform 0.1s ease-out',
-  animation: isDragging ? `${dragFloat} 2s ease-in-out infinite` : 'none',
-  overflow: 'hidden',
-  wordWrap: 'break-word',
-  wordBreak: 'break-all',
-  boxShadow: theme.shadows[8],
-  display: 'block', // 确保显示
-  visibility: 'visible', // 确保可见
-  ...(isNearBoundary && {
-    animation: `${boundaryPulse} 1s ease-in-out infinite, ${dragFloat} 2s ease-in-out infinite`,
-    borderColor: primaryColor,
-    backgroundColor: `${primaryColor}20`,
-    boxShadow: `0 0 20px ${primaryColor}40`,
-  }),
-}));
-
-// 边界指示器
-const BoundaryIndicator = styled(Box, {
-  shouldForwardProp: (prop) => !['position', 'primaryColor'].includes(prop),
-})(({ theme, position, primaryColor }) => {
-  const baseStyles = {
-    position: 'fixed',
-    backgroundColor: primaryColor,
-    opacity: 0.8,
-    zIndex: 9998,
-    transition: 'all 0.3s ease-out',
-  };
-
-  switch (position) {
-    case 'top':
-      return {
-        ...baseStyles,
-        top: 0,
-        left: 0,
-        right: 0,
-        height: 4,
-      };
-    case 'bottom':
-      return {
-        ...baseStyles,
-        bottom: 0,
-        left: 0,
-        right: 0,
-        height: 4,
-      };
-    case 'left':
-      return {
-        ...baseStyles,
-        top: 0,
-        left: 0,
-        bottom: 0,
-        width: 4,
-      };
-    case 'right':
-      return {
-        ...baseStyles,
-        top: 0,
-        right: 0,
-        bottom: 0,
-        width: 4,
-      };
-    default:
-      return baseStyles;
+// 图标弹跳动画
+const iconBounce = keyframes`
+  0%, 100% {
+    transform: scale(1);
   }
-});
+  50% {
+    transform: scale(1.15);
+  }
+`;
 
 /**
  * 拖拽预览组件
  * 显示拖拽过程中的视觉反馈和动画效果
+ * 采用毛玻璃风格，与应用整体设计语言一致
  */
 const DragPreview = ({ 
   isDragging, 
@@ -117,9 +48,11 @@ const DragPreview = ({
   currentPosition, 
   isNearBoundary,
   boundaryPosition,
-  previewRef  // 接收 ref
+  previewRef
 }) => {
   const { primaryColor } = useStore();
+  const muiTheme = useTheme();
+  const isDarkMode = muiTheme.palette.mode === 'dark';
   const [showPreview, setShowPreview] = useState(false);
   const [showBoundaryIndicator, setShowBoundaryIndicator] = useState(false);
 
@@ -127,8 +60,7 @@ const DragPreview = ({
     if (isDragging) {
       setShowPreview(true);
     } else {
-      // 延迟隐藏预览，让动画完成
-      const timer = setTimeout(() => setShowPreview(false), 200);
+      const timer = setTimeout(() => setShowPreview(false), 250);
       return () => clearTimeout(timer);
     }
   }, [isDragging, draggedItem]);
@@ -137,7 +69,7 @@ const DragPreview = ({
     if (isNearBoundary) {
       setShowBoundaryIndicator(true);
     } else {
-      const timer = setTimeout(() => setShowBoundaryIndicator(false), 300);
+      const timer = setTimeout(() => setShowBoundaryIndicator(false), 350);
       return () => clearTimeout(timer);
     }
   }, [isNearBoundary]);
@@ -147,13 +79,20 @@ const DragPreview = ({
   }
 
   const getItemIcon = () => {
+    const iconStyle = {
+      fontSize: 20,
+      color: primaryColor,
+      animation: isNearBoundary ? `${iconBounce} 0.6s ease-in-out infinite` : 'none',
+      transition: 'color 0.3s ease'
+    };
+    
     switch (draggedItemType) {
       case 'note':
-        return <NoteIcon color="primary" />;
+        return <NoteIcon sx={iconStyle} />;
       case 'todo':
-        return <ChecklistIcon color="primary" />;
+        return <ChecklistIcon sx={iconStyle} />;
       default:
-        return <NoteIcon color="primary" />;
+        return <NoteIcon sx={iconStyle} />;
     }
   };
 
@@ -180,10 +119,11 @@ const DragPreview = ({
 
   return (
     <>
-      {/* 拖拽预览 */}
+      {/* 拖拽预览卡片 - 毛玻璃风格 */}
       <div
         ref={previewRef}
         style={{
+          '--glow-color': `${primaryColor}40`,
           position: 'fixed',
           left: currentPosition.x,
           top: currentPosition.y,
@@ -191,91 +131,150 @@ const DragPreview = ({
           pointerEvents: 'none',
           zIndex: 99999,
           opacity: isDragging ? 1 : 0,
-          transition: 'opacity 200ms',
-          padding: '12px',
-          minWidth: '200px',
-          maxWidth: '280px',
-          backgroundColor: 'white',
-          border: `2px solid ${primaryColor}`,
-          borderRadius: '8px',
-          boxShadow: '0px 8px 16px rgba(0,0,0,0.2)',
-          animation: isDragging ? `${dragFloat} 2s ease-in-out infinite` : 'none',
-          willChange: 'left, top',  // 提示浏览器优化这些属性
-          ...(isNearBoundary && {
-            backgroundColor: `${primaryColor}20`,
-            boxShadow: `0 0 20px ${primaryColor}40`,
-          }),
+          transition: 'opacity 0.25s cubic-bezier(0.4, 0, 0.2, 1), background-color 0.3s ease, box-shadow 0.3s ease',
+          padding: '14px 16px',
+          minWidth: '180px',
+          maxWidth: '260px',
+          // 毛玻璃背景
+          backgroundColor: isDarkMode 
+            ? (isNearBoundary ? `${primaryColor}18` : 'rgba(30, 41, 59, 0.88)')
+            : (isNearBoundary ? `${primaryColor}12` : 'rgba(255, 255, 255, 0.92)'),
+          backdropFilter: 'blur(16px) saturate(180%)',
+          WebkitBackdropFilter: 'blur(16px) saturate(180%)',
+          // 边框
+          border: isNearBoundary 
+            ? `1.5px solid ${primaryColor}` 
+            : `1px solid ${isDarkMode ? 'rgba(255, 255, 255, 0.1)' : 'rgba(0, 0, 0, 0.08)'}`,
+          borderRadius: '12px',
+          // 阴影
+          boxShadow: isNearBoundary
+            ? `0 12px 40px rgba(0, 0, 0, ${isDarkMode ? '0.3' : '0.15'}), 0 0 20px ${primaryColor}30`
+            : `0 8px 32px rgba(0, 0, 0, ${isDarkMode ? '0.25' : '0.1'})`,
+          // 动画
+          animation: isDragging 
+            ? (isNearBoundary ? `${glowPulse} 1.5s ease-in-out infinite` : `${elegantFloat} 2.5s ease-in-out infinite`)
+            : 'none',
+          willChange: 'left, top, transform',
         }}
       >
-          <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: 1 }}>
+        {/* 内容区域 */}
+        <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.5 }}>
+          {/* 图标容器 */}
+          <Box
+            sx={{
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              width: 36,
+              height: 36,
+              borderRadius: '10px',
+              backgroundColor: `${primaryColor}15`,
+              flexShrink: 0,
+              transition: 'background-color 0.3s ease',
+              ...(isNearBoundary && {
+                backgroundColor: `${primaryColor}25`,
+              })
+            }}
+          >
             {getItemIcon()}
+          </Box>
+          
+          {/* 文字内容 */}
+          <Box sx={{ flex: 1, minWidth: 0, overflow: 'hidden' }}>
             <Typography 
               variant="subtitle2" 
               sx={{ 
-                flex: 1,
+                fontWeight: 600,
+                fontSize: '0.875rem',
+                color: isDarkMode ? 'rgba(255, 255, 255, 0.95)' : 'rgba(0, 0, 0, 0.87)',
                 overflow: 'hidden',
                 textOverflow: 'ellipsis',
                 whiteSpace: 'nowrap',
-                maxWidth: '180px' // 限制标题最大宽度
+                lineHeight: 1.3,
               }}
             >
               {getItemTitle()}
             </Typography>
-            {isNearBoundary && (
-              <LaunchIcon color="success" fontSize="small" 
-                style={{
-                  opacity: isNearBoundary ? 1 : 0,
-                  transition: 'opacity 200ms',
-                }}
-              />
-            )}
-          </Box>
-          
-          <Typography 
-            variant="caption" 
-            color="text.secondary" 
-            sx={{
-              display: 'block',
-              overflow: 'hidden',
-              textOverflow: 'ellipsis',
-              whiteSpace: 'nowrap',
-              maxWidth: '100%' // 确保副标题不会溢出
-            }}
-          >
-            {getItemSubtitle()}
-          </Typography>
-          
-          {isNearBoundary && (
             <Typography 
               variant="caption" 
-              color="success.main" 
-              sx={{ 
-                display: 'block', 
-                mt: 0.5, 
-                fontWeight: 'bold',
-                textAlign: 'center',
-                opacity: isNearBoundary ? 1 : 0,
-                transition: 'opacity 200ms',
+              sx={{
+                display: 'block',
+                fontSize: '0.75rem',
+                color: isDarkMode ? 'rgba(255, 255, 255, 0.6)' : 'rgba(0, 0, 0, 0.5)',
+                overflow: 'hidden',
+                textOverflow: 'ellipsis',
+                whiteSpace: 'nowrap',
+                lineHeight: 1.4,
+                mt: 0.25,
               }}
             >
-              释放以创建独立窗口
+              {getItemSubtitle()}
             </Typography>
+          </Box>
+          
+          {/* 独立窗口图标 */}
+          {isNearBoundary && (
+            <Box
+              sx={{
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                width: 28,
+                height: 28,
+                borderRadius: '8px',
+                backgroundColor: `${primaryColor}20`,
+                animation: `${iconBounce} 0.8s ease-in-out infinite`,
+              }}
+            >
+              <LaunchIcon sx={{ fontSize: 16, color: primaryColor }} />
+            </Box>
           )}
-        </div>
+        </Box>
+        
+        {/* 释放提示 */}
+        {isNearBoundary && (
+          <Box
+            sx={{
+              mt: 1.5,
+              pt: 1,
+              borderTop: `1px solid ${isDarkMode ? 'rgba(255,255,255,0.1)' : 'rgba(0,0,0,0.06)'}`,
+              textAlign: 'center',
+            }}
+          >
+            <Typography 
+              variant="caption" 
+              sx={{ 
+                fontWeight: 600,
+                fontSize: '0.7rem',
+                color: primaryColor,
+                letterSpacing: '0.02em',
+                textTransform: 'uppercase',
+              }}
+            >
+              释放创建独立窗口
+            </Typography>
+          </Box>
+        )}
+      </div>
 
-      {/* 边界指示器 */}
+      {/* 边界光晕指示器 */}
       {showBoundaryIndicator && boundaryPosition && (
         <div
           style={{
             position: 'fixed',
-            backgroundColor: primaryColor,
-            opacity: isNearBoundary ? 0.8 : 0,
+            background: `linear-gradient(${
+              boundaryPosition === 'top' ? '180deg' :
+              boundaryPosition === 'bottom' ? '0deg' :
+              boundaryPosition === 'left' ? '90deg' : '270deg'
+            }, ${primaryColor}60 0%, transparent 100%)`,
+            opacity: isNearBoundary ? 1 : 0,
             zIndex: 99998,
-            transition: 'opacity 300ms',
-            ...(boundaryPosition === 'top' && { top: 0, left: 0, right: 0, height: '4px' }),
-            ...(boundaryPosition === 'bottom' && { bottom: 0, left: 0, right: 0, height: '4px' }),
-            ...(boundaryPosition === 'left' && { top: 0, left: 0, bottom: 0, width: '4px' }),
-            ...(boundaryPosition === 'right' && { top: 0, right: 0, bottom: 0, width: '4px' }),
+            transition: 'opacity 0.35s cubic-bezier(0.4, 0, 0.2, 1)',
+            pointerEvents: 'none',
+            ...(boundaryPosition === 'top' && { top: 0, left: 0, right: 0, height: '60px' }),
+            ...(boundaryPosition === 'bottom' && { bottom: 0, left: 0, right: 0, height: '60px' }),
+            ...(boundaryPosition === 'left' && { top: 0, left: 0, bottom: 0, width: '60px' }),
+            ...(boundaryPosition === 'right' && { top: 0, right: 0, bottom: 0, width: '60px' }),
           }}
         />
       )}

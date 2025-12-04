@@ -80,14 +80,22 @@ const MyDayPanel = ({ selectedDate, onTodoSelect, refreshToken = 0, onTodoUpdate
   const headerText = `${formattedDate}${isToday(targetDate) ? ' - 今天' : ''}`;
 
   return (
-    <Box sx={{ height: '100%', display: 'flex', flexDirection: 'column' }}>
+    <Box sx={(theme) => ({ 
+      height: '100%', 
+      display: 'flex', 
+      flexDirection: 'column',
+      backgroundColor: theme.palette.mode === 'dark'
+        ? 'rgba(30, 41, 59, 0.85)'
+        : 'rgba(255, 255, 255, 0.85)',
+      backdropFilter: 'blur(12px) saturate(150%)',
+      WebkitBackdropFilter: 'blur(12px) saturate(150%)'
+    })}>
       {/* 头部信息 */}
       <Box 
         sx={{ 
           p: 2, 
           borderBottom: 1, 
-          borderColor: 'divider',
-          bgcolor: 'background.default'
+          borderColor: 'divider'
         }}
       >
         <Box sx={{ display: 'flex', alignItems: 'center', mb: 2 }}>

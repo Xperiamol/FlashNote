@@ -111,19 +111,26 @@ const PluginCard = ({
 	return (
 		<Card
 			variant="outlined"
-			sx={{
+			sx={(muiTheme) => ({
 				position: 'relative',
 				borderRadius: 2,
 				height: '100%',
+				display: 'flex',
+				flexDirection: 'column',
+				backgroundColor: muiTheme.palette.mode === 'dark'
+					? 'rgba(30, 41, 59, 0.85)'
+					: 'rgba(255, 255, 255, 0.85)',
+				backdropFilter: 'blur(12px) saturate(150%)',
+				WebkitBackdropFilter: 'blur(12px) saturate(150%)',
 				'&:hover': {
 					borderColor: 'primary.main',
 					boxShadow: 3,
 					cursor: 'pointer'
 				}
-			}}
+			})}
 			onClick={() => onSelect(plugin.id)}
 		>
-			<CardContent sx={{ pb: 1.5 }}>
+			<CardContent sx={{ pb: 1.5, flex: 1, display: 'flex', flexDirection: 'column' }}>
 				<Stack direction="row" spacing={2} alignItems="center" sx={{ mb: 1.5 }}>
 					{plugin.icon ? (
 						<Avatar src={plugin.icon} alt={plugin.name} sx={{ width: 48, height: 48 }} />
@@ -172,11 +179,23 @@ const PluginCard = ({
 					)}
 				</Stack>
 
-				<Typography variant="body2" color="text.secondary" sx={{ minHeight: compact ? 'auto' : 48 }}>
+				<Typography 
+					variant="body2" 
+					color="text.secondary" 
+					sx={{ 
+						height: compact ? 'auto' : 60,
+						overflow: 'hidden',
+						display: '-webkit-box',
+						WebkitLineClamp: 3,
+						WebkitBoxOrient: 'vertical',
+						textOverflow: 'ellipsis',
+						flex: compact ? 'none' : 1
+					}}
+				>
 					{description}
 				</Typography>
 
-				<Stack direction="row" spacing={1} sx={{ mt: 2, flexWrap: 'wrap', gap: 0.5 }}>
+				<Stack direction="row" spacing={1} sx={{ mt: 'auto', pt: 1.5, flexWrap: 'wrap', gap: 0.5 }}>
 					{categories.slice(0, 3).map((category) => (
 						<Chip key={category} size="small" label={category} variant="outlined" />
 					))}
@@ -606,9 +625,12 @@ const PluginStore = () => {
 					case 'disabled':
 					case 'error':
 						if (event.plugin) {
-							const exists = prev.some((plugin) => plugin.id === event.pluginId)
+							const exists = prev.find((plugin) => plugin.id === event.pluginId)
 							if (exists) {
-								return prev.map((plugin) => plugin.id === event.pluginId ? event.plugin : plugin)
+								// 更新时保留现有图标
+								return prev.map((plugin) => plugin.id === event.pluginId 
+									? { ...event.plugin, icon: event.plugin.icon || plugin.icon }
+									: plugin)
 							}
 							return [...prev, event.plugin]
 						}
@@ -781,10 +803,10 @@ const PluginStore = () => {
 		// 如果已安装，合并市场信息和安装状态
 		if (installed && available) {
 			return {
-				...available,  // 保留市场信息（icon、description、shortDescription 等）
+				...available,  // 保留市场信息（description、shortDescription 等）
 				...installed,  // 覆盖运行时状态（enabled、installedVersion、runtimeStatus 等）
-				// 确保关键字段正确
-				icon: available.icon,  // 强制使用市场的图标
+				// 确保关键字段正确 - 优先使用已加载的图标 (data URI)
+				icon: installed.icon || available.icon,
 				name: available.name || installed.manifest?.name,
 				description: available.description || installed.manifest?.description,
 				manifest: installed.manifest || available.manifest

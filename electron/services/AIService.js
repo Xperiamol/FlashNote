@@ -13,6 +13,42 @@ class AIService extends EventEmitter {
   }
 
   /**
+   * 规范化自定义 API URL，确保以 /chat/completions 结尾
+   * @param {string} apiUrl 用户输入的 API 地址
+   * @returns {string} 规范化后的完整 URL
+   */
+  normalizeApiUrl(apiUrl) {
+    if (!apiUrl) return apiUrl;
+    
+    // 移除末尾的斜杠
+    let url = apiUrl.replace(/\/+$/, '');
+    
+    // 如果已经以 /chat/completions 结尾，直接返回
+    if (url.endsWith('/chat/completions')) {
+      return url;
+    }
+    
+    // 如果以 /v1, /v2, /v3 等版本号结尾，添加 /chat/completions
+    if (/\/v\d+$/.test(url)) {
+      return `${url}/chat/completions`;
+    }
+    
+    // 如果以 /api/v1, /api/v2, /api/v3 等结尾，添加 /chat/completions
+    if (/\/api\/v\d+$/.test(url)) {
+      return `${url}/chat/completions`;
+    }
+    
+    // 其他情况，假设需要添加 /chat/completions
+    // 但如果 URL 看起来已经是完整的端点（包含 chat 或 completions），则不添加
+    if (url.includes('/chat') || url.includes('/completions')) {
+      return url;
+    }
+    
+    // 默认添加 /chat/completions
+    return `${url}/chat/completions`;
+  }
+
+  /**
    * 初始化AI服务
    */
   async initialize() {
@@ -190,10 +226,19 @@ class AIService extends EventEmitter {
           message: 'OpenAI连接测试成功'
         };
       } else {
-        const error = await response.json();
+        let errorMessage = `连接失败 (${response.status})`;
+        try {
+          const text = await response.text();
+          if (text) {
+            const error = JSON.parse(text);
+            errorMessage = error.error?.message || errorMessage;
+          }
+        } catch (e) {
+          // JSON parse failed
+        }
         return {
           success: false,
-          error: error.error?.message || '连接失败'
+          error: errorMessage
         };
       }
     } catch (error) {
@@ -228,10 +273,19 @@ class AIService extends EventEmitter {
           message: 'DeepSeek连接测试成功'
         };
       } else {
-        const error = await response.json();
+        let errorMessage = `连接失败 (${response.status})`;
+        try {
+          const text = await response.text();
+          if (text) {
+            const error = JSON.parse(text);
+            errorMessage = error.error?.message || errorMessage;
+          }
+        } catch (e) {
+          // JSON parse failed
+        }
         return {
           success: false,
-          error: error.error?.message || '连接失败'
+          error: errorMessage
         };
       }
     } catch (error) {
@@ -270,10 +324,19 @@ class AIService extends EventEmitter {
           message: '通义千问连接测试成功'
         };
       } else {
-        const error = await response.json();
+        let errorMessage = `连接失败 (${response.status})`;
+        try {
+          const text = await response.text();
+          if (text) {
+            const error = JSON.parse(text);
+            errorMessage = error.message || errorMessage;
+          }
+        } catch (e) {
+          // JSON parse failed
+        }
         return {
           success: false,
-          error: error.message || '连接失败'
+          error: errorMessage
         };
       }
     } catch (error) {
@@ -296,7 +359,10 @@ class AIService extends EventEmitter {
         };
       }
 
-      const response = await fetch(apiUrl, {
+      // 确保 URL 以 /chat/completions 结尾
+      const fullUrl = this.normalizeApiUrl(apiUrl);
+
+      const response = await fetch(fullUrl, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -315,10 +381,19 @@ class AIService extends EventEmitter {
           message: '自定义API连接测试成功'
         };
       } else {
-        const error = await response.json();
+        let errorMessage = `连接失败 (${response.status})`;
+        try {
+          const text = await response.text();
+          if (text) {
+            const error = JSON.parse(text);
+            errorMessage = error.error?.message || error.message || errorMessage;
+          }
+        } catch (e) {
+          // JSON parse failed
+        }
         return {
           success: false,
-          error: error.error?.message || error.message || '连接失败'
+          error: errorMessage
         };
       }
     } catch (error) {
@@ -453,11 +528,35 @@ class AIService extends EventEmitter {
     });
 
     if (!response.ok) {
-      const error = await response.json();
-      throw new Error(error.error?.message || '请求失败');
+      let errorMessage = `请求失败 (${response.status})`;
+      try {
+        const text = await response.text();
+        if (text) {
+          const error = JSON.parse(text);
+          errorMessage = error.error?.message || errorMessage;
+        }
+      } catch (e) {
+        // JSON parse failed, use default error message
+      }
+      throw new Error(errorMessage);
     }
 
-    const data = await response.json();
+    const text = await response.text();
+    if (!text) {
+      throw new Error('API 返回空响应');
+    }
+    
+    let data;
+    try {
+      data = JSON.parse(text);
+    } catch (e) {
+      throw new Error('解析 API 响应失败: ' + e.message);
+    }
+    
+    if (!data.choices || !data.choices[0] || !data.choices[0].message) {
+      throw new Error('API 响应格式不正确');
+    }
+    
     return {
       success: true,
       data: {
@@ -490,11 +589,35 @@ class AIService extends EventEmitter {
     });
 
     if (!response.ok) {
-      const error = await response.json();
-      throw new Error(error.error?.message || '请求失败');
+      let errorMessage = `请求失败 (${response.status})`;
+      try {
+        const text = await response.text();
+        if (text) {
+          const error = JSON.parse(text);
+          errorMessage = error.error?.message || errorMessage;
+        }
+      } catch (e) {
+        // JSON parse failed, use default error message
+      }
+      throw new Error(errorMessage);
     }
 
-    const data = await response.json();
+    const text = await response.text();
+    if (!text) {
+      throw new Error('API 返回空响应');
+    }
+    
+    let data;
+    try {
+      data = JSON.parse(text);
+    } catch (e) {
+      throw new Error('解析 API 响应失败: ' + e.message);
+    }
+    
+    if (!data.choices || !data.choices[0] || !data.choices[0].message) {
+      throw new Error('API 响应格式不正确');
+    }
+    
     return {
       success: true,
       data: {
@@ -529,11 +652,35 @@ class AIService extends EventEmitter {
     });
 
     if (!response.ok) {
-      const error = await response.json();
-      throw new Error(error.message || '请求失败');
+      let errorMessage = `请求失败 (${response.status})`;
+      try {
+        const text = await response.text();
+        if (text) {
+          const error = JSON.parse(text);
+          errorMessage = error.message || errorMessage;
+        }
+      } catch (e) {
+        // JSON parse failed, use default error message
+      }
+      throw new Error(errorMessage);
     }
 
-    const data = await response.json();
+    const text = await response.text();
+    if (!text) {
+      throw new Error('API 返回空响应');
+    }
+    
+    let data;
+    try {
+      data = JSON.parse(text);
+    } catch (e) {
+      throw new Error('解析 API 响应失败: ' + e.message);
+    }
+    
+    if (!data.output || !data.output.text) {
+      throw new Error('API 响应格式不正确');
+    }
+    
     return {
       success: true,
       data: {
@@ -551,7 +698,10 @@ class AIService extends EventEmitter {
     const temperature = options.temperature || config.temperature
     const validTemperature = Math.min(Math.max(temperature, 0), 2)
     
-    const response = await fetch(config.apiUrl, {
+    // 规范化 API URL
+    const fullUrl = this.normalizeApiUrl(config.apiUrl);
+    
+    const response = await fetch(fullUrl, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -566,11 +716,35 @@ class AIService extends EventEmitter {
     });
 
     if (!response.ok) {
-      const error = await response.json();
-      throw new Error(error.error?.message || error.message || '请求失败');
+      let errorMessage = `请求失败 (${response.status})`;
+      try {
+        const text = await response.text();
+        if (text) {
+          const error = JSON.parse(text);
+          errorMessage = error.error?.message || error.message || errorMessage;
+        }
+      } catch (e) {
+        // JSON parse failed, use default error message
+      }
+      throw new Error(errorMessage);
     }
 
-    const data = await response.json();
+    const text = await response.text();
+    if (!text) {
+      throw new Error('API 返回空响应');
+    }
+    
+    let data;
+    try {
+      data = JSON.parse(text);
+    } catch (e) {
+      throw new Error('解析 API 响应失败: ' + e.message);
+    }
+    
+    if (!data.choices || !data.choices[0] || !data.choices[0].message) {
+      throw new Error('API 响应格式不正确');
+    }
+    
     return {
       success: true,
       data: {

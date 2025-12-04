@@ -85,7 +85,7 @@ function TabPanel({ children, value, index, ...other }) {
 }
 
 const Settings = () => {
-    const { theme, setTheme, setPrimaryColor, setUserAvatar, setUserName, titleBarStyle, setTitleBarStyle, editorMode, setEditorMode, language, setLanguage, defaultMinibarMode, setDefaultMinibarMode } = useStore();
+    const { theme, setTheme, setPrimaryColor, setUserAvatar, setUserName, titleBarStyle, setTitleBarStyle, editorMode, setEditorMode, language, setLanguage, defaultMinibarMode, setDefaultMinibarMode, maskOpacity, setMaskOpacity } = useStore();
     const settingsTabValue = useStore((state) => state.settingsTabValue);
     const [settings, setSettings] = useState({
         theme: 'system',
@@ -95,7 +95,8 @@ const Settings = () => {
         userName: '',
         titleBarStyle: 'windows',
         language: 'zh-CN',
-        defaultMinibarMode: false
+        defaultMinibarMode: false,
+        maskOpacity: 'medium'
     });
     const [shortcuts, setShortcuts] = useState(DEFAULT_SHORTCUTS);
     const [shortcutConflicts, setShortcutConflicts] = useState({});
@@ -162,6 +163,9 @@ const Settings = () => {
         },
         defaultMinibarMode: {
             syncGlobalState: setDefaultMinibarMode
+        },
+        maskOpacity: {
+            syncGlobalState: setMaskOpacity
         },
         theme: {
             syncGlobalState: setTheme
@@ -638,6 +642,41 @@ const Settings = () => {
                                             sx={{ width: 60 }}
                                         />
                                     </Box>
+                                </Box>
+                            </Box>
+                        </ListItem>
+
+                        <Divider />
+
+                        {/* 背景遮罩透明度 */}
+                        <ListItem>
+                            <Box sx={{ width: '100%' }}>
+                                <ListItemText
+                                    primary="背景遮罩"
+                                    secondary="调节内容区域的背景遮罩强度，适配壁纸/主题外观的显示效果"
+                                    sx={{ mb: 2 }}
+                                />
+                                <Box sx={{ display: 'flex', gap: 1, flexWrap: 'wrap' }}>
+                                    {[
+                                        { value: 'none', label: '无遮罩', desc: '完全透明' },
+                                        { value: 'light', label: '轻度', desc: '微弱遮罩' },
+                                        { value: 'medium', label: '中度', desc: '平衡效果' },
+                                        { value: 'heavy', label: '重度', desc: '强遮罩' }
+                                    ].map((option) => (
+                                        <Chip
+                                            key={option.value}
+                                            label={option.label}
+                                            variant={settings.maskOpacity === option.value ? 'filled' : 'outlined'}
+                                            color={settings.maskOpacity === option.value ? 'primary' : 'default'}
+                                            onClick={() => handleSettingChange('maskOpacity', option.value)}
+                                            sx={{
+                                                minWidth: 80,
+                                                '&:hover': {
+                                                    transform: 'scale(1.02)'
+                                                }
+                                            }}
+                                        />
+                                    ))}
                                 </Box>
                             </Box>
                         </ListItem>

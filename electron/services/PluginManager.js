@@ -77,6 +77,7 @@ class PluginManager extends EventEmitter {
 		this.app = options.app
 		this.services = options.services || {}
 		this.shortcutService = options.shortcutService || this.services.shortcutService || null
+		this.dbManager = this.services.dbManager || null // 数据库管理器，用于插件存储
 		this.windowAccessor = options.windowAccessor || (() => [])
 		this.mainWindowAccessor = options.mainWindowAccessor || (() => null)
 		this.logger = options.logger || console
@@ -243,6 +244,37 @@ class PluginManager extends EventEmitter {
 			return true
 		} catch (error) {
 			return false
+		}
+	}
+
+	/**
+	 * 读取插件图标并转换为 data URI
+	 * @param {string} pluginDir 插件目录路径
+	 * @param {string} iconPath 图标相对路径
+	 * @returns {Promise<string|null>} data URI 或 null
+	 */
+	async loadPluginIcon(pluginDir, iconPath) {
+		if (!iconPath) return null
+		
+		try {
+			const fullPath = path.join(pluginDir, iconPath)
+			const exists = await this.pathExists(fullPath)
+			if (!exists) return null
+			
+			const content = await fsp.readFile(fullPath)
+			const ext = path.extname(iconPath).toLowerCase()
+			
+			let mimeType = 'image/svg+xml'
+			if (ext === '.png') mimeType = 'image/png'
+			else if (ext === '.jpg' || ext === '.jpeg') mimeType = 'image/jpeg'
+			else if (ext === '.gif') mimeType = 'image/gif'
+			else if (ext === '.webp') mimeType = 'image/webp'
+			
+			const base64 = content.toString('base64')
+			return `data:${mimeType};base64,${base64}`
+		} catch (error) {
+			this.logger.warn(`[PluginManager] 读取插件图标失败: ${pluginDir}/${iconPath}`, error.message)
+			return null
 		}
 	}
 
@@ -492,7 +524,8 @@ class PluginManager extends EventEmitter {
 	async listInstalledPlugins() {
 		const list = []
 		for (const [pluginId] of this.installedPlugins.entries()) {
-			list.push(this.getPluginStateSnapshot(pluginId))
+			const snapshot = await this.getPluginStateSnapshotWithIcon(pluginId)
+			if (snapshot) list.push(snapshot)
 		}
 		return list.sort((a, b) => a.manifest.name.localeCompare(b.manifest.name, 'zh-CN'))
 	}
@@ -500,20 +533,30 @@ class PluginManager extends EventEmitter {
 	async listAvailablePlugins() {
 		const registry = await this.readRegistryFile()
 
-		return registry.map((item) => {
+		const plugins = await Promise.all(registry.map(async (item) => {
 			const installed = this.installedPlugins.get(item.id)
 			const state = installed ? this.pluginStates.get(item.id) : null
 			const versionDiff = installed ? compareVersions(item.version, state?.installedVersion) : 0
 
+			// 尝试加载图标
+			let iconDataUri = null
+			if (item.icon && item.source?.path) {
+				const pluginDir = this.resolveRegistrySourcePath(item)
+				iconDataUri = await this.loadPluginIcon(pluginDir, item.icon)
+			}
+
 			return {
 				...item,
+				icon: iconDataUri || item.icon, // 优先使用 data URI，否则保留原值
 				installed: Boolean(installed),
 				enabled: Boolean(state?.enabled),
 				installedVersion: state?.installedVersion || null,
 				hasUpdate: versionDiff > 0,
 				commands: this.getCommandsForPlugin(item.id)
 			}
-		})
+		}))
+
+		return plugins
 	}
 
 	async scanLocalPlugins() {
@@ -597,6 +640,9 @@ class PluginManager extends EventEmitter {
 						const installed = this.installedPlugins.get(manifest.id)
 						const state = installed ? this.pluginStates.get(manifest.id) : null
 						
+						// 尝试加载图标
+						const iconDataUri = await this.loadPluginIcon(pluginDir, manifest.icon)
+						
 						// 构建插件信息
 						const pluginInfo = {
 							id: manifest.id,
@@ -612,7 +658,7 @@ class PluginManager extends EventEmitter {
 							tags: Array.isArray(manifest.tags) ? manifest.tags : [],
 							permissions: this.formatPermissions(manifest.permissions),
 							minAppVersion: manifest.minAppVersion || '2.0.0',
-							icon: manifest.icon || null,
+							icon: iconDataUri || null,
 							manifest,
 							// 运行时状态
 							installed: Boolean(installed),
@@ -700,8 +746,36 @@ class PluginManager extends EventEmitter {
 		}
 	}
 
+	/**
+	 * 获取插件状态快照（包含图标）
+	 */
+	async getPluginStateSnapshotWithIcon(pluginId) {
+		const record = this.installedPlugins.get(pluginId)
+		const state = this.pluginStates.get(pluginId)
+		if (!record || !state) return null
+
+		// 尝试加载图标
+		let iconDataUri = null
+		if (record.manifest?.icon && record.path) {
+			iconDataUri = await this.loadPluginIcon(record.path, record.manifest.icon)
+		}
+
+		return {
+			id: pluginId,
+			manifest: record.manifest,
+			icon: iconDataUri,
+			enabled: Boolean(state.enabled),
+			installedVersion: state.installedVersion,
+			installedAt: state.installedAt,
+			lastError: state.lastError,
+			runtimeStatus: state.runtimeStatus || 'stopped',
+			commands: this.getCommandsForPlugin(pluginId),
+			permissions: state.permissions
+		}
+	}
+
 	async getPluginDetails(pluginId) {
-		return this.getPluginStateSnapshot(pluginId)
+		return this.getPluginStateSnapshotWithIcon(pluginId)
 	}
 
 	getPluginPath(pluginId) {
@@ -845,9 +919,12 @@ class PluginManager extends EventEmitter {
 		})
 
 		this.pluginStates.set(pluginId, state)
-		this.markStateDirty()
+		
+		// 安装后立即保存状态
+		await this.saveStateImmediate()
 
-		const snapshot = this.getPluginStateSnapshot(pluginId)
+		// 使用带图标的快照用于事件通知
+		const snapshot = await this.getPluginStateSnapshotWithIcon(pluginId)
 		this.emitStoreEvent({ type: 'installed', pluginId, plugin: snapshot, manifest })
 
 		if (state.enabled) {
@@ -857,12 +934,13 @@ class PluginManager extends EventEmitter {
 				state.enabled = false
 				state.runtimeStatus = 'error'
 				state.lastError = error.message
-				this.markStateDirty()
+				await this.saveStateImmediate()
+				const errorSnapshot = await this.getPluginStateSnapshotWithIcon(pluginId)
 				this.emitStoreEvent({
 					type: 'error',
 					pluginId,
 					error: error.message,
-					plugin: this.getPluginStateSnapshot(pluginId)
+					plugin: errorSnapshot
 				})
 				throw error
 			}
@@ -903,7 +981,8 @@ class PluginManager extends EventEmitter {
 			}
 		}
 
-		this.markStateDirty()
+		// 卸载后立即保存状态，确保状态持久化
+		await this.saveStateImmediate()
 
 		this.emitStoreEvent({ type: 'uninstalled', pluginId })
 
@@ -922,7 +1001,9 @@ class PluginManager extends EventEmitter {
 
 		state.enabled = true
 		state.lastError = null
-		this.markStateDirty()
+		
+		// 启用后立即保存状态
+		await this.saveStateImmediate()
 
 		await this.startPlugin(pluginId)
 		const snapshot = this.getPluginStateSnapshot(pluginId)
@@ -942,7 +1023,9 @@ class PluginManager extends EventEmitter {
 
 		state.enabled = false
 		await this.stopPlugin(pluginId)
-		this.markStateDirty()
+		
+		// 禁用后立即保存状态
+		await this.saveStateImmediate()
 
 		const snapshot = this.getPluginStateSnapshot(pluginId)
 		this.emitStoreEvent({ type: 'disabled', pluginId, plugin: snapshot })
@@ -1885,22 +1968,112 @@ class PluginManager extends EventEmitter {
 	}
 
 	async loadPluginStorage(pluginId) {
+		// 优先使用数据库存储
+		try {
+			const db = this.dbManager?.getDatabase()
+			if (db) {
+				const rows = db.prepare(
+					'SELECT key, value FROM plugin_storage WHERE plugin_id = ?'
+				).all(pluginId)
+				
+				const data = {}
+				for (const row of rows) {
+					try {
+						data[row.key] = JSON.parse(row.value)
+					} catch {
+						data[row.key] = row.value
+					}
+				}
+				return data
+			}
+		} catch (error) {
+			this.logger.warn(`[PluginManager] 从数据库读取插件存储失败 (${pluginId}):`, error.message)
+		}
+		
+		// 回退到 JSON 文件（向后兼容）
 		const storagePath = path.join(this.storageDir, `${pluginId}.json`)
 		try {
 			const raw = await fsp.readFile(storagePath, 'utf8')
 			const data = JSON.parse(raw)
+			
+			// 迁移到数据库
+			if (this.dbManager?.getDatabase() && data && typeof data === 'object') {
+				await this._migrateStorageToDb(pluginId, data)
+				// 删除旧文件
+				await fsp.unlink(storagePath).catch(() => {})
+				this.logger.info(`[PluginManager] 已将 ${pluginId} 存储迁移到数据库`)
+			}
+			
 			return data && typeof data === 'object' ? data : {}
 		} catch (error) {
-			if (error.code !== 'ENOENT') {
-				this.logger.warn(`[PluginManager] 读取插件存储失败 (${pluginId}):`, error)
+			if (error.code === 'ENOENT') {
+				return {}
 			}
+			// JSON 解析错误 - 文件损坏，直接返回空对象
+			if (error instanceof SyntaxError) {
+				this.logger.warn(`[PluginManager] 插件存储文件损坏 (${pluginId})，将重置`)
+				await fsp.unlink(storagePath).catch(() => {})
+				return {}
+			}
+			this.logger.warn(`[PluginManager] 读取插件存储失败 (${pluginId}):`, error)
 			return {}
 		}
 	}
 
 	async savePluginStorage(pluginId, data) {
+		// 优先使用数据库存储
+		const db = this.dbManager?.getDatabase()
+		if (db) {
+			try {
+				const stmt = db.prepare(`
+					INSERT OR REPLACE INTO plugin_storage (plugin_id, key, value, updated_at)
+					VALUES (?, ?, ?, datetime('now'))
+				`)
+				
+				const deleteStmt = db.prepare(
+					'DELETE FROM plugin_storage WHERE plugin_id = ?'
+				)
+				
+				// 使用事务确保原子性
+				db.transaction(() => {
+					deleteStmt.run(pluginId)
+					for (const [key, value] of Object.entries(data)) {
+						const jsonValue = JSON.stringify(value)
+						stmt.run(pluginId, key, jsonValue)
+					}
+				})()
+				
+				return
+			} catch (error) {
+				this.logger.warn(`[PluginManager] 保存到数据库失败 (${pluginId}):`, error.message)
+				// 回退到文件存储
+			}
+		}
+		
+		// 回退到 JSON 文件
 		const storagePath = path.join(this.storageDir, `${pluginId}.json`)
 		await fsp.writeFile(storagePath, JSON.stringify(data, null, 2), 'utf8')
+	}
+	
+	/**
+	 * 将 JSON 文件存储迁移到数据库
+	 * @private
+	 */
+	async _migrateStorageToDb(pluginId, data) {
+		const db = this.dbManager?.getDatabase()
+		if (!db || !data) return
+		
+		const stmt = db.prepare(`
+			INSERT OR REPLACE INTO plugin_storage (plugin_id, key, value, updated_at)
+			VALUES (?, ?, ?, datetime('now'))
+		`)
+		
+		db.transaction(() => {
+			for (const [key, value] of Object.entries(data)) {
+				const jsonValue = JSON.stringify(value)
+				stmt.run(pluginId, key, jsonValue)
+			}
+		})()
 	}
 
 	async registerCommand(pluginId, command) {

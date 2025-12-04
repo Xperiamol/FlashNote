@@ -139,7 +139,7 @@ const MarkdownPreview = ({ content, sx, onWikiLinkClick, onTagClick }) => {
     }
   }, [content, md])
 
-  // 处理点击事件（Wiki 链接和标签）
+  // 处理点击事件（Wiki 链接、标签和外部链接）
   useEffect(() => {
     const handleClick = (e) => {
       const target = e.target
@@ -163,6 +163,16 @@ const MarkdownPreview = ({ content, sx, onWikiLinkClick, onTagClick }) => {
 
         if (onTagClick && tag) {
           onTagClick(tag)
+        }
+        return
+      }
+
+      // 处理外部链接 - 用外部浏览器打开
+      if (target.tagName === 'A' && target.href) {
+        const href = target.href
+        if (href.startsWith('http://') || href.startsWith('https://')) {
+          e.preventDefault()
+          window.electronAPI?.system?.openExternal?.(href)
         }
         return
       }

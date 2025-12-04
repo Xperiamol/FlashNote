@@ -3,6 +3,7 @@
   "name": "Auto Tag Creator (Built-in)",
   "version": "1.0.0",
   "description": "根据笔记内容自动创建和管理标签",
+  "icon": "icon.svg",
   "entry": "index.js",
   "permissions": [
     "notes:read",

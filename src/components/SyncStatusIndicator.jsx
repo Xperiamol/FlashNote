@@ -287,6 +287,17 @@ const SyncStatusIndicator = () => {
           vertical: 'top',
           horizontal: 'right',
         }}
+        PaperProps={{
+          sx: (theme) => ({
+            backdropFilter: 'blur(20px) saturate(180%)',
+            WebkitBackdropFilter: 'blur(20px) saturate(180%)',
+            backgroundColor: theme.palette.mode === 'dark'
+              ? 'rgba(30, 41, 59, 0.85)'
+              : 'rgba(255, 255, 255, 0.85)',
+            border: `1px solid ${theme.palette.divider}`,
+            borderRadius: '8px'
+          })
+        }}
       >
         <Box sx={{ p: 2, minWidth: 320 }}>
           <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', mb: 2 }}>

@@ -747,7 +747,7 @@ const FocusModeView = ({
                     ? 'rgba(18, 18, 18, 0.95)' 
                     : 'rgba(255, 255, 255, 0.95)',
                 backdropFilter: 'blur(20px)',
-                borderRadius: 3,
+                borderRadius: '8px',
                 border: '1px solid',
                 borderColor: 'divider',
                 boxShadow: (theme) => theme.shadows[10],

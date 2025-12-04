@@ -25,6 +25,7 @@ import {
   Select,
   MenuItem
 } from '@mui/material';
+import MultiSelectToolbar from './MultiSelectToolbar';
 import {
   Add as AddIcon,
   CheckCircle as CheckCircleIcon,
@@ -72,6 +73,10 @@ const TodoView = ({ viewMode, showCompleted, onViewModeChange, onShowCompletedCh
   // 双击完成相关状态
   const [pendingComplete, setPendingComplete] = useState(new Set());
   const [celebratingTodos, setCelebratingTodos] = useState(new Set());
+
+  // 多选相关状态
+  const [multiSelectMode, setMultiSelectMode] = useState(false);
+  const [selectedTodos, setSelectedTodos] = useState([]);
 
   // 使用拖放 hook
   const {
@@ -259,7 +264,6 @@ const TodoView = ({ viewMode, showCompleted, onViewModeChange, onShowCompletedCh
       console.error('删除待办事项失败:', error);
     }
   };
-
   // 渲染单个待办事项
   const renderTodoItem = (todo) => {
     return (
@@ -278,8 +282,38 @@ const TodoView = ({ viewMode, showCompleted, onViewModeChange, onShowCompletedCh
         compact={false}
         pendingComplete={pendingComplete}
         celebratingTodos={celebratingTodos}
-        onDragStart={handleDragStart}
-        onDragEnd={handleDragEnd}
+        isMultiSelectMode={multiSelectMode}
+        isSelected={selectedTodos.includes(todo.id)}
+        onClick={(e, todo) => {
+          if (multiSelectMode) {
+            // 多选模式下的点击处理
+            if (selectedTodos.includes(todo.id)) {
+              setSelectedTodos(selectedTodos.filter(id => id !== todo.id));
+            } else {
+              setSelectedTodos([...selectedTodos, todo.id]);
+            }
+          } else {
+            // 正常模式下的点击处理
+            handleToggleTodo(todo);
+          }
+        }}
+        onContextMenu={(e, todo) => {
+          if (multiSelectMode) {
+            // 多选模式下的右键处理
+            e.preventDefault();
+            if (selectedTodos.includes(todo.id)) {
+              setSelectedTodos(selectedTodos.filter(id => id !== todo.id));
+            } else {
+              setSelectedTodos([...selectedTodos, todo.id]);
+            }
+          } else {
+            // 正常模式下的右键处理
+            e.preventDefault();
+            // 进入多选模式
+            setMultiSelectMode(true);
+            setSelectedTodos([todo.id]);
+          }
+        }}
       />
     );
   };
@@ -374,7 +408,7 @@ const TodoView = ({ viewMode, showCompleted, onViewModeChange, onShowCompletedCh
                   height: '400px',
                   display: 'flex',
                   flexDirection: 'column',
-                  borderRadius: 1,
+                  borderRadius: '8px',
                   background: 'transparent',
                   backdropFilter: 'blur(10px)',
                   backgroundColor: theme.palette.mode === 'dark'
@@ -498,8 +532,86 @@ const TodoView = ({ viewMode, showCompleted, onViewModeChange, onShowCompletedCh
     );
   }
 
+  // 处理多选操作
+  const handleMultiSelectComplete = async () => {
+    try {
+      for (const todoId of selectedTodos) {
+        await toggleTodoComplete(todoId);
+      }
+      loadTodos();
+      if (onRefresh) {
+        onRefresh();
+      }
+      setMultiSelectMode(false);
+      setSelectedTodos([]);
+    } catch (error) {
+      console.error('批量完成待办事项失败:', error);
+    }
+  };
+
+  const handleMultiSelectDelete = async () => {
+    try {
+      for (const todoId of selectedTodos) {
+        await deleteTodoAPI(todoId);
+      }
+      loadTodos();
+      if (onRefresh) {
+        onRefresh();
+      }
+      setMultiSelectMode(false);
+      setSelectedTodos([]);
+    } catch (error) {
+      console.error('批量删除待办事项失败:', error);
+    }
+  };
+
+  // 计算todos总数
+  const getTotalTodosCount = () => {
+    if (Array.isArray(todos)) {
+      return todos.length;
+    }
+    if (todos && typeof todos === 'object') {
+      return Object.values(todos).flat().length;
+    }
+    return 0;
+  };
+
+  // 获取所有todoIds用于全选
+  const getAllTodoIds = () => {
+    if (Array.isArray(todos)) {
+      return todos.map(todo => todo.id);
+    }
+    if (todos && typeof todos === 'object') {
+      return Object.values(todos).flat().map(todo => todo.id);
+    }
+    return [];
+  };
+
   return (
     <Box sx={{ height: '100%', display: 'flex', flexDirection: 'column' }}>
+      {/* 多选工具栏 */}
+      <MultiSelectToolbar
+        visible={multiSelectMode}
+        selectedCount={selectedTodos.length}
+        totalCount={getTotalTodosCount()}
+        itemType="待办事项"
+        onSelectAll={() => setSelectedTodos(getAllTodoIds())}
+        onSelectNone={() => setSelectedTodos([])}
+        onDelete={handleMultiSelectDelete}
+        customActions={[
+          {
+            key: 'complete',
+            label: '设为完成',
+            onClick: handleMultiSelectComplete,
+            icon: <CheckCircleIcon />,
+          },
+        ]}
+        onClose={() => {
+          setMultiSelectMode(false);
+          setSelectedTodos([]);
+        }}
+      />
+
       {/* 主内容区域 */}
       <Box sx={{ flex: 1, p: 3, overflow: 'auto' }}>
         {effectiveViewMode === 'quadrant' ? renderQuadrantView() : renderFocusView()}
@@ -507,5 +619,6 @@ const TodoView = ({ viewMode, showCompleted, onViewModeChange, onShowCompletedCh
     </Box>
   );
 };
+
 // 创建待办事项弹窗组件
 export default TodoView;

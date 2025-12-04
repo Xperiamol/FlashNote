@@ -123,6 +123,15 @@ class DatabaseManager {
         created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
         synced INTEGER DEFAULT 0,
         synced_at DATETIME NULL
+      )`,
+      
+      // 插件存储表 - 用于插件数据持久化
+      `CREATE TABLE IF NOT EXISTS plugin_storage (
+        plugin_id TEXT NOT NULL,
+        key TEXT NOT NULL,
+        value TEXT,
+        updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        PRIMARY KEY (plugin_id, key)
       )`
     ];
 
@@ -142,7 +151,8 @@ class DatabaseManager {
       'CREATE INDEX IF NOT EXISTS idx_todos_is_urgent ON todos(is_urgent)',
       'CREATE INDEX IF NOT EXISTS idx_changes_entity ON changes(entity_type, entity_id)',
       'CREATE INDEX IF NOT EXISTS idx_changes_synced ON changes(synced)',
-      'CREATE INDEX IF NOT EXISTS idx_changes_created_at ON changes(created_at DESC)'
+      'CREATE INDEX IF NOT EXISTS idx_changes_created_at ON changes(created_at DESC)',
+      'CREATE INDEX IF NOT EXISTS idx_plugin_storage_plugin ON plugin_storage(plugin_id)'
     ];
 
     // 执行建表语句

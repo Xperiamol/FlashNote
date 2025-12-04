@@ -12,7 +12,6 @@ import {
   Snackbar,
   ToggleButton,
   ToggleButtonGroup,
-  Icon,
   InputAdornment
 } from '@mui/material'
 import {
@@ -29,7 +28,9 @@ import {
   Brush as WhiteboardIcon,
   OpenInNew as OpenInNewIcon,
   Code as CodeIcon,
-  GetApp as GetAppIcon
+  GetApp as GetAppIcon,
+  CheckCircle as CheckCircleIcon,
+  Error as ErrorIcon
 } from '@mui/icons-material'
 import { useStore } from '../store/useStore'
 import { useStandaloneContext } from './StandaloneProvider'
@@ -48,6 +49,7 @@ import { useDebouncedSave } from '../hooks/useDebouncedSave'
 import { imageAPI } from '../api/imageAPI'
 import { convertMarkdownToWhiteboard } from '../utils/markdownToWhiteboardConverter'
 import { useTranslation } from '../utils/i18n'
+import { saveQueue } from '../utils/SaveQueue'
 
 const NoteEditor = () => {
   // 检测是否在独立窗口模式下运行
@@ -64,6 +66,7 @@ const NoteEditor = () => {
   // 根据运行环境选择状态管理
   const mainStore = useStore()
   const store = standaloneContext || mainStore
+  const maskOpacity = useStore((state) => state.maskOpacity)
 
   const { t } = useTranslation()
 
@@ -85,6 +88,8 @@ const NoteEditor = () => {
   const [isAutoSaving, setIsAutoSaving] = useState(false)
   const [lastSaved, setLastSaved] = useState(null)
   const [showSaveSuccess, setShowSaveSuccess] = useState(false)
+  const [showSaveError, setShowSaveError] = useState(false)
+  const [saveErrorMessage, setSaveErrorMessage] = useState('')
   const [hasUnsavedChanges, setHasUnsavedChanges] = useState(false)
   const [viewMode, setViewMode] = useState('edit') // 'edit', 'preview', 'split'
   const [isDragging, setIsDragging] = useState(false)
@@ -105,33 +110,52 @@ const NoteEditor = () => {
   const prevStateRef = useRef({ title: '', content: '', category: '', tags: '', noteType: 'markdown' })
   const hasUnsavedChangesRef = useRef(false)
 
-  // 保存函数（稳定引用）
-  const performSave = async () => {
+  // 保存函数（稳定引用，带重试机制和队列管理）
+  const performSave = async (retries = 3) => {
     if (!selectedNoteId) return
 
-    setIsAutoSaving(true)
-    try {
-      const tagsArray = parseTags(prevStateRef.current.tags)
-      await updateNote(selectedNoteId, {
-        title: prevStateRef.current.title.trim() || '无标题',
-        content: prevStateRef.current.content,
-        category: prevStateRef.current.category.trim(),
-        tags: formatTags(tagsArray),
-        note_type: prevStateRef.current.noteType
-      })
-      setLastSaved(new Date().toISOString())
-      setHasUnsavedChanges(false)
-      hasUnsavedChangesRef.current = false
-      console.log('自动保存成功')
-    } catch (error) {
-      console.error('自动保存失败:', error)
-    } finally {
-      setIsAutoSaving(false)
-    }
+    // 使用保存队列避免并发冲突
+    return saveQueue.add(selectedNoteId, async () => {
+      setIsAutoSaving(true)
+      
+      for (let attempt = 0; attempt < retries; attempt++) {
+        try {
+          const tagsArray = parseTags(prevStateRef.current.tags)
+          await updateNote(selectedNoteId, {
+            title: prevStateRef.current.title.trim() || '无标题',
+            content: prevStateRef.current.content,
+            category: prevStateRef.current.category.trim(),
+            tags: formatTags(tagsArray),
+            note_type: prevStateRef.current.noteType
+          })
+          setLastSaved(new Date().toISOString())
+          setHasUnsavedChanges(false)
+          hasUnsavedChangesRef.current = false
+          setShowSaveError(false)
+          console.log('[NoteEditor] 自动保存成功')
+          setIsAutoSaving(false)
+          return // 保存成功，退出
+        } catch (error) {
+          console.error(`[NoteEditor] 自动保存失败 (尝试 ${attempt + 1}/${retries}):`, error)
+          
+          if (attempt === retries - 1) {
+            // 最后一次尝试失败
+            setShowSaveError(true)
+            setSaveErrorMessage(error.message || '保存失败，请重试')
+            console.error('[NoteEditor] 保存失败，已达最大重试次数')
+            setIsAutoSaving(false)
+            throw error; // 抛出错误让队列知道保存失败
+          } else {
+            // 等待一段时间后重试
+            await new Promise(resolve => setTimeout(resolve, 1000))
+          }
+        }
+      }
+    });
   }
 
-  // 使用防抖保存 Hook
-  const { debouncedSave, saveNow, cancelSave } = useDebouncedSave(performSave, 2000)
+  // 使用防抖保存 Hook（减少延迟到1500ms）
+  const { debouncedSave, saveNow, cancelSave } = useDebouncedSave(performSave, 1500)
 
   // 同步 hasUnsavedChanges 到 ref
   useEffect(() => {
@@ -144,7 +168,6 @@ const NoteEditor = () => {
     if (prevNoteIdRef.current !== null && prevNoteIdRef.current !== selectedNoteId) {
       // 检查是否有未保存的更改
       if (hasUnsavedChangesRef.current) {
-        // 立即保存旧笔记，使用 prevStateRef 中保存的状态
         const oldNoteId = prevNoteIdRef.current
         const stateToSave = {
           title: prevStateRef.current.title.trim() || '无标题',
@@ -157,12 +180,13 @@ const NoteEditor = () => {
         // 先取消当前的防抖保存
         cancelSave()
 
-        // 立即保存
-        updateNote(oldNoteId, stateToSave).then(() => {
-          console.log('切换笔记前已自动保存')
+        // 使用保存队列立即保存，确保按顺序执行
+        saveQueue.add(oldNoteId, async () => {
+          console.log('[NoteEditor] 切换笔记前保存:', oldNoteId);
+          await updateNote(oldNoteId, stateToSave);
         }).catch(error => {
-          console.error('切换笔记时保存失败:', error)
-        })
+          console.error('[NoteEditor] 切换笔记时保存失败:', error);
+        });
       }
     }
 
@@ -211,6 +235,7 @@ const NoteEditor = () => {
       setNoteType(newNoteType)
       setLastSaved(currentNote.updated_at)
       setHasUnsavedChanges(false)
+      setShowSaveError(false)
 
       // 保存新笔记的状态到 ref
       prevStateRef.current = {
@@ -243,6 +268,20 @@ const NoteEditor = () => {
       prevStateRef.current = { title: '', content: '', category: '', tags: '' }
     }
   }, [selectedNoteId, currentNote])
+
+  // 暴露保存函数供窗口关闭时调用
+  useEffect(() => {
+    window.__saveBeforeClose = async () => {
+      if (hasUnsavedChangesRef.current) {
+        console.log('[NoteEditor] 窗口关闭前保存');
+        await saveNow();
+      }
+    };
+
+    return () => {
+      delete window.__saveBeforeClose;
+    };
+  }, [saveNow]);
 
   // 初始化快捷键管理器和注册监听器
   useEffect(() => {
@@ -674,8 +713,11 @@ const NoteEditor = () => {
               const end = textarea.selectionEnd
               const imageMarkdown = `![${fileName}](${imagePath})`
               const newContent = content.substring(0, start) + imageMarkdown + content.substring(end)
+              
               setContent(newContent)
               setHasUnsavedChanges(true)
+              prevStateRef.current.content = newContent
+              debouncedSave()
 
               // 设置光标位置到图片markdown之后
               setTimeout(() => {
@@ -692,53 +734,83 @@ const NoteEditor = () => {
     }
   }
 
-  // 处理拖拽进入
-  const handleDragEnter = (e) => {
-    e.preventDefault()
-    e.stopPropagation()
-    setIsDragging(true)
-  }
-
-  // 处理拖拽离开
-  const handleDragLeave = (e) => {
-    e.preventDefault()
-    e.stopPropagation()
-    // 只有当离开编辑器容器时才设置为false
-    if (!e.currentTarget.contains(e.relatedTarget)) {
-      setIsDragging(false)
-    }
-  }
-
   // 处理拖拽悬停
   const handleDragOver = (e) => {
     e.preventDefault()
     e.stopPropagation()
   }
 
-  // 处理文件拖拽放置
+  // 处理拖拽放置（支持文本和图片）
   const handleDrop = async (e) => {
     e.preventDefault()
     e.stopPropagation()
-    setIsDragging(false)
 
+    const textarea = contentRef.current?.querySelector('textarea')
+    if (!textarea) return
+
+    // 根据鼠标位置计算插入点
+    const rect = textarea.getBoundingClientRect()
+    const x = e.clientX - rect.left
+    const y = e.clientY - rect.top
+    
+    // 使用 caretPositionFromPoint 或 caretRangeFromPoint 获取插入位置
+    let position = 0
+    if (document.caretPositionFromPoint) {
+      const caretPos = document.caretPositionFromPoint(e.clientX, e.clientY)
+      if (caretPos) position = caretPos.offset
+    } else if (document.caretRangeFromPoint) {
+      const range = document.caretRangeFromPoint(e.clientX, e.clientY)
+      if (range) position = range.startOffset
+    } else {
+      // 降级方案:使用当前光标位置
+      position = textarea.selectionStart
+    }
+    
+    const start = position
+    const end = position
+
+    // 优先处理文本
+    const text = e.dataTransfer.getData('text/plain')
+    if (text) {
+      const newContent = content.substring(0, start) + text + content.substring(end)
+      setContent(newContent)
+      setHasUnsavedChanges(true)
+      prevStateRef.current.content = newContent
+      debouncedSave()
+
+      setTimeout(() => {
+        textarea.selectionStart = textarea.selectionEnd = start + text.length
+        textarea.focus()
+      }, 0)
+      return
+    }
+
+    // 处理图片文件 - 插入到光标位置
     const files = Array.from(e.dataTransfer.files)
     const imageFiles = files.filter(file => file.type.startsWith('image/'))
-
     if (imageFiles.length === 0) return
 
     try {
+      let insertText = ''
       for (const file of imageFiles) {
         const arrayBuffer = await file.arrayBuffer()
         const buffer = new Uint8Array(arrayBuffer)
         const imagePath = await imageAPI.saveFromBuffer(buffer, file.name)
-
-        // 插入图片到内容末尾
-        const imageMarkdown = `![${file.name}](${imagePath})\n`
-        setContent(prev => prev + imageMarkdown)
-        setHasUnsavedChanges(true)
+        insertText += `![${file.name}](${imagePath})\n`
       }
+      
+      const newContent = content.substring(0, start) + insertText + content.substring(end)
+      setContent(newContent)
+      setHasUnsavedChanges(true)
+      prevStateRef.current.content = newContent
+      debouncedSave()
+
+      setTimeout(() => {
+        textarea.selectionStart = textarea.selectionEnd = start + insertText.length
+        textarea.focus()
+      }, 0)
     } catch (error) {
-      console.error('拖拽图片失败:', error)
+      console.error('拖拽失败:', error)
     }
   }
 
@@ -811,9 +883,35 @@ const NoteEditor = () => {
     }, 500)
   }
 
+  // 根据遮罩透明度设置获取对应的透明度值
+  const getMaskOpacityValue = (isDark) => {
+    const opacityMap = {
+      none: { dark: 0, light: 0 },
+      light: { dark: 0.5, light: 0.45 },
+      medium: { dark: 0.75, light: 0.75 },
+      heavy: { dark: 0.92, light: 0.92 }
+    }
+    const values = opacityMap[maskOpacity] || opacityMap.medium
+    return isDark ? values.dark : values.light
+  }
+
   return (
     <Box
-      sx={{ height: '100%', display: 'flex', flexDirection: 'column', overflow: 'hidden', position: 'relative' }}
+      sx={(theme) => {
+        const opacity = getMaskOpacityValue(theme.palette.mode === 'dark')
+        return { 
+          height: '100%', 
+          display: 'flex', 
+          flexDirection: 'column', 
+          overflow: 'hidden', 
+          position: 'relative',
+          backgroundColor: theme.palette.mode === 'dark'
+            ? `rgba(15, 23, 42, ${opacity})`
+            : `rgba(240, 244, 248, ${opacity})`,
+          backdropFilter: opacity > 0 ? 'blur(8px)' : 'none',
+          WebkitBackdropFilter: opacity > 0 ? 'blur(8px)' : 'none',
+        }
+      }}
       onMouseMove={handleMouseMove}
       onMouseLeave={handleMouseLeave}
     >
@@ -825,6 +923,7 @@ const NoteEditor = () => {
           height: '48px',
           borderBottom: 1,
           borderColor: 'divider',
+          borderRadius: 0,
           display: 'flex',
           alignItems: 'center',
           gap: 1,
@@ -852,20 +951,35 @@ const NoteEditor = () => {
         <Box sx={{ flex: 1, display: 'flex', alignItems: 'center', gap: 1 }}>
           {isAutoSaving ? (
             <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
-              <AutoSaveIcon fontSize="small" color="action" />
-              <Typography variant="body2" color="text.secondary">
+              <AutoSaveIcon fontSize="small" color="primary" sx={{ animation: 'pulse 1.5s infinite' }} />
+              <Typography variant="body2" color="primary">
                 {t('common.autoSaving')}
+              </Typography>
+            </Box>
+          ) : showSaveError ? (
+            <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
+              <ErrorIcon sx={{ fontSize: 16, color: 'error.main' }} />
+              <Typography variant="body2" color="error">
+                保存失败
+              </Typography>
+            </Box>
+          ) : hasUnsavedChanges ? (
+            <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
+              <EditIcon sx={{ fontSize: 16, color: 'warning.main' }} />
+              <Typography variant="body2" color="text.secondary">
+                {t('common.unsavedChanges')}
+              </Typography>
+            </Box>
+          ) : lastSaved ? (
+            <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
+              <CheckCircleIcon sx={{ fontSize: 16, color: 'success.main' }} />
+              <Typography variant="body2" color="text.secondary">
+                {t('common.lastSaved', { time: formatLastSaved(lastSaved) })}
               </Typography>
             </Box>
           ) : (
             <Typography variant="body2" color="text.secondary">
-              {hasUnsavedChanges ? (
-                t('common.unsavedChanges')
-              ) : lastSaved ? (
-                t('common.lastSaved', { time: formatLastSaved(lastSaved) })
-              ) : (
-                t('common.newNote')
-              )}
+              {t('common.newNote')}
             </Typography>
           )}
         </Box>
@@ -1106,44 +1220,12 @@ const NoteEditor = () => {
                     minHeight: 0,
                     display: 'flex',
                     flexDirection: 'column',
-                    position: 'relative',
-                    // 拖拽样式
-                    ...(isDragging && editorMode === 'markdown' && {
-                      backgroundColor: 'action.hover'
-                    })
+                    position: 'relative'
                   }}
-                  onDragEnter={editorMode === 'markdown' ? handleDragEnter : undefined}
-                  onDragLeave={editorMode === 'markdown' ? handleDragLeave : undefined}
                   onDragOver={editorMode === 'markdown' ? handleDragOver : undefined}
                   onDrop={editorMode === 'markdown' ? handleDrop : undefined}
                   onPaste={editorMode === 'markdown' ? handlePaste : undefined}
                 >
-                  {/* 拖拽覆盖层 */}
-                  {isDragging && editorMode === 'markdown' && (
-                    <Box
-                      sx={{
-                        position: 'absolute',
-                        top: 0,
-                        left: 0,
-                        right: 0,
-                        bottom: 0,
-                        display: 'flex',
-                        alignItems: 'center',
-                        justifyContent: 'center',
-                        backgroundColor: 'rgba(25, 118, 210, 0.1)',
-                        color: 'primary.main',
-                        fontSize: '1.2rem',
-                        fontWeight: 'bold',
-                        zIndex: 1000,
-                        border: '2px dashed',
-                        borderColor: 'primary.main',
-                        borderRadius: 1
-                      }}
-                    >
-                      {t('common.dragImageHere')}
-                    </Box>
-                  )}
-
                   {/* 内容编辑器 - 根据 editorMode 切换 */}
                   {editorMode === 'markdown' ? (
                     <TextField
@@ -1170,6 +1252,15 @@ const NoteEditor = () => {
                           fontFamily: '"OPPOSans R", "OPPOSans", system-ui, -apple-system, sans-serif',
                           height: '100% !important',
                           overflow: 'auto !important'
+                        },
+                        '& textarea': {
+                          // 纯纯写作风格: 消失→显现→消失 (1.5秒)
+                          '@keyframes caret-breath': {
+                            '0%': { caretColor: 'transparent' },
+                            '50%': { caretColor: 'currentColor' },
+                            '100%': { caretColor: 'transparent' }
+                          },
+                          animation: 'caret-breath 1.5s ease-in-out infinite'
                         }
                       }}
                     />
@@ -1241,6 +1332,18 @@ const NoteEditor = () => {
       >
         <Alert severity="success" onClose={() => setShowSaveSuccess(false)}>
           {t('common.noteSaved')}
+        </Alert>
+      </Snackbar>
+
+      {/* 保存失败提示 */}
+      <Snackbar
+        open={showSaveError}
+        autoHideDuration={5000}
+        onClose={() => setShowSaveError(false)}
+        anchorOrigin={{ vertical: 'bottom', horizontal: 'right' }}
+      >
+        <Alert severity="error" onClose={() => setShowSaveError(false)}>
+          {saveErrorMessage || '保存失败，请重试'}
         </Alert>
       </Snackbar>
 

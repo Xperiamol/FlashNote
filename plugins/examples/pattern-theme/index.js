@@ -1,5 +1,5 @@
 /**
- * 花纹主题插件
+ * 主题外观插件
  * 
  * 为 FlashNote 添加炫酷的几何花纹背景效果
  * 支持多种花纹样式、透明度调节、动态切换
@@ -253,7 +253,7 @@ let currentState = {
   opacity: 1.0,
   primaryColor: '#1976d2', // 默认蓝色
   customImageUrl: null, // 自定义图片URL
-  maskMode: 'edge' // 显示模式: 'edge' = 边缘显示（壁纸效果）, 'full' = 全屏显示
+  maskMode: 'full' // 显示模式: 'editor' = 仅覆盖笔记编辑区, 'toolbar' = 仅覆盖按钮/工具栏区, 'full' = 全屏显示
 }
 
 /**
@@ -322,17 +322,10 @@ function generatePatternCSS() {
     })
   }
 
-  // 根据显示模式决定是否应用遮罩
-  const maskCSS = currentState.maskMode === 'edge' ? `
-      /* 使用遮罩让花纹只显示在边缘区域（壁纸效果） */
-      mask-image: radial-gradient(ellipse at center, transparent 0%, transparent 30%, black 70%, black 100%);
-      -webkit-mask-image: radial-gradient(ellipse at center, transparent 0%, transparent 30%, black 70%, black 100%);` : ''
-
-  return `
-    /* FlashNote 花纹主题 - ${style.name} (主题色: ${getPrimaryColor()}, 显示模式: ${currentState.maskMode === 'edge' ? '边缘' : '全屏'}) */
-    
-    /* 使用伪元素作为壁纸层 */
-    body::before {
+  // 根据显示模式生成不同的CSS
+  let modeDescription = '全屏'
+  let targetSelector = 'body::before'
+  let positionCSS = `
       content: '';
       position: fixed;
       top: 0;
@@ -342,7 +335,79 @@ function generatePatternCSS() {
       ${css}
       background-attachment: fixed;
       pointer-events: none;
-      z-index: 0;${maskCSS}
+      z-index: 0;`
+
+  if (currentState.maskMode === 'editor') {
+    // 仅覆盖笔记编辑区
+    modeDescription = '仅编辑区'
+    return `
+    /* FlashNote 主题外观 - ${style.name} (主题色: ${getPrimaryColor()}, 显示模式: ${modeDescription}) */
+    
+    /* 仅在笔记编辑区域显示花纹 */
+    .note-editor-content::before,
+    .MuiBox-root[class*="NoteEditor"]::before,
+    [class*="editor-container"]::before {
+      content: '';
+      position: absolute;
+      top: 0;
+      left: 0;
+      right: 0;
+      bottom: 0;
+      ${css}
+      background-attachment: local;
+      pointer-events: none;
+      z-index: 0;
+      border-radius: inherit;
+    }
+    
+    .note-editor-content,
+    .MuiBox-root[class*="NoteEditor"],
+    [class*="editor-container"] {
+      position: relative;
+    }
+  `
+  } else if (currentState.maskMode === 'toolbar') {
+    // 仅覆盖按钮/工具栏区
+    modeDescription = '仅工具栏'
+    return `
+    /* FlashNote 主题外观 - ${style.name} (主题色: ${getPrimaryColor()}, 显示模式: ${modeDescription}) */
+    
+    /* 仅在工具栏和侧边栏显示花纹 */
+    .MuiToolbar-root::before,
+    .MuiDrawer-paper::before,
+    .MuiAppBar-root::before,
+    [class*="Sidebar"]::before,
+    [class*="toolbar"]::before {
+      content: '';
+      position: absolute;
+      top: 0;
+      left: 0;
+      right: 0;
+      bottom: 0;
+      ${css}
+      background-attachment: local;
+      pointer-events: none;
+      z-index: 0;
+      border-radius: inherit;
+    }
+    
+    .MuiToolbar-root,
+    .MuiDrawer-paper,
+    .MuiAppBar-root,
+    [class*="Sidebar"],
+    [class*="toolbar"] {
+      position: relative;
+    }
+  `
+  }
+
+  // 默认全屏显示
+  return `
+    /* FlashNote 主题外观 - ${style.name} (主题色: ${getPrimaryColor()}, 显示模式: ${modeDescription}) */
+    
+    /* 使用伪元素作为壁纸层 */
+    body::before {
+      ${positionCSS}
     }
     
     /* 确保内容在花纹之上 */
@@ -359,7 +424,7 @@ function generatePatternCSS() {
 }
 
 /**
- * 应用花纹主题
+ * 应用主题外观
  */
 async function applyPattern() {
   runtime.logger.info('[applyPattern] 开始应用花纹', { enabled: currentState.enabled, styleId: currentState.styleId })
@@ -378,7 +443,7 @@ async function applyPattern() {
   })
 
   runtime.logger.info('[applyPattern] 注册结果:', result)
-  runtime.logger.info('花纹主题已应用', {
+  runtime.logger.info('主题外观已应用', {
     style: PATTERN_STYLES[currentState.styleId].name,
     opacity: currentState.opacity
   })
@@ -415,7 +480,7 @@ async function loadState() {
     if (primaryColor) currentState.primaryColor = primaryColor
     if (customImageUrl) currentState.customImageUrl = customImageUrl
 
-    runtime.logger.info('花纹主题状态已加载', currentState)
+    runtime.logger.info('主题外观状态已加载', currentState)
   } catch (error) {
     runtime.logger.error('加载状态失败', error)
   }
@@ -444,7 +509,7 @@ async function setPrimaryColor(color) {
 // ============ 插件生命周期 ============
 
 runtime.onActivate(async () => {
-  runtime.logger.info('花纹主题插件已激活')
+  runtime.logger.info('主题外观插件已激活')
 
   // 加载保存的状态
   await loadState()
@@ -457,7 +522,7 @@ runtime.onActivate(async () => {
 
   // 注册命令：切换开关
   runtime.registerCommand(
-    { id: 'pattern-theme.toggle', title: '切换花纹主题' },
+    { id: 'pattern-theme.toggle', title: '切换主题外观' },
     async () => {
       try {
         runtime.logger.info('[toggle] 当前状态:', currentState.enabled)
@@ -468,14 +533,14 @@ runtime.onActivate(async () => {
         await applyPattern()
 
         await runtime.notifications.show({
-          title: '花纹主题',
+          title: '主题外观',
           body: currentState.enabled ? '已启用花纹效果' : '已禁用花纹效果',
           type: 'success'
         })
 
         return { success: true, enabled: currentState.enabled }
       } catch (error) {
-        runtime.logger.error('切换花纹主题失败', error)
+        runtime.logger.error('切换主题外观失败', error)
         return { success: false, error: error.message }
       }
     }
@@ -514,7 +579,7 @@ runtime.onActivate(async () => {
 
   // 注册命令：设置（打开设置面板或处理设置更新）
   runtime.registerCommand(
-    { id: 'pattern-theme.settings', title: '花纹主题设置' },
+    { id: 'pattern-theme.settings', title: '主题外观设置' },
     async (payload) => {
       try {
         // 如果 payload 明确请求获取设置或更新设置
@@ -550,7 +615,7 @@ runtime.onActivate(async () => {
           }
 
           // 接收显示模式
-          if (payload.maskMode && ['edge', 'full'].includes(payload.maskMode)) {
+          if (payload.maskMode && ['editor', 'toolbar', 'full'].includes(payload.maskMode)) {
             currentState.maskMode = payload.maskMode
           }
 
@@ -592,7 +657,7 @@ runtime.onActivate(async () => {
         runtime.logger.info('[pattern-theme.settings] 打开设置窗口')
         await runtime.ui.openWindow({
           url: 'settings.html',
-          title: '花纹主题设置',
+          title: '主题外观设置',
           width: 800,
           height: 700
         })
@@ -605,11 +670,11 @@ runtime.onActivate(async () => {
     }
   )
 
-  runtime.logger.info('花纹主题插件命令已注册')
+  runtime.logger.info('主题外观插件命令已注册')
 })
 
 runtime.onDeactivate(async () => {
   // 清理所有样式
   await runtime.theme.unregisterGlobalStyle('main-pattern')
-  runtime.logger.info('花纹主题插件已停用')
+  runtime.logger.info('主题外观插件已停用')
 })

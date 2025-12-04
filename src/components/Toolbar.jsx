@@ -309,13 +309,17 @@ const Toolbar = ({
   return (
     <MuiToolbar
       disableGutters
-      sx={{
+      sx={(theme) => ({
         borderBottom: 1,
         borderColor: 'divider',
-        backgroundColor: 'background.paper',
+        backgroundColor: theme.palette.mode === 'dark'
+          ? 'rgba(30, 41, 59, 0.85)'
+          : 'rgba(255, 255, 255, 0.85)',
+        backdropFilter: 'blur(12px) saturate(150%)',
+        WebkitBackdropFilter: 'blur(12px) saturate(150%)',
         minHeight: '64px !important',
         px: 2
-      }}
+      })}
     >
       {/* 左侧按钮组 */}
       <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>

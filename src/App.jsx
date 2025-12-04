@@ -147,7 +147,7 @@ import { injectUIBridge } from './utils/pluginUIBridge'
 import themeManager from './utils/pluginThemeManager'
 
 function App() {
-  const { theme, setTheme, primaryColor, loadNotes, currentView, initializeSettings, setCurrentView, createNote, batchDeleteNotes, batchDeleteTodos, batchCompleteTodos, batchRestoreNotes, batchPermanentDeleteNotes, getAllTags, batchSetTags, setSelectedNoteId, updateNoteInList } = useStore()
+  const { theme, setTheme, primaryColor, loadNotes, currentView, initializeSettings, setCurrentView, createNote, batchDeleteNotes, batchDeleteTodos, batchCompleteTodos, batchRestoreNotes, batchPermanentDeleteNotes, getAllTags, batchSetTags, setSelectedNoteId, updateNoteInList, maskOpacity } = useStore()
   const refreshPluginCommands = useStore((state) => state.refreshPluginCommands)
   const addPluginCommand = useStore((state) => state.addPluginCommand)
   const removePluginCommand = useStore((state) => state.removePluginCommand)
@@ -218,6 +218,18 @@ function App() {
   const [selectedNotesForTagging, setSelectedNotesForTagging] = useState([])
 
   const appTheme = createAppTheme(theme, primaryColor)
+
+  // 根据遮罩透明度设置获取对应的透明度值
+  const getMaskOpacityValue = (isDark) => {
+    const opacityMap = {
+      none: { dark: 0, light: 0 },
+      light: { dark: 0.4, light: 0.35 },
+      medium: { dark: 0.6, light: 0.6 },
+      heavy: { dark: 0.85, light: 0.85 }
+    }
+    const values = opacityMap[maskOpacity] || opacityMap.medium
+    return isDark ? values.dark : values.light
+  }
   const isMobile = useMediaQuery(appTheme.breakpoints.down('md'))
 
   // 暴露插件API到全局对象（用于调试和测试）
@@ -303,6 +315,14 @@ function App() {
       loadNotes();
     }
   }, [currentView, loadNotes]);
+
+  // 监听视图切换，自动退出多选模式
+  useEffect(() => {
+    // 当切换功能区时，退出多选状态
+    if (currentMultiSelectRef) {
+      currentMultiSelectRef.exitMultiSelectMode();
+    }
+  }, [currentView]);
 
   // 监听命令面板快捷键 (Ctrl+Shift+P / Cmd+Shift+P)
   useEffect(() => {
@@ -751,9 +771,9 @@ function App() {
               <AppBar
                 position="static"
                 sx={{
-                  backgroundColor: 'background.paper',
+                  backgroundColor: 'transparent',
                   color: 'text.primary',
-                  boxShadow: 1
+                  boxShadow: 'none'
                 }}
               >
                 <Toolbar
@@ -800,7 +820,7 @@ function App() {
                       currentMultiSelectRef.selectNone();
                     }
                   }}
-                  onDelete={showDeleted || multiSelectState.itemType !== '笔记' ? undefined : async () => {
+                  onDelete={showDeleted ? undefined : async () => {
                     if (multiSelectState.selectedIds.length === 0) return;
 
                     try {
@@ -999,7 +1019,18 @@ function App() {
                 />
 
                 {/* 主内容区域 */}
-                <Box sx={{ flex: 1, overflow: 'hidden' }}>
+                <Box sx={(theme) => {
+                  const opacity = getMaskOpacityValue(theme.palette.mode === 'dark')
+                  return { 
+                    flex: 1, 
+                    overflow: 'hidden',
+                    backgroundColor: theme.palette.mode === 'dark'
+                      ? `rgba(15, 23, 42, ${opacity})`
+                      : `rgba(240, 244, 248, ${opacity})`,
+                    backdropFilter: opacity > 0 ? 'blur(8px)' : 'none',
+                    WebkitBackdropFilter: opacity > 0 ? 'blur(8px)' : 'none',
+                  }
+                }}>
                   {currentView === 'notes' && <NoteEditor />}
                   {currentView === 'todo' && (
                     <TodoView

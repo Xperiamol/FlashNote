@@ -478,6 +478,49 @@ class WindowManager extends EventEmitter {
       const windowId = `todo-${Date.now()}`;
       this.windows.set(windowId, todoWindow);
 
+      // 设置窗口事件（必须在loadURL之前注册，否则事件可能已触发）
+      todoWindow.on('closed', () => {
+        this.windows.delete(windowId);
+      });
+
+      // 添加页面加载失败的错误处理
+      todoWindow.webContents.on('did-fail-load', (event, errorCode, errorDescription, validatedURL) => {
+        console.error(`Todo独立窗口加载失败: ${errorDescription} (${errorCode}) - URL: ${validatedURL}`);
+        // 即使加载失败也显示窗口，让用户知道出了问题
+        if (!todoWindow.isDestroyed() && !todoWindow.isVisible()) {
+          todoWindow.show();
+        }
+      });
+
+      // 添加控制台错误监听
+      todoWindow.webContents.on('console-message', (event, level, message, line, sourceId) => {
+        if (level === 3) { // 错误级别
+          console.error(`Todo独立窗口控制台错误: ${message} (${sourceId}:${line})`);
+        }
+      });
+
+      // 页面加载完成后显示窗口
+      todoWindow.webContents.on('did-finish-load', () => {
+        console.log(`Todo窗口页面加载完成: ${windowId}`);
+        if (!todoWindow.isDestroyed() && !todoWindow.isVisible()) {
+          todoWindow.show();
+          if (isDev) {
+            todoWindow.webContents.openDevTools();
+          }
+        }
+      });
+
+      // ready-to-show 作为备用显示机制
+      todoWindow.once('ready-to-show', () => {
+        console.log(`Todo窗口 ready-to-show: ${windowId}`);
+        if (!todoWindow.isDestroyed() && !todoWindow.isVisible()) {
+          todoWindow.show();
+          if (isDev) {
+            todoWindow.webContents.openDevTools();
+          }
+        }
+      });
+
       // 序列化Todo数据
       const encodedTodoData = encodeURIComponent(JSON.stringify(todoData));
 
@@ -489,30 +532,6 @@ class WindowManager extends EventEmitter {
           query: { type: 'todo', todoData: encodedTodoData, minibarMode: defaultMinibarMode.toString() }
         });
       }
-
-      // 设置窗口事件
-      todoWindow.on('closed', () => {
-        this.windows.delete(windowId);
-      });
-
-      // 添加页面加载失败的错误处理
-      todoWindow.webContents.on('did-fail-load', (event, errorCode, errorDescription, validatedURL) => {
-        console.error(`Todo独立窗口加载失败: ${errorDescription} (${errorCode}) - URL: ${validatedURL}`);
-      });
-
-      // 添加控制台错误监听
-      todoWindow.webContents.on('console-message', (event, level, message, line, sourceId) => {
-        if (level === 3) { // 错误级别
-          console.error(`Todo独立窗口控制台错误: ${message} (${sourceId}:${line})`);
-        }
-      });
-
-      todoWindow.once('ready-to-show', () => {
-        todoWindow.show();
-        if (isDev) {
-          todoWindow.webContents.openDevTools();
-        }
-      });
 
       console.log(`Todo窗口创建成功: ${windowId}`);
       return { windowId };
@@ -718,11 +737,36 @@ class WindowManager extends EventEmitter {
   /**
    * 关闭指定窗口
    */
-  closeWindow(id) {
+  async closeWindow(id) {
     const window = this.windows.get(id);
     if (window && !window.isDestroyed()) {
-      window.close();
-      return true;
+      try {
+        // 在关闭前触发保存
+        console.log('[WindowManager] 关闭窗口前触发保存:', id);
+        await window.webContents.executeJavaScript(`
+          (async () => {
+            if (window.__saveBeforeClose) {
+              await window.__saveBeforeClose();
+              return true;
+            }
+            return false;
+          })();
+        `).catch(err => {
+          console.error('[WindowManager] 保存失败:', err);
+        });
+
+        // 等待保存完成（给一些缓冲时间）
+        await new Promise(resolve => setTimeout(resolve, 300));
+
+        // 关闭窗口
+        window.close();
+        return true;
+      } catch (error) {
+        console.error('[WindowManager] 关闭窗口失败:', error);
+        // 即使保存失败也关闭窗口
+        window.close();
+        return true;
+      }
     }
     return false;
   }
@@ -730,12 +774,15 @@ class WindowManager extends EventEmitter {
   /**
    * 关闭所有窗口
    */
-  closeAllWindows() {
+  async closeAllWindows() {
+    const closePromises = [];
     for (const [id, window] of this.windows) {
       if (!window.isDestroyed()) {
-        window.close();
+        closePromises.push(this.closeWindow(id));
       }
     }
+    // 等待所有窗口关闭完成
+    await Promise.all(closePromises);
     this.windows.clear();
   }
 

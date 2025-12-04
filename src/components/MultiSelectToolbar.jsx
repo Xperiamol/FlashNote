@@ -104,13 +104,13 @@ const MultiSelectToolbar = ({
              {isAllSelected ? '取消全选' : '全选'}
            </Button>
           
-          {/* 只有在有默认操作或自定义操作时才显示分隔符 */}
-          {((customActions.length === 0 && (onDelete || onSetTags)) || customActions.length > 0) && (
+          {/* 只有在有操作时显示分隔符 */}
+          {(onDelete || onSetTags || customActions.length > 0) && (
             <Divider orientation="vertical" flexItem sx={{ mx: 1, borderColor: 'currentColor' }} />
           )}
           
-          {/* 删除按钮 - 仅在没有自定义操作时显示 */}
-          {customActions.length === 0 && onDelete && (
+          {/* 删除按钮 - 始终显示（如果提供） */}
+          {onDelete && (
             <Button
               size="small"
               startIcon={<DeleteIcon />}
@@ -130,8 +130,8 @@ const MultiSelectToolbar = ({
             </Button>
           )}
           
-          {/* 批量设置标签按钮 - 仅在没有自定义操作时显示 */}
-          {customActions.length === 0 && onSetTags && (
+          {/* 批量设置标签按钮 - 始终显示（如果提供） */}
+          {onSetTags && (
             <Button
               size="small"
               startIcon={<LabelIcon />}
@@ -147,28 +147,24 @@ const MultiSelectToolbar = ({
             </Button>
           )}
           
-          {/* 自定义操作按钮 */}
-          {customActions.length > 0 && (
-            <>
-              {customActions.map((action, index) => (
-                <Button
-                  key={action.key || index}
-                  size="small"
-                  startIcon={action.icon}
-                  onClick={action.onClick}
-                  disabled={action.disabled || selectedCount === 0}
-                  sx={{
-                    color: 'inherit',
-                    textTransform: 'none',
-                    minWidth: 'auto',
-                    ...action.sx
-                  }}
-                >
-                  {action.label}
-                </Button>
-              ))}
-            </>
-          )}
+          {/* 自定义操作按钮 - 始终显示（如果提供） */}
+          {customActions.map((action, index) => (
+            <Button
+              key={action.key || index}
+              size="small"
+              startIcon={action.icon}
+              onClick={action.onClick}
+              disabled={action.disabled || selectedCount === 0}
+              sx={{
+                color: 'inherit',
+                textTransform: 'none',
+                minWidth: 'auto',
+                ...action.sx
+              }}
+            >
+              {action.label}
+            </Button>
+          ))}
           
           {/* 弹性空间 */}
           <Box sx={{ flexGrow: 1 }} />
