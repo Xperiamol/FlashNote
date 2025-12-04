@@ -129,7 +129,9 @@
       "oneClick": false,
       "allowToChangeInstallationDirectory": true,
       "createDesktopShortcut": true,
-      "createStartMenuShortcut": true
+      "createStartMenuShortcut": true,
+      "deleteAppDataOnUninstall": true,
+      "uninstallDisplayName": "FlashNote 2.2.2 Zeta"
     }
   }
 }

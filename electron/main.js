@@ -816,11 +816,17 @@ if (!gotTheLock) {
   })
 }
 
-// 当所有窗口关闭时的处理 - 由于有托盘，不直接退出应用
+// 当所有窗口关闭时的处理
 app.on('window-all-closed', () => {
-  // 有托盘时，即使所有窗口关闭也不退出应用
-  // 用户需要通过托盘菜单或快捷键退出
-  console.log('所有窗口已关闭，应用继续在托盘中运行')
+  // 检查主窗口是否还存在（可能只是隐藏到托盘）
+  if (mainWindow && !mainWindow.isDestroyed()) {
+    // 主窗口存在（可能隐藏到托盘），继续运行
+    console.log('所有窗口已关闭，主窗口在托盘中，应用继续运行')
+  } else {
+    // 主窗口不存在，说明是独立窗口单独运行后关闭，退出应用
+    console.log('所有窗口已关闭且主窗口不存在，退出应用')
+    app.quit()
+  }
 })
 
 // 应用即将退出时的清理工作
@@ -2384,8 +2390,14 @@ app.on('before-quit', async (event) => {
       // 2. 等待一些额外时间确保保存完成
       await new Promise(resolve => setTimeout(resolve, 500));
 
-      // 3. 关闭所有窗口
-      await windowManager.closeAllWindows();
+      // 3. 强制销毁所有窗口（使用 destroy 而不是 close，避免 close 事件的 preventDefault 阻止关闭）
+      const remainingWindows = BrowserWindow.getAllWindows();
+      for (const window of remainingWindows) {
+        if (!window.isDestroyed()) {
+          console.log('[App] 强制销毁窗口');
+          window.destroy();
+        }
+      }
 
       // 4. 关闭数据库连接
       const dbManager = DatabaseManager.getInstance();
@@ -2396,8 +2408,8 @@ app.on('before-quit', async (event) => {
       app.quit();
     } catch (error) {
       console.error('[App] 应用退出清理失败:', error);
-      // 即使失败也退出
-      app.quit();
+      // 即使失败也强制退出
+      app.exit(0);
     }
   }
 });
