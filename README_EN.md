@@ -5,7 +5,8 @@
 A modern desktop note-taking application designed for efficient note recording and management.
 The old 1.x version has been phased out. Welcome to the new version that is more open and visually appealing!
 <img width="1492" height="995" alt="image" src="https://github.com/user-attachments/assets/7b81f992-9684-42da-8eb2-624d6d702bea" />
-![Uploading image.png…]()
+<img width="1495" height="996" alt="image" src="https://github.com/user-attachments/assets/ed2c6353-447a-4621-93d7-0a0aa7a79774" />
+
 
 
 ## 🌟 Key Features
