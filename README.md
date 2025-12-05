@@ -1,12 +1,13 @@
-# FlashNote 2.0
+<img width="1495" height="996" alt="image" src="https://github.com/user-attachments/assets/a878cd8c-d734-4a13-bed1-72785608e0fd" /># FlashNote 2.0
 
 中文 | [English](./README_EN.md)
 
 一个现代化的桌面笔记应用，专为高效记录和管理笔记而设计。
 旧的1.x版本已经随风而逝了，迎接现在更开放更赏心悦目的新版本。
 <img width="1492" height="995" alt="image" src="https://github.com/user-attachments/assets/04957a50-7fdb-4d66-8271-337aaf85f8c6" />
+<img width="1495" height="996" alt="image" src="https://github.com/user-attachments/assets/e52d7d6f-ffb3-4cde-a0c5-988ba006a278" />
 
-## 感谢百度文心快码（BAIDU COMATE）支持！🙏https://download.csdn.net/download/liberationit/92408931?spm=1001.2014.3001.5501
+
 
 ## 🌟 主要特性
 
