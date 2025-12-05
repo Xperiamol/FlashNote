@@ -1,5 +1,3 @@
-<img width="1495" height="996" alt="image" src="https://github.com/user-attachments/assets/a878cd8c-d734-4a13-bed1-72785608e0fd" /># FlashNote 2.0
-
 中文 | [English](./README_EN.md)
 
 一个现代化的桌面笔记应用，专为高效记录和管理笔记而设计。
