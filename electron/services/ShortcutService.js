@@ -356,10 +356,49 @@ class ShortcutService {
    * @param {string} shortcutId 快捷键ID
    * @param {string} newAccelerator 新的快捷键组合
    * @param {string} action 动作类型
+   * @param {Object} completeShortcuts 完整的快捷键配置（可选，优先使用）
    */
-  async updateShortcut(shortcutId, newAccelerator, action) {
+  async updateShortcut(shortcutId, newAccelerator, action, completeShortcuts = null) {
     try {
-      await this.registerShortcut(shortcutId, newAccelerator, action);
+      let allShortcuts;
+      
+      // 如果传递了完整配置，直接使用（避免数据不一致）
+      if (completeShortcuts && typeof completeShortcuts === 'object' && Object.keys(completeShortcuts).length > 0) {
+        console.log('使用传递的完整快捷键配置');
+        allShortcuts = completeShortcuts;
+      } else {
+        // 否则获取当前配置并更新单个
+        allShortcuts = await this.getAllShortcuts();
+        
+        if (allShortcuts[shortcutId]) {
+          allShortcuts[shortcutId] = {
+            ...allShortcuts[shortcutId],
+            currentKey: newAccelerator
+          };
+        } else {
+          console.warn(`快捷键 ${shortcutId} 不存在于配置中，创建新配置`);
+          allShortcuts[shortcutId] = {
+            id: shortcutId,
+            currentKey: newAccelerator,
+            defaultKey: newAccelerator,
+            type: action && typeof action === 'object' ? 'local' : 'global',
+            action: action
+          };
+        }
+      }
+
+      // 保存完整配置到数据库（指定类型为json）
+      const SettingsService = require('./SettingsService');
+      const settingsService = new SettingsService();
+      await settingsService.setSetting('shortcuts', allShortcuts, 'json', '快捷键配置');
+      console.log(`完整快捷键配置已保存，包含 ${Object.keys(allShortcuts).length} 个快捷键`);
+
+      // 如果是全局快捷键，重新注册
+      if (allShortcuts[shortcutId] && allShortcuts[shortcutId].type === 'global') {
+        await this.registerShortcut(shortcutId, newAccelerator, action);
+      }
+      
+      return allShortcuts[shortcutId];
     } catch (error) {
       console.error(`更新快捷键 ${shortcutId} 失败:`, error);
       throw error;
@@ -634,10 +673,10 @@ class ShortcutService {
         currentKey: defaultConfig.defaultKey
       };
 
-      // 保存配置
+      // 保存配置（指定类型为json）
       const SettingsService = require('./SettingsService');
       const settingsService = new SettingsService();
-      await settingsService.setSetting('shortcuts', allShortcuts);
+      await settingsService.setSetting('shortcuts', allShortcuts, 'json', '快捷键配置');
 
       // 重新注册快捷键
       if (defaultConfig.type === 'global') {
@@ -658,10 +697,10 @@ class ShortcutService {
    */
   async resetAllShortcuts(defaultShortcuts = DEFAULT_SHORTCUTS) {
     try {
-      // 保存默认配置到设置
+      // 保存默认配置到设置（指定类型为json）
       const SettingsService = require('./SettingsService');
       const settingsService = new SettingsService();
-      await settingsService.setSetting('shortcuts', defaultShortcuts);
+      await settingsService.setSetting('shortcuts', defaultShortcuts, 'json', '快捷键配置');
 
       // 重新注册所有快捷键
       await this.registerAllShortcuts(defaultShortcuts);

@@ -360,7 +360,7 @@ const Mem0Settings = () => {
           {/* 语义搜索 */}
           <ListItem>
             <Box sx={{ width: '100%' }}>
-              <Typography variant="subtitle2" gutterBottom>
+              <Typography variant="h6" sx={{ fontWeight: 600 }} gutterBottom>
                 {t('mem0.semanticSearch')}
               </Typography>
               <Box sx={{ display: 'flex', gap: 1, mb: 2, alignItems: 'center' }}>
@@ -405,7 +405,7 @@ const Mem0Settings = () => {
                           </Box>
                         </Box>
                         <ListItemSecondaryAction>
-                          <Tooltip title="删除">
+                          <Tooltip title={t('mem0.delete')}>
                             <IconButton
                               size="small"
                               edge="end"
@@ -429,7 +429,7 @@ const Mem0Settings = () => {
           <ListItem>
             <Box sx={{ width: '100%' }}>
               <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', mb: 2 }}>
-                <Typography variant="subtitle2">
+                <Typography variant="h6" sx={{ fontWeight: 600 }}>
                   {t('mem0.memoryList')} ({Array.isArray(memories) ? memories.length : 0})
                 </Typography>
                 <Box sx={{ display: 'flex', gap: 1, alignItems: 'center' }}>
@@ -447,16 +447,6 @@ const Mem0Settings = () => {
                       <MenuItem value="organization">{t('mem0.organization')}</MenuItem>
                     </Select>
                   </FormControl>
-                  <Button
-                    variant="text"
-                    color="error"
-                    size="small"
-                    startIcon={<DeleteIcon />}
-                    onClick={() => setClearDialogOpen(true)}
-                    disabled={!Array.isArray(memories) || memories.length === 0}
-                  >
-                    {t('mem0.clear')}
-                  </Button>
                 </Box>
               </Box>
               
@@ -503,11 +493,38 @@ const Mem0Settings = () => {
 
           <Divider />
 
+          {/* 维护 */}
+          <ListItem>
+            <Box sx={{ width: '100%' }}>
+              <Typography variant="subtitle2" sx={{ mb: 0.5 }}>
+                {t('mem0.clear')}
+              </Typography>
+              <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mb: 1.5 }}>
+                {t('mem0.confirmClearDesc')}
+              </Typography>
+              <Box sx={{ display: 'flex', alignItems: 'center', gap: 2 }}>
+                <Box sx={{ flex: 1 }} />
+                <Button
+                  variant="outlined"
+                  color="error"
+                  size="small"
+                  startIcon={<DeleteIcon />}
+                  onClick={() => setClearDialogOpen(true)}
+                  disabled={!Array.isArray(memories) || memories.length === 0}
+                >
+                  {t('mem0.clear')}
+                </Button>
+              </Box>
+            </Box>
+          </ListItem>
+
+          <Divider />
+
           {/* 技术信息 */}
           <ListItem>
             <Box>
               <Typography variant="subtitle2" gutterBottom color="text.secondary">
-                📖 {t('mem0.technicalInfo')}
+                {t('mem0.technicalInfo')}
               </Typography>
               <Typography variant="body2" color="text.secondary">
                 {t('mem0.technicalDesc')}
@@ -531,10 +548,10 @@ const Mem0Settings = () => {
           </DialogContentText>
         </DialogContent>
         <DialogActions>
-          <Button onClick={() => setClearDialogOpen(false)}>
+          <Button size="small" onClick={() => setClearDialogOpen(false)}>
             {t('mem0.cancel')}
           </Button>
-          <Button onClick={handleClearAll} color="error" variant="contained">
+          <Button size="small" onClick={handleClearAll} color="error" variant="contained">
             {t('mem0.confirmClear')}
           </Button>
         </DialogActions>
@@ -557,11 +574,12 @@ const Mem0Settings = () => {
           </DialogContentText>
         </DialogContent>
         <DialogActions>
-          <Button onClick={() => setMigrateDialogOpen(false)} disabled={loading}>
+          <Button size="small" onClick={() => setMigrateDialogOpen(false)} disabled={loading}>
             {t('mem0.cancel')}
           </Button>
           <Button
             onClick={handleMigrateHistoricalData}
+            size="small"
             variant="contained"
             color="primary"
             disabled={loading}

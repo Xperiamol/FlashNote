@@ -1,6 +1,6 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none">
-  <!-- 圆角方形背景 -->
-  <rect x="2" y="2" width="20" height="20" rx="4.5" fill="url(#gradient4)"/>
+  <!-- 圆形背景 -->
+  <circle cx="12" cy="12" r="10" fill="url(#gradient4)"/>
   <!-- 闪电图标代表 AI -->
   <path d="M13 4L7 13h4l-1 7 6-9h-4l1-7z" fill="white" opacity="0.95"/>
   <!-- 小任务点 -->

@@ -8,6 +8,21 @@ const NutCloudImageSync = require('./NutCloudImageSync');
 const IncrementalSyncService = require('./IncrementalSyncService');
 const ConflictResolver = require('../utils/ConflictResolver');
 const RetryHelper = require('../utils/RetryHelper');
+const { getInstance: getDeviceIdManager } = require('../utils/DeviceIdManager');
+
+// ========== 同步日志工具 ==========
+// 将日志写入文件，方便打包后调试
+const syncLogFile = path.join(app.getPath('userData'), 'sync-debug.log');
+function syncLog(...args) {
+  const timestamp = new Date().toISOString();
+  const message = `[${timestamp}] ${args.map(a => typeof a === 'object' ? JSON.stringify(a, null, 2) : a).join(' ')}\n`;
+  console.log(...args);
+  try {
+    fs.appendFileSync(syncLogFile, message);
+  } catch (e) { /* ignore */ }
+}
+// 启动时清空日志文件
+try { fs.writeFileSync(syncLogFile, `=== FlashNote 同步日志 ===\n启动时间: ${new Date().toISOString()}\n日志路径: ${syncLogFile}\n\n`); } catch (e) { /* ignore */ }
 
 /**
  * 坚果云同步服务提供商
@@ -185,13 +200,28 @@ class NutCloudProvider extends EventEmitter {
         auth: {
           username: this.username,
           password: this.password
-        }
+        },
+        timeout: 10000
       });
+      console.log('[坚果云Provider] 应用文件夹创建成功');
     } catch (error) {
-      // 文件夹已存在时会返回405错误，这是正常的
-      if (error.response?.status !== 405) {
-        console.warn('创建应用文件夹失败:', error.message);
+      // 405或409表示文件夹已存在，这是正常的
+      if (error.response?.status === 405 || error.response?.status === 409) {
+        console.log('[坚果云Provider] 应用文件夹已存在');
+        return;
       }
+      
+      // 其他错误需要抛出，不能吞掉
+      console.error('[坚果云Provider] 创建应用文件夹失败:', error);
+      
+      let errorMessage = error.message;
+      if (error.code === 'ENOTFOUND' || error.code === 'ETIMEDOUT' || error.code === 'ECONNREFUSED') {
+        errorMessage = '网络连接失败，无法访问坚果云服务器';
+      } else if (error.code === 'ECONNABORTED') {
+        errorMessage = '连接超时';
+      }
+      
+      throw new Error(`创建应用文件夹失败: ${errorMessage}`);
     }
   }
 
@@ -213,10 +243,19 @@ class NutCloudProvider extends EventEmitter {
       console.log('版本检查结果:', versionCheck);
       
       if (versionCheck.should) {
-        try {
-          await this.createVersion(data, versionCheck.reason);
-        } catch (error) {
-          console.warn('创建版本备份失败，但继续上传数据:', error);
+        const versionResult = await this.createVersion(data, versionCheck.reason);
+        
+        if (!versionResult.success) {
+          console.warn('创建版本备份失败，但继续上传数据:', versionResult);
+          
+          // 发送事件通知用户版本创建失败
+          this.emit('versionCreationFailed', {
+            reason: versionCheck.reason,
+            error: versionResult.error || versionResult.message,
+            skipped: versionResult.skipped || false
+          });
+        } else {
+          console.log(`✅ 版本创建成功: v${versionResult.version}`);
         }
       }
 
@@ -256,15 +295,33 @@ class NutCloudProvider extends EventEmitter {
    * 下载数据
    */
   async download() {
+    console.log('[坚果云Provider] 开始下载数据...');
+    
     if (!this.isAuthenticated) {
+      console.log('[坚果云Provider] 未认证，尝试加载凭据...');
       // 如果没有凭据，先尝试加载保存的凭据
       if (!this.username || !this.password) {
-        await this.loadCredentials();
+        console.log('[坚果云Provider] 加载保存的凭据...');
+        const loaded = await this.loadCredentials();
+        if (!loaded || !this.username || !this.password) {
+          console.error('[坚果云Provider] 未找到保存的凭据或凭据不完整');
+          throw new Error('请先在设置中配置坚果云账户信息（用户名和应用密码）');
+        }
+        console.log('[坚果云Provider] 凭据加载成功');
       }
-      await this.authenticate();
+      
+      console.log('[坚果云Provider] 开始认证...');
+      try {
+        await this.authenticate();
+        console.log('[坚果云Provider] 认证成功');
+      } catch (authError) {
+        console.error('[坚果云Provider] 认证失败:', authError);
+        throw authError; // 直接抛出认证错误，它已经包含了友好的错误信息
+      }
     }
 
     try {
+      console.log('[坚果云Provider] 发起下载请求...');
       const response = await axios({
         method: 'GET',
         url: this.baseUrl + this.dataFile,
@@ -276,10 +333,11 @@ class NutCloudProvider extends EventEmitter {
       });
 
       if (response.status === 200) {
+        console.log('[坚果云Provider] 下载成功，解析数据...');
         try {
           // 现在response.data应该是字符串，需要解析为JSON
           const result = JSON.parse(response.data);
-          console.log('从坚果云下载数据成功');
+          console.log('[坚果云Provider] 数据解析成功');
           
           // 确保返回的数据包含metadata
           if (result.data) {
@@ -302,22 +360,30 @@ class NutCloudProvider extends EventEmitter {
             };
           }
         } catch (parseError) {
-          console.error('解析JSON数据失败:', parseError);
-          console.log('原始响应数据:', response.data);
+          console.error('[坚果云Provider] 解析JSON数据失败:', parseError);
+          console.log('[坚果云Provider] 原始响应数据:', response.data);
           throw new Error(`数据格式错误: ${parseError.message}`);
         }
       }
     } catch (error) {
       if (error.response?.status === 404) {
         // 文件不存在，返回null表示首次同步
-        console.log('坚果云上没有找到数据文件，这可能是首次同步');
+        console.log('[坚果云Provider] 坚果云上没有找到数据文件，这是首次同步');
         return null;
       }
-      console.error('从坚果云下载失败:', error);
+      console.error('[坚果云Provider] 从坚果云下载失败:', error);
       
       // 改进错误信息处理
       let errorMessage = error.message;
-      if (error.response?.data) {
+      if (error.response?.status === 401) {
+        errorMessage = '坚果云用户名或应用密码错误，请检查设置';
+      } else if (error.response?.status === 403) {
+        errorMessage = '没有权限访问坚果云，请检查账户权限';
+      } else if (error.response?.status === 503) {
+        errorMessage = '坚果云服务器繁忙，请稍后重试';
+      } else if (error.code === 'ENOTFOUND' || error.code === 'ETIMEDOUT') {
+        errorMessage = '网络连接失败，请检查网络设置';
+      } else if (error.response?.data) {
         if (typeof error.response.data === 'string') {
           errorMessage = error.response.data;
         } else if (typeof error.response.data === 'object') {
@@ -344,12 +410,32 @@ class NutCloudProvider extends EventEmitter {
         auth: {
           username: this.username,
           password: this.password
-        }
+        },
+        timeout: 10000
       });
 
       return response.status === 200;
     } catch (error) {
-      return false;
+      // 404表示文件不存在，这是正常情况
+      if (error.response?.status === 404) {
+        return false;
+      }
+      
+      // 其他错误（网络错误、认证错误等）应该抛出
+      console.error('[坚果云Provider] 检查文件存在性失败:', error);
+      
+      let errorMessage = error.message;
+      if (error.code === 'ENOTFOUND' || error.code === 'ETIMEDOUT' || error.code === 'ECONNREFUSED') {
+        errorMessage = '网络连接失败，无法访问坚果云服务器';
+      } else if (error.code === 'ECONNABORTED') {
+        errorMessage = '连接超时，请检查网络';
+      } else if (error.response?.status === 401) {
+        errorMessage = '坚果云认证失败';
+      } else if (error.response?.status === 403) {
+        errorMessage = '没有权限访问';
+      }
+      
+      throw new Error(`检查文件失败: ${errorMessage}`);
     }
   }
 
@@ -428,7 +514,12 @@ class NutCloudProvider extends EventEmitter {
     // 防止并发创建版本
     if (this._creatingVersion) {
       console.warn('正在创建版本中，跳过重复请求');
-      return null;
+      return {
+        success: false,
+        skipped: true,
+        reason: 'concurrent_creation',
+        message: '正在创建版本中，跳过重复请求'
+      };
     }
     
     this._creatingVersion = true;
@@ -477,6 +568,7 @@ class NutCloudProvider extends EventEmitter {
         await this.cleanupOldVersions();
         
         return {
+          success: true,
           version: versionNumber,
           fileName: fileName,
           timestamp: versionData.timestamp,
@@ -485,7 +577,11 @@ class NutCloudProvider extends EventEmitter {
       }
     } catch (error) {
       console.error('创建版本失败:', error);
-      throw new Error(`创建版本失败: ${error.message}`);
+      return {
+        success: false,
+        error: error.message,
+        reason: 'creation_failed'
+      };
     } finally {
       this._creatingVersion = false;
     }
@@ -736,25 +832,55 @@ class NutCloudProvider extends EventEmitter {
 
   /**
    * 计算数据变化百分比
+   * 改进：同时检测数量变化和内容变化（基于 updated_at）
    */
   calculateDataChangePercentage(oldData, newData) {
     const tables = ['notes', 'todos', 'settings', 'categories', 'tags'];
-    let totalOldItems = 0;
     let totalChanges = 0;
+    let totalItems = 0;
 
     for (const table of tables) {
       const oldItems = oldData[table] || [];
       const newItems = newData[table] || [];
       
-      totalOldItems += oldItems.length;
+      // 统计总项目数（取较大值）
+      totalItems += Math.max(oldItems.length, newItems.length);
       
-      // 简单的变化检测：比较数量差异
+      // 1. 检查数量变化
       const quantityChange = Math.abs(oldItems.length - newItems.length);
       totalChanges += quantityChange;
+      
+      // 2. 检查内容变化（基于 updated_at 或 deleted_at）
+      if (oldItems.length > 0 && newItems.length > 0) {
+        // 构建旧数据的时间戳映射（使用 sync_id 或 id）
+        const oldMap = new Map();
+        for (const item of oldItems) {
+          const key = item.sync_id || item.id;
+          const timestamp = item.deleted_at || item.updated_at || item.created_at;
+          oldMap.set(key, timestamp);
+        }
+        
+        // 检查每个新项目是否有变化
+        for (const newItem of newItems) {
+          const key = newItem.sync_id || newItem.id;
+          const newTimestamp = newItem.deleted_at || newItem.updated_at || newItem.created_at;
+          const oldTimestamp = oldMap.get(key);
+          
+          if (!oldTimestamp || oldTimestamp !== newTimestamp) {
+            // 内容发生变化，权重为 0.5（比新增/删除影响小）
+            totalChanges += 0.5;
+          }
+        }
+      }
     }
 
-    if (totalOldItems === 0) return 100;
-    return (totalChanges / totalOldItems) * 100;
+    if (totalItems === 0) return 100;
+    const percentage = (totalChanges / totalItems) * 100;
+    
+    // 输出详细日志便于调试
+    console.log(`[版本检查] 数据变化: ${totalChanges.toFixed(1)} / ${totalItems} = ${percentage.toFixed(1)}%`);
+    
+    return percentage;
   }
 
   /**
@@ -784,16 +910,34 @@ class NutCloudProvider extends EventEmitter {
         data: JSON.stringify(changePackage, null, 2),
         headers: {
           'Content-Type': 'application/json'
-        }
+        },
+        timeout: 30000 // 30秒超时
       });
 
       if (response.status === 201 || response.status === 204) {
         console.log(`上传变更包成功: ${filepath}`);
         return true;
       }
+      
+      throw new Error(`上传失败，服务器返回状态码: ${response.status}`);
     } catch (error) {
       console.error(`上传变更包失败: ${filepath}`, error);
-      throw error;
+      
+      // 改进错误信息
+      let errorMessage = error.message;
+      if (error.code === 'ENOTFOUND' || error.code === 'ETIMEDOUT' || error.code === 'ECONNREFUSED') {
+        errorMessage = '网络连接失败，无法访问坚果云服务器';
+      } else if (error.code === 'ECONNABORTED') {
+        errorMessage = '上传超时，请检查网络连接';
+      } else if (error.response?.status === 401) {
+        errorMessage = '坚果云认证失败，请检查用户名和应用密码';
+      } else if (error.response?.status === 403) {
+        errorMessage = '没有权限访问坚果云，请检查账户权限';
+      } else if (error.response?.status === 507) {
+        errorMessage = '坚果云存储空间不足';
+      }
+      
+      throw new Error(errorMessage);
     }
   }
 
@@ -829,11 +973,26 @@ class NutCloudProvider extends EventEmitter {
       // 解析WebDAV响应，获取文件列表
       const files = this._parseWebDAVResponse(response.data);
       
-      // 过滤出在指定时间之后的变更文件
+      // 获取本设备 ID，用于过滤
+      const deviceIdManager = getDeviceIdManager();
+      const ownDeviceId = deviceIdManager.getShortDeviceId();
+      
+      // 过滤出在指定时间之后的变更文件，并排除本设备生成的文件
       const sinceTime = new Date(since).getTime();
       const recentFiles = files.filter(file => {
         const fileTime = new Date(file.lastModified).getTime();
-        return fileTime > sinceTime;
+        if (fileTime <= sinceTime) {
+          return false;
+        }
+        
+        // 排除本设备生成的变更文件，避免重复应用自己的变更
+        const filename = file.path.split('/').pop() || file.path;
+        if (filename.includes(`-${ownDeviceId}-`)) {
+          console.log(`[增量同步] 跳过本设备(${ownDeviceId})的变更文件: ${filename}`);
+          return false;
+        }
+        
+        return true;
       });
 
       // 下载并合并所有变更
@@ -857,11 +1016,27 @@ class NutCloudProvider extends EventEmitter {
       return allChanges;
     } catch (error) {
       if (error.response?.status === 404) {
-        // 增量文件夹不存在，返回空列表
+        // 增量文件夹不存在，返回空列表（这是正常情况，不是错误）
+        console.log('[增量同步] 增量文件夹不存在，可能是首次同步');
         return [];
       }
-      console.error('下载远程变更失败:', error);
-      throw error;
+      
+      // 其他错误都应该抛出，不能吞掉
+      console.error('[增量同步] 下载远程变更失败:', error);
+      
+      // 改进错误信息
+      let errorMessage = error.message;
+      if (error.code === 'ENOTFOUND' || error.code === 'ETIMEDOUT' || error.code === 'ECONNREFUSED') {
+        errorMessage = '网络连接失败，无法访问坚果云服务器';
+      } else if (error.response?.status === 401) {
+        errorMessage = '坚果云认证失败，请检查用户名和应用密码';
+      } else if (error.response?.status === 403) {
+        errorMessage = '没有权限访问坚果云，请检查账户权限';
+      } else if (error.response?.status === 503) {
+        errorMessage = '坚果云服务器繁忙，请稍后重试';
+      }
+      
+      throw new Error(`下载远程变更失败: ${errorMessage}`);
     }
   }
 
@@ -926,13 +1101,32 @@ class NutCloudProvider extends EventEmitter {
         auth: {
           username: this.username,
           password: this.password
-        }
+        },
+        timeout: 10000
       });
+      console.log(`[坚果云Provider] 创建文件夹成功: ${folderPath}`);
     } catch (error) {
       // 405或409表示文件夹已存在，这是正常的
-      if (error.response?.status !== 405 && error.response?.status !== 409) {
-        throw error;
+      if (error.response?.status === 405 || error.response?.status === 409) {
+        console.log(`[坚果云Provider] 文件夹已存在: ${folderPath}`);
+        return;
       }
+      
+      // 其他错误需要抛出
+      console.error(`[坚果云Provider] 创建文件夹失败: ${folderPath}`, error);
+      
+      let errorMessage = error.message;
+      if (error.code === 'ENOTFOUND' || error.code === 'ETIMEDOUT' || error.code === 'ECONNREFUSED') {
+        errorMessage = '网络连接失败，无法访问坚果云服务器';
+      } else if (error.code === 'ECONNABORTED') {
+        errorMessage = '连接超时';
+      } else if (error.response?.status === 401) {
+        errorMessage = '认证失败';
+      } else if (error.response?.status === 403) {
+        errorMessage = '没有权限';
+      }
+      
+      throw new Error(`创建文件夹失败: ${errorMessage}`);
     }
   }
 
@@ -1085,33 +1279,85 @@ class NutCloudSyncService extends CloudSyncService {
    * 插入远程项目
    */
   async insertRemoteItem(dbParam, table, data) {
+    syncLog(`[insertRemoteItem] 开始插入 ${table}`, { id: data?.id, sync_id: data?.sync_id, title: data?.title?.substring(0, 30) });
+    
     // 获取数据库实例，优先使用传入的参数，否则自己获取
     let db = dbParam;
     if (!db || typeof db.prepare !== 'function') {
+      syncLog(`[insertRemoteItem] 传入的db无效，重新获取数据库实例`);
       const DatabaseManager = require('../dao/DatabaseManager');
       const dbManager = DatabaseManager.getInstance();
       db = dbManager.db;
     }
-
-    const tables = {
-      notes: 'INSERT OR REPLACE INTO notes (id, title, content, tags, category, is_pinned, is_deleted, created_at, updated_at, deleted_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
-      todos: 'INSERT OR REPLACE INTO todos (id, content, tags, is_completed, is_important, is_urgent, due_date, focus_time_seconds, created_at, updated_at, completed_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
-      settings: 'INSERT OR REPLACE INTO settings (key, value, type, description, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)',
-      categories: 'INSERT OR REPLACE INTO categories (id, name, color, icon, sort_order, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?)',
-      tags: 'INSERT OR REPLACE INTO tags (id, name, color, usage_count, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)'
-    };
-
-    const stmt = db.prepare(tables[table]);
     
     if (table === 'notes') {
-      stmt.run(data.id, data.title, data.content, data.tags, data.category, data.is_pinned, data.is_deleted, data.created_at, data.updated_at, data.deleted_at);
+      // 如果远程数据没有 sync_id，生成一个新的
+      const syncId = data.sync_id || require('crypto').randomUUID();
+      syncLog(`[insertRemoteItem] notes - syncId: ${syncId}`);
+      
+      // 检查本地是否已存在此 sync_id
+      const existingNote = db.prepare('SELECT id FROM notes WHERE sync_id = ?').get(syncId);
+      syncLog(`[insertRemoteItem] notes - 本地存在: ${!!existingNote}`);
+      
+      if (existingNote) {
+        // 已存在，使用本地的 id 进行更新
+        const stmt = db.prepare('UPDATE notes SET title = ?, content = ?, tags = ?, category = ?, is_pinned = ?, is_deleted = ?, created_at = ?, updated_at = ?, deleted_at = ?, note_type = ? WHERE sync_id = ?');
+        const result = stmt.run(data.title, data.content, data.tags, data.category, data.is_pinned, data.is_deleted, data.created_at, data.updated_at, data.deleted_at, data.note_type || 'markdown', syncId);
+        syncLog(`[insertRemoteItem] notes - UPDATE 完成: changes=${result.changes}`);
+      } else {
+        // 不存在，插入新记录（让 SQLite 自动生成新的本地 id）
+        const stmt = db.prepare('INSERT INTO notes (sync_id, title, content, tags, category, is_pinned, is_deleted, created_at, updated_at, deleted_at, note_type) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)');
+        const result = stmt.run(syncId, data.title, data.content, data.tags, data.category, data.is_pinned, data.is_deleted, data.created_at, data.updated_at, data.deleted_at, data.note_type || 'markdown');
+        syncLog(`[insertRemoteItem] notes - INSERT 完成: id=${result.lastInsertRowid}`);
+      }
     } else if (table === 'todos') {
-      stmt.run(data.id, data.content, data.tags, data.is_completed, data.is_important, data.is_urgent, data.due_date, data.focus_time_seconds, data.created_at, data.updated_at, data.completed_at);
+      // 如果远程数据没有 sync_id，生成一个新的
+      const syncId = data.sync_id || require('crypto').randomUUID();
+      
+      // 检查本地是否已存在此 sync_id
+      const existingTodo = db.prepare('SELECT id FROM todos WHERE sync_id = ?').get(syncId);
+      
+      if (existingTodo) {
+        // 已存在，使用本地的 id 进行更新
+        const stmt = db.prepare(`UPDATE todos SET 
+          content = ?, description = ?, tags = ?, 
+          is_completed = ?, is_important = ?, is_urgent = ?, 
+          due_date = ?, end_date = ?, item_type = ?, has_time = ?, 
+          focus_time_seconds = ?, repeat_type = ?, repeat_days = ?, 
+          repeat_interval = ?, next_due_date = ?, is_recurring = ?, 
+          parent_todo_id = ?, is_deleted = ?, deleted_at = ?, 
+          created_at = ?, updated_at = ?, completed_at = ?
+          WHERE sync_id = ?`);
+        stmt.run(
+          data.content, data.description || '', data.tags, 
+          data.is_completed, data.is_important, data.is_urgent, 
+          data.due_date, data.end_date, data.item_type || 'todo', data.has_time || 0, 
+          data.focus_time_seconds || 0, data.repeat_type || 'none', data.repeat_days || '', 
+          data.repeat_interval || 1, data.next_due_date, data.is_recurring || 0, 
+          data.parent_todo_id, data.is_deleted || 0, data.deleted_at, 
+          data.created_at, data.updated_at, data.completed_at, syncId
+        );
+      } else {
+        // 不存在，插入新记录（让 SQLite 自动生成新的本地 id）
+        const stmt = db.prepare('INSERT INTO todos (sync_id, content, description, tags, is_completed, is_important, is_urgent, due_date, end_date, item_type, has_time, focus_time_seconds, repeat_type, repeat_days, repeat_interval, next_due_date, is_recurring, parent_todo_id, is_deleted, deleted_at, created_at, updated_at, completed_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)');
+        stmt.run(
+          syncId, data.content, data.description || '', data.tags, 
+          data.is_completed, data.is_important, data.is_urgent, data.due_date, data.end_date,
+          data.item_type || 'todo', data.has_time || 0, data.focus_time_seconds || 0,
+          data.repeat_type || 'none', data.repeat_days || '', data.repeat_interval || 1,
+          data.next_due_date, data.is_recurring || 0, data.parent_todo_id,
+          data.is_deleted || 0, data.deleted_at,
+          data.created_at, data.updated_at, data.completed_at
+        );
+      }
     } else if (table === 'settings') {
+      const stmt = db.prepare('INSERT OR REPLACE INTO settings (key, value, type, description, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)');
       stmt.run(data.key, data.value, data.type, data.description, data.created_at, data.updated_at);
     } else if (table === 'categories') {
+      const stmt = db.prepare('INSERT OR REPLACE INTO categories (id, name, color, icon, sort_order, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?)');
       stmt.run(data.id, data.name, data.color, data.icon, data.sort_order, data.created_at, data.updated_at);
     } else if (table === 'tags') {
+      const stmt = db.prepare('INSERT OR REPLACE INTO tags (id, name, color, usage_count, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)');
       stmt.run(data.id, data.name, data.color, data.usage_count, data.created_at, data.updated_at);
     }
   }
@@ -1144,23 +1390,44 @@ class NutCloudSyncService extends CloudSyncService {
    * 执行增量同步（覆盖父类的sync方法）
    */
   async sync() {
+    syncLog('[NutCloudSync] ======== 同步开始 ========');
+    syncLog('[NutCloudSync] isEnabled:', this.isEnabled, 'isSyncing:', this.isSyncing);
+    
     if (!this.isEnabled || this.isSyncing) {
+      syncLog('[NutCloudSync] 同步跳过: isEnabled=', this.isEnabled, 'isSyncing=', this.isSyncing);
       return { success: false, message: '同步服务未启用或正在同步中' };
+    }
+
+    // 重置停止标志
+    this.isStopping = false;
+    if (this.incrementalSync) {
+      this.incrementalSync.resetStopFlag();
     }
 
     this.isSyncing = true;
     this.emit('syncStart');
     
     try {
-      console.log('[同步] 开始增量同步...');
+      syncLog('[NutCloudSync] 尝试增量同步...');
       
       // 使用增量同步服务
       const result = await this.incrementalSync.performIncrementalSync();
+      syncLog('[NutCloudSync] 增量同步结果:', result);
       
-      // 如果增量同步失败，回退到全量同步
-      if (!result.success && this.incrementalSync.useFullSyncFallback) {
-        console.warn('[同步] 增量同步失败，回退到全量同步');
-        return await super.sync(); // 调用父类的全量同步
+      // 如果增量同步失败或需要全量同步，回退到全量同步
+      if (!result.success || result.needsFullSync) {
+        syncLog('[NutCloudSync] ★★★ 需要回退到全量同步 ★★★');
+        syncLog('[NutCloudSync] 原因:', result.reason || result.message || '未知原因');
+        const fullSyncResult = await super.sync(); // 调用父类的全量同步
+        syncLog('[NutCloudSync] 全量同步结果:', fullSyncResult);
+        
+        // 全量同步成功后，创建同步初始化标记
+        if (fullSyncResult.success) {
+          await this._markSyncInitialized();
+          syncLog('[NutCloudSync] 已创建同步初始化标记');
+        }
+        
+        return fullSyncResult;
       }
       
       // 同步图片（如果启用）
@@ -1176,8 +1443,9 @@ class NutCloudSyncService extends CloudSyncService {
       }
       
       // 清理云端旧的变更文件（滚动窗口策略）
+      // 减少保留数量，避免文件堆积
       try {
-        await this.cleanupOldChangeFiles(50); // 保留最近50个变更文件
+        await this.cleanupOldChangeFiles(20); // 保留最近20个变更文件，减少存储压力
       } catch (cleanupError) {
         console.warn('[同步] 清理变更文件失败（不影响主流程）:', cleanupError.message);
       }
@@ -1200,23 +1468,53 @@ class NutCloudSyncService extends CloudSyncService {
       return syncResult;
     } catch (error) {
       console.error('[同步] 同步失败:', error);
-      this.emit('syncError', error);
+      console.error('[同步] 错误堆栈:', error.stack);
       
       // 如果启用了回退，尝试全量同步
       if (this.incrementalSync.useFullSyncFallback) {
-        console.warn('[同步] 尝试回退到全量同步...');
+        console.warn('[同步] 增量同步失败，尝试回退到全量同步...');
+        // 注意：不要在这里触发 syncError，让全量同步来决定最终结果
         try {
-          return await super.sync();
+          const fullSyncResult = await super.sync();
+          // 全量同步成功后，创建同步初始化标记
+          if (fullSyncResult.success) {
+            await this._markSyncInitialized();
+            console.log('[同步] 已回退到全量同步并成功完成');
+          }
+          return fullSyncResult;
         } catch (fallbackError) {
           console.error('[同步] 全量同步也失败:', fallbackError);
-          return { success: false, error: fallbackError.message };
+          console.error('[同步] 全量同步错误堆栈:', fallbackError.stack);
+          // 只有在回退也失败时才触发错误事件
+          this.emit('syncError', fallbackError);
+          return { 
+            success: false, 
+            message: fallbackError.message,
+            error: fallbackError.message 
+          };
         }
       }
       
-      return { success: false, error: error.message };
+      // 没有回退机制，直接触发错误事件
+      this.emit('syncError', error);
+      return { 
+        success: false, 
+        message: error.message,
+        error: error.message 
+      };
     } finally {
       this.isSyncing = false;
     }
+  }
+
+  /**
+   * 标记同步已初始化（首次全量同步成功后调用）
+   */
+  async _markSyncInitialized() {
+    const fs = require('fs');
+    const syncMarkerPath = path.join(app.getPath('userData'), 'sync-initialized.marker');
+    fs.writeFileSync(syncMarkerPath, new Date().toISOString());
+    console.log('[同步] 已创建同步初始化标记');
   }
 
   /**
@@ -1472,23 +1770,23 @@ class NutCloudSyncService extends CloudSyncService {
    * @param {number} maxFiles - 保留的最大文件数量
    */
   async cleanupOldChangeFiles(maxFiles = 50) {
-    if (!this.isAuthenticated) {
-      await this.authenticate();
+    if (!this.provider.isAuthenticated) {
+      await this.provider.authenticate();
     }
 
     try {
-      const changesPath = '/FlashNote/incremental/changes';
-      const fullUrl = this.baseUrl + changesPath;
+      // 修正路径：变更文件在 /FlashNote/incremental/ 目录下，不是 /incremental/changes/
+      const changesPath = '/FlashNote/incremental';
+      const fullUrl = this.provider.baseUrl + changesPath;
       console.log(`[变更文件清理] 开始清理，保留最近 ${maxFiles} 个文件...`);
-      console.log(`[变更文件清理] 请求URL: ${fullUrl}`);
 
       // 1. 列出所有变更文件
       const response = await axios({
         method: 'PROPFIND',
         url: fullUrl,
         auth: {
-          username: this.username,
-          password: this.password
+          username: this.provider.username,
+          password: this.provider.password
         },
         headers: {
           'Depth': '1',
@@ -1496,21 +1794,12 @@ class NutCloudSyncService extends CloudSyncService {
         }
       });
 
-      console.log(`[变更文件清理] PROPFIND 响应状态: ${response.status}`);
-      console.log(`[变更文件清理] PROPFIND 响应状态: ${response.status}`);
-      const files = await this._parseWebDAVResponse(response.data);
+      const files = this.provider._parseWebDAVResponse(response.data);
       
-      console.log(`[变更文件清理] 解析到 ${files.length} 个文件/目录`);
-      
-      // 2. 过滤出变更文件（排除目录）
+      // 2. 过滤出变更文件（以 changes- 开头的 JSON 文件）
       const changeFiles = files.filter(file => {
-        const isChangeFile = !file.isDirectory && 
-          file.href.includes('/incremental/changes/') &&
-          file.href.endsWith('.json');
-        if (isChangeFile) {
-          console.log(`[变更文件清理] 变更文件: ${file.href}, 修改时间: ${file.lastModified}`);
-        }
-        return isChangeFile;
+        const filename = file.path.split('/').pop() || '';
+        return filename.startsWith('changes-') && filename.endsWith('.json');
       });
 
       console.log(`[变更文件清理] 找到 ${changeFiles.length} 个变更文件`);
@@ -1519,8 +1808,8 @@ class NutCloudSyncService extends CloudSyncService {
       if (changeFiles.length > maxFiles) {
         // 按修改时间排序（最新的在前）
         changeFiles.sort((a, b) => {
-          const timeA = a.lastModified ? a.lastModified.getTime() : 0;
-          const timeB = b.lastModified ? b.lastModified.getTime() : 0;
+          const timeA = new Date(a.lastModified || 0).getTime();
+          const timeB = new Date(b.lastModified || 0).getTime();
           return timeB - timeA;
         });
 
@@ -1532,22 +1821,23 @@ class NutCloudSyncService extends CloudSyncService {
         let deletedCount = 0;
         for (const file of filesToDelete) {
           try {
+            const deleteUrl = this.provider.baseUrl + file.path;
             await axios({
               method: 'DELETE',
-              url: this.baseUrl + file.href,
+              url: deleteUrl,
               auth: {
-                username: this.username,
-                password: this.password
+                username: this.provider.username,
+                password: this.provider.password
               }
             });
             deletedCount++;
-            console.log(`[变更文件清理] 已删除: ${file.href}`);
+            console.log(`[变更文件清理] 已删除: ${file.path}`);
           } catch (error) {
-            console.error(`[变更文件清理] 删除失败 ${file.href}:`, error.message);
+            console.error(`[变更文件清理] 删除失败 ${file.path}:`, error.message);
           }
         }
 
-        console.log(`[变更文件清理] 完成，删除了 ${deletedCount} 个旧变更文件`);
+        console.log(`[变更文件清理] 完成，删除了 ${deletedCount}/${filesToDelete.length} 个旧变更文件`);
         return deletedCount;
       }
 
@@ -1558,13 +1848,80 @@ class NutCloudSyncService extends CloudSyncService {
       // 404 表示目录不存在，这是正常的
       if (error.response?.status === 404) {
         console.log('[变更文件清理] 变更目录不存在，跳过清理');
-        console.log('[变更文件清理] 请求URL:', error.config?.url);
         return 0;
       }
       console.error('[变更文件清理] 清理失败:', error.message);
-      console.error('[变更文件清理] 错误详情:', error.response?.status, error.response?.statusText);
       // 不抛出错误，避免影响主同步流程
       return 0;
+    }
+  }
+
+  /**
+   * 清理所有变更文件（用于手动清理或重置）
+   */
+  async cleanupAllChangeFiles() {
+    if (!this.provider.isAuthenticated) {
+      await this.provider.authenticate();
+    }
+
+    try {
+      const changesPath = '/FlashNote/incremental';
+      const fullUrl = this.provider.baseUrl + changesPath;
+      console.log('[变更文件清理] 开始清理所有变更文件...');
+
+      // 1. 列出所有变更文件
+      const response = await axios({
+        method: 'PROPFIND',
+        url: fullUrl,
+        auth: {
+          username: this.provider.username,
+          password: this.provider.password
+        },
+        headers: {
+          'Depth': '1',
+          'Content-Type': 'application/xml'
+        }
+      });
+
+      const files = this.provider._parseWebDAVResponse(response.data);
+      
+      // 2. 过滤出变更文件
+      const changeFiles = files.filter(file => {
+        const filename = file.path.split('/').pop() || '';
+        return filename.startsWith('changes-') && filename.endsWith('.json');
+      });
+
+      console.log(`[变更文件清理] 找到 ${changeFiles.length} 个变更文件，准备全部删除`);
+
+      // 3. 逐个删除
+      let deletedCount = 0;
+      for (const file of changeFiles) {
+        try {
+          const deleteUrl = this.provider.baseUrl + file.path;
+          await axios({
+            method: 'DELETE',
+            url: deleteUrl,
+            auth: {
+              username: this.provider.username,
+              password: this.provider.password
+            }
+          });
+          deletedCount++;
+        } catch (error) {
+          console.error(`[变更文件清理] 删除失败 ${file.path}:`, error.message);
+        }
+      }
+
+      console.log(`[变更文件清理] 完成，删除了 ${deletedCount}/${changeFiles.length} 个变更文件`);
+      return { deleted: deletedCount, total: changeFiles.length };
+
+    } catch (error) {
+      if (error.response?.status === 404) {
+        console.log('[变更文件清理] 变更目录不存在');
+        return { deleted: 0, total: 0 };
+      }
+      console.error('[变更文件清理] 清理失败:', error.message);
+      throw error;
     }
   }
 }

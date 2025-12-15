@@ -152,6 +152,36 @@ export const createAppTheme = (mode = 'light', primaryColor = '#1976d2') => {
                     }
                 }
             },
+            MuiDialogTitle: {
+                styleOverrides: {
+                    root: {
+                        padding: '20px 24px 12px',
+                        fontSize: '1.05rem',
+                        fontWeight: 700,
+                        letterSpacing: '-0.01em',
+                    }
+                }
+            },
+            MuiDialogContent: {
+                styleOverrides: {
+                    root: {
+                        padding: '12px 24px 20px',
+                        fontSize: '0.9rem',
+                    },
+                    dividers: {
+                        borderTopColor: alpha(isDark ? '#ffffff' : '#000000', isDark ? 0.08 : 0.10),
+                        borderBottomColor: alpha(isDark ? '#ffffff' : '#000000', isDark ? 0.08 : 0.10),
+                    }
+                }
+            },
+            MuiDialogActions: {
+                styleOverrides: {
+                    root: {
+                        padding: '0 24px 20px',
+                        gap: 8,
+                    }
+                }
+            },
             MuiMenu: {
                 styleOverrides: {
                     paper: {
@@ -160,6 +190,50 @@ export const createAppTheme = (mode = 'light', primaryColor = '#1976d2') => {
                         border: glassBorder,
                         borderRadius: 8,
                         boxShadow: '0 8px 30px rgba(0,0,0,0.12)'
+                    }
+                }
+            },
+            MuiMenuList: {
+                styleOverrides: {
+                    root: {
+                        paddingTop: 8,
+                        paddingBottom: 8,
+                    }
+                }
+            },
+            MuiMenuItem: {
+                styleOverrides: {
+                    root: {
+                        // 恢复接近 MUI 默认密度，避免菜单/列表项过窄
+                        minHeight: 48,
+                        fontSize: '0.875rem',
+                        lineHeight: 1.6,
+                        borderRadius: 10,
+                        marginLeft: 6,
+                        marginRight: 6,
+                        marginTop: 2,
+                        marginBottom: 2,
+                    }
+                }
+            },
+            MuiInputLabel: {
+                styleOverrides: {
+                    root: {
+                        fontSize: '0.85rem',
+                        fontWeight: 600,
+                        letterSpacing: '0.005em',
+                    }
+                }
+            },
+            MuiSelect: {
+                styleOverrides: {
+                    select: {
+                        fontSize: '0.9rem',
+                        paddingTop: 10,
+                        paddingBottom: 10,
+                    },
+                    icon: {
+                        opacity: 0.75,
                     }
                 }
             },
@@ -183,6 +257,33 @@ export const createAppTheme = (mode = 'light', primaryColor = '#1976d2') => {
                                 backgroundColor: alpha(primaryColor, 0.25),
                             },
                         },
+                    }
+                }
+            },
+            MuiListItemText: {
+                defaultProps: {
+                    primaryTypographyProps: {
+                        variant: 'body2',
+                        fontWeight: 600,
+                    },
+                    secondaryTypographyProps: {
+                        variant: 'caption',
+                        color: 'text.secondary',
+                    },
+                },
+                styleOverrides: {
+                    root: {
+                        // 恢复列表项的默认“呼吸感”，避免整体高度被压扁
+                        marginTop: 4,
+                        marginBottom: 4,
+                    },
+                    primary: {
+                        lineHeight: 1.6,
+                    },
+                    secondary: {
+                        display: 'block',
+                        marginTop: 4,
+                        lineHeight: 1.6,
                     }
                 }
             }

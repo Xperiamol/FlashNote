@@ -105,6 +105,18 @@ class CloudSyncManager {
           ...config
         };
         
+        // 如果配置中有 syncInterval，更新同步间隔（分钟转毫秒）
+        if (config.syncInterval !== undefined) {
+          service.instance.syncInterval = Number(config.syncInterval) * 60 * 1000;
+          console.log(`同步间隔已更新为: ${config.syncInterval} 分钟 (${service.instance.syncInterval}ms)`);
+          
+          // 重启自动同步以应用新间隔
+          if (service.instance.config.autoSync) {
+            service.instance.stopAutoSync();
+            await service.instance.startAutoSync();
+          }
+        }
+        
         // 保存配置到文件（调用服务实例的saveConfig方法）
         await service.instance.saveConfig();
         
@@ -289,12 +301,28 @@ class CloudSyncManager {
    * 强制停止同步
    */
   async forceStopSync() {
-    if (!this.activeService) return;
+    if (!this.activeService) {
+      console.log('[CloudSyncManager] 没有活动的同步服务');
+      return;
+    }
 
     const service = this.services.get(this.activeService);
-    if (service?.instance && service.instance.isSyncing) {
-      // 这里需要实现强制停止的逻辑
-      console.log('强制停止同步');
+    if (service?.instance) {
+      console.log('[CloudSyncManager] 请求停止同步服务:', this.activeService);
+      
+      // 设置停止标志
+      if (typeof service.instance.stopSync === 'function') {
+        service.instance.stopSync();
+      }
+      
+      // 如果有增量同步服务，也停止它
+      if (service.instance.incrementalSync && typeof service.instance.incrementalSync.stopSync === 'function') {
+        service.instance.incrementalSync.stopSync();
+      }
+      
+      console.log('[CloudSyncManager] 停止信号已发送');
+    } else {
+      console.log('[CloudSyncManager] 同步服务实例不存在');
     }
   }
 

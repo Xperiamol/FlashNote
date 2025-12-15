@@ -54,7 +54,9 @@ const Toolbar = ({
   calendarShowCompleted,
   onCalendarShowCompletedChange,
   onSelectedDateChange,
-  selectedDate
+  selectedDate,
+  calendarViewMode,
+  onCalendarViewModeChange
 }) => {
   const {
     createNote,
@@ -266,6 +268,15 @@ const Toolbar = ({
               type: 'checkbox',
               label: t('todos.showCompleted'),
               key: 'showCompleted'
+            },
+            {
+              type: 'calendarViewMode',
+              position: 'right',
+              options: [
+                { value: 'todos', label: t('sidebar.calendarViewMode.todos') },
+                { value: 'notes', label: t('sidebar.calendarViewMode.notes') },
+                { value: 'focus', label: t('sidebar.calendarViewMode.focus') }
+              ]
             }
           ]
         };
@@ -399,15 +410,47 @@ const Toolbar = ({
         )}
       </Box>
 
-      {/* 居中区域 - 日历导航和待办视图切换 */}
+
+
+      {/* 居中区域 - 日历视图模式选择器和待办视图切换 */}
       {viewConfig.customButtons && (
         <Box sx={{ display: 'flex', alignItems: 'center', gap: 2, position: 'absolute', left: '50%', transform: 'translateX(-50%)' }}>
           {viewConfig.customButtons
             .filter(button =>
-              button.type === 'calendarNavigation' ||
+              (button.type === 'calendarViewMode' && button.position === 'right') ||
               (button.type === 'viewToggle' && button.position === 'center')
             )
             .map((button, index) => {
+              if (button.type === 'calendarViewMode') {
+                return (
+                  <ButtonGroup key={index} size="small" variant="outlined">
+                    {button.options.map((option) => (
+                      <Button
+                        key={option.value}
+                        variant={(calendarViewMode || 'todos') === option.value ? 'contained' : 'outlined'}
+                        onClick={() => {
+                          console.log('Calendar view mode clicked:', option.value);
+                          if (onCalendarViewModeChange) {
+                            onCalendarViewModeChange(option.value);
+                          }
+                        }}
+                        sx={{
+                          px: 2,
+                          ...((calendarViewMode || 'todos') === option.value && {
+                            backgroundColor: 'primary.main',
+                            color: 'primary.contrastText',
+                            '&:hover': {
+                              backgroundColor: 'primary.dark'
+                            }
+                          })
+                        }}
+                      >
+                        {option.label}
+                      </Button>
+                    ))}
+                  </ButtonGroup>
+                );
+              }
               if (button.type === 'viewToggle') {
                 return (
                   <ButtonGroup key={index} size="small" variant="outlined">
@@ -527,10 +570,106 @@ const Toolbar = ({
         </Box>
       )}
 
+      {/* 右侧区域 - 日历导航按钮 */}
+      {currentView === 'calendar' && viewConfig.customButtons && (
+        <Box sx={{ display: 'flex', alignItems: 'center', gap: 2, ml: 'auto' }}>
+          {viewConfig.customButtons
+            .filter(button => button.type === 'calendarNavigation')
+            .map((button, index) => (
+              <Box key={index} sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+                <Tooltip title={t('common.previous')}>
+                  <IconButton
+                    onClick={goToPreviousMonth}
+                    size="small"
+                    sx={{
+                      backgroundColor: 'background.paper',
+                      border: 1,
+                      borderColor: 'divider',
+                      '&:hover': {
+                        backgroundColor: 'primary.main',
+                        color: 'primary.contrastText',
+                        transform: 'scale(1.05)'
+                      },
+                      transition: createTransitionString(ANIMATIONS.button)
+                    }}
+                  >
+                    <ChevronLeft />
+                  </IconButton>
+                </Tooltip>
+
+                <Box
+                  sx={{
+                    minWidth: '140px',
+                    textAlign: 'center',
+                    px: 2,
+                    py: 0.5,
+                    borderRadius: 1,
+                    backgroundColor: 'primary.main',
+                    color: 'primary.contrastText'
+                  }}
+                >
+                  <Typography
+                    variant="body2"
+                    sx={{
+                      fontWeight: 600,
+                      fontSize: '0.875rem'
+                    }}
+                  >
+                    {button.currentDate ?
+                      `${button.currentDate.getFullYear()}年${button.currentDate.getMonth() + 1}月` :
+                      t('sidebar.calendar')
+                    }
+                  </Typography>
+                </Box>
+
+                <Tooltip title={t('common.next')}>
+                  <IconButton
+                    onClick={goToNextMonth}
+                    size="small"
+                    sx={{
+                      backgroundColor: 'background.paper',
+                      border: 1,
+                      borderColor: 'divider',
+                      '&:hover': {
+                        backgroundColor: 'primary.main',
+                        color: 'primary.contrastText',
+                        transform: 'scale(1.05)'
+                      },
+                      transition: createTransitionString(ANIMATIONS.button)
+                    }}
+                  >
+                    <ChevronRight />
+                  </IconButton>
+                </Tooltip>
+
+                <Tooltip title={t('common.today')}>
+                  <IconButton
+                    onClick={goToToday}
+                    size="small"
+                    color="primary"
+                    sx={{
+                      backgroundColor: 'primary.main',
+                      color: 'primary.contrastText',
+                      '&:hover': {
+                        backgroundColor: 'primary.dark',
+                        transform: 'scale(1.1)'
+                      },
+                      transition: createTransitionString(ANIMATIONS.button),
+                      ml: 1
+                    }}
+                  >
+                    <Today />
+                  </IconButton>
+                </Tooltip>
+              </Box>
+            ))}
+        </Box>
+      )}
+
       {/* 动态标题已移除 */}
 
       {/* 右侧按钮组 */}
-      <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, ml: 'auto' }}>
+      <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, ml: currentView === 'calendar' ? 0 : 'auto' }}>
         {currentView === 'notes' && noteToolbarCommands.length > 0 && (
           <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5, mr: 0.5 }}>
             {noteToolbarCommands.map((command) => {

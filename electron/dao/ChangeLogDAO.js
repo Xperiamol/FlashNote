@@ -1,7 +1,11 @@
 const { getInstance } = require('./DatabaseManager');
+const { getInstance: getDeviceIdManager } = require('../utils/DeviceIdManager');
 
 /**
  * 变更日志DAO - 用于追踪数据变更以支持增量同步
+ * 
+ * 注意：entity_id 存储的是 sync_id（UUID），而不是整数 id。
+ * 这样可以确保跨设备同步时能正确识别实体。
  */
 class ChangeLogDAO {
   constructor() {
@@ -18,19 +22,31 @@ class ChangeLogDAO {
   /**
    * 记录变更
    * @param {string} entityType - 实体类型 ('note' 或 'todo')
-   * @param {number} entityId - 实体ID
+   * @param {string|number} entityId - 实体ID（优先使用 sync_id）
    * @param {string} operation - 操作类型 ('create', 'update', 'delete', 'restore')
    * @param {object} changeData - 变更数据 (可选)
    */
   logChange(entityType, entityId, operation, changeData = null) {
     const db = this.getDB();
+    
+    // 优先使用 changeData 中的 sync_id 作为实体标识符
+    // 这确保了跨设备同步时能正确识别实体
+    let syncEntityId = entityId;
+    if (changeData && changeData.sync_id) {
+      syncEntityId = changeData.sync_id;
+    }
+
+    // 获取设备ID和高精度时间戳
+    const deviceId = getDeviceIdManager().getDeviceId();
+    const createdAt = new Date().toISOString();
+    
     const stmt = db.prepare(`
-      INSERT INTO changes (entity_type, entity_id, operation, change_data)
-      VALUES (?, ?, ?, ?)
+      INSERT INTO changes (entity_type, entity_id, operation, change_data, device_id, created_at)
+      VALUES (?, ?, ?, ?, ?, ?)
     `);
     
     const changeDataJson = changeData ? JSON.stringify(changeData) : null;
-    const result = stmt.run(entityType, entityId, operation, changeDataJson);
+    const result = stmt.run(entityType, syncEntityId, operation, changeDataJson, deviceId, createdAt);
     return result.lastInsertRowid;
   }
 
@@ -71,6 +87,20 @@ class ChangeLogDAO {
       ...change,
       change_data: change.change_data ? JSON.parse(change.change_data) : null
     }));
+  }
+
+  /**
+   * 获取指定实体的未同步变更
+   * @param {string} entityType - 实体类型
+   * @param {string} entityId - 实体ID (sync_id)
+   */
+  getUnsyncedChangesForEntity(entityType, entityId) {
+    const db = this.getDB();
+    const stmt = db.prepare(`
+      SELECT * FROM changes 
+      WHERE entity_type = ? AND entity_id = ? AND synced = 0
+    `);
+    return stmt.all(entityType, entityId);
   }
 
   /**

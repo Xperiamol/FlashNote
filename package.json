@@ -1,7 +1,7 @@
 {
   "name": "flashnote",
   "version": "2.2.2",
-  "description": "闪念速记 V2.2.2 Zeta - 现代化本地笔记应用",
+  "description": "FlashNote 2.2.2 eta - 现代化本地笔记应用",
   "main": "electron/main.js",
   "homepage": "./",
   "scripts": {
@@ -12,7 +12,7 @@
     "electron-dev": "concurrently \"npm run dev\" \"wait-on http://localhost:5174 && cross-env NODE_ENV=development electron .\"",
     "pre-build": "node scripts/pre-download-models.js",
     "electron-build": "npm run pre-build && npm run build && electron-builder",
-    "repair-db": "node scripts/repair-database.js",
+    "repair-db": "node scripts/fix-corrupted-db.js",
     "check-db": "node scripts/check-database.js",
     "test": "echo \"Error: no test specified\" && exit 1"
   },
@@ -76,7 +76,7 @@
   },
   "build": {
     "appId": "com.flashnote.app",
-    "productName": "FlashNote 2.2.2 Zeta",
+    "productName": "FlashNote",
     "directories": {
       "output": "dist-electron"
     },
@@ -87,6 +87,11 @@
       "node_modules/**/*"
     ],
     "extraResources": [
+      {
+        "from": ".env",
+        "to": ".env",
+        "filter": "**/*"
+      },
       {
         "from": "logo.png",
         "to": "logo.png"
@@ -131,7 +136,7 @@
       "createDesktopShortcut": true,
       "createStartMenuShortcut": true,
       "deleteAppDataOnUninstall": false,
-      "uninstallDisplayName": "FlashNote 2.2.2 Zeta",
+      "uninstallDisplayName": "FlashNote 2.2.2 eta",
       "include": "build/installer.nsh"
     }
   }

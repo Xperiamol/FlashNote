@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import { useTranslation } from '../utils/i18n';
 import {
   Box,
   Typography,
@@ -13,6 +14,7 @@ import {
   CircularProgress,
   List,
   ListItem,
+  ListItemButton,
   ListItemText,
   ListItemSecondaryAction,
   Divider,
@@ -21,6 +23,7 @@ import {
 import { Sync, CheckCircle, CloudSync, Google as GoogleIcon, LinkOff } from '@mui/icons-material';
 
 const GoogleCalendarSettings = () => {
+  const { t } = useTranslation();
   const [config, setConfig] = useState({
     enabled: false,
     connected: false,
@@ -78,7 +81,7 @@ const GoogleCalendarSettings = () => {
   // 开始 OAuth 授权 (使用本地服务器自动接收)
   const handleStartAuth = async () => {
     setAuthorizing(true);
-    setMessage({ type: 'info', text: '正在启动授权流程,浏览器即将打开...' });
+    setMessage({ type: 'info', text: t('googleCalendar.startAuthInfo') });
     
     try {
       // 新版本:本地服务器自动接收授权,无需手动输入授权码
@@ -88,19 +91,33 @@ const GoogleCalendarSettings = () => {
         // 授权成功,直接获得日历列表
         setCalendars(result.data.calendars);
         setConfig({ ...config, connected: true });
-        setMessage({ type: 'success', text: `授权成功！找到 ${result.data.calendars.length} 个日历` });
+        setMessage({
+          type: 'success',
+          text: t('googleCalendar.authSuccess', { count: result.data.calendars.length })
+        });
       } else {
         // 显示详细错误信息
-        const errorLines = result.error.split('\n');
+        console.error('[GoogleCalendar] 授权失败:', result.error);
+        
+        // 解析错误信息
+        const errorMsg = result.error || '授权失败';
+        const isInvalidRequest = errorMsg.toLowerCase().includes('invalid');
+        
+        // 构建用户友好的错误提示
+        let displayMsg = errorMsg;
+        if (isInvalidRequest) {
+          displayMsg = '授权请求无效。这通常是因为：\n\n' +
+            '1. 重定向 URI 未在 Google Cloud Console 中配置\n' +
+            '2. 客户端 ID 或密钥配置错误\n' +
+            '3. 网络连接问题\n\n' +
+            '请查看文档 docs/GOOGLE_CALENDAR_OAUTH_SETUP.md 了解详细配置步骤。\n\n' +
+            '或者按 Ctrl+Shift+I 打开开发者工具查看详细日志。';
+        }
+        
         setMessage({ 
           type: 'error', 
-          text: errorLines[0] // 显示第一行
+          text: displayMsg
         });
-        
-        // 如果有详细信息,在控制台显示
-        if (errorLines.length > 1) {
-          console.error('[GoogleCalendar] 详细错误:', result.error);
-        }
       }
     } catch (error) {
       setMessage({ type: 'error', text: error.message });
@@ -117,7 +134,7 @@ const GoogleCalendarSettings = () => {
       if (result.success) {
         setConfig({ ...config, enabled: false, connected: false, calendarId: '' });
         setCalendars([]);
-        setMessage({ type: 'success', text: '已断开 Google Calendar 连接' });
+        setMessage({ type: 'success', text: t('googleCalendar.disconnectSuccess') });
       } else {
         setMessage({ type: 'error', text: result.error });
       }
@@ -132,7 +149,7 @@ const GoogleCalendarSettings = () => {
       const result = await window.electronAPI.invoke('google-calendar:save-config', config);
 
       if (result.success) {
-        setMessage({ type: 'success', text: '配置已保存' });
+        setMessage({ type: 'success', text: t('googleCalendar.saveSuccess') });
         await loadStatus();
       } else {
         setMessage({ type: 'error', text: result.error });
@@ -153,7 +170,10 @@ const GoogleCalendarSettings = () => {
       if (result.success) {
         setMessage({
           type: 'success',
-          text: `同步完成！上传: ${result.data.localToRemote}, 下载: ${result.data.remoteToLocal}`,
+          text: t('googleCalendar.syncComplete', {
+            up: result.data.localToRemote,
+            down: result.data.remoteToLocal
+          })
         });
         await loadStatus();
       } else {
@@ -167,8 +187,20 @@ const GoogleCalendarSettings = () => {
   };
 
   // 选择日历
-  const handleSelectCalendar = (calendarId) => {
+  const handleSelectCalendar = async (calendarId) => {
     setConfig({ ...config, calendarId });
+    // 立即保存以保持与 SyncStatusIndicator 同步
+    try {
+      const result = await window.electronAPI.invoke('google-calendar:save-config', {
+        ...config,
+        calendarId
+      });
+      if (result.success) {
+        await loadStatus();
+      }
+    } catch (error) {
+      console.error('保存配置失败:', error);
+    }
   };
 
   return (
@@ -180,24 +212,39 @@ const GoogleCalendarSettings = () => {
       )}
 
       <List>
-        {/* 启用开关 (仅在连接后显示) */}
+        {/* 同步开关 - 移到最上面 */}
         <ListItem disabled={!config.connected}>
           <ListItemText
-            primary="启用日历同步"
+            primary={t('googleCalendar.enableSync')}
             secondary={
-              !config.connected 
-                ? '请先连接 Google 账号' 
-                : (status && config.enabled && lastSync ? `上次同步: ${new Date(lastSync).toLocaleString('zh-CN')}` : '开启后自动同步日历事件')
+              !config.connected
+                ? t('googleCalendar.needConnectFirst')
+                : (status && config.enabled && lastSync
+                    ? t('googleCalendar.lastSync', { time: new Date(lastSync).toLocaleString('zh-CN') })
+                    : t('googleCalendar.enableSyncDesc'))
             }
           />
           <ListItemSecondaryAction>
             <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-              {status && config.enabled && status.syncing && (
-                <CircularProgress size={20} />
-              )}
+              {status && config.enabled && status.syncing && <CircularProgress size={20} />}
               <Switch
                 checked={config.enabled}
-                onChange={(e) => setConfig({ ...config, enabled: e.target.checked })}
+                onChange={async (e) => {
+                  const newEnabled = e.target.checked;
+                  setConfig({ ...config, enabled: newEnabled });
+                  // 立即保存以保持与 SyncStatusIndicator 同步
+                  try {
+                    const result = await window.electronAPI.invoke('google-calendar:save-config', {
+                      ...config,
+                      enabled: newEnabled
+                    });
+                    if (result.success) {
+                      await loadStatus();
+                    }
+                  } catch (error) {
+                    console.error('保存配置失败:', error);
+                  }
+                }}
                 disabled={!config.connected}
               />
             </Box>
@@ -209,38 +256,53 @@ const GoogleCalendarSettings = () => {
         {/* 账号连接 */}
         <ListItem>
           <Box sx={{ width: '100%' }}>
-            <Typography variant="subtitle2" sx={{ mb: 2 }}>账号连接</Typography>
+            <Typography variant="subtitle2" sx={{ mb: 1 }}>
+              {t('googleCalendar.accountConnection')}
+            </Typography>
             
             {!config.connected ? (
-              <Box sx={{ textAlign: 'center', py: 2, bgcolor: 'action.hover', borderRadius: 1 }}>
+              <Box
+                sx={{
+                  textAlign: 'center',
+                  py: 2,
+                  px: 2,
+                }}
+              >
                 <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
-                  使用 OAuth 2.0 安全授权,无需密码
+                  {t('googleCalendar.oauthHint')}
                 </Typography>
                 
                 {authorizing ? (
                   <Box sx={{ display: 'flex', flexDirection: 'column', alignItems: 'center' }}>
                     <CircularProgress size={24} sx={{ mb: 1 }} />
                     <Typography variant="caption" color="text.secondary">
-                      正在授权,请在浏览器中完成操作...
+                      {t('googleCalendar.authorizing')}
                     </Typography>
                   </Box>
                 ) : (
                   <Button
                     variant="contained"
+                    size="small"
                     startIcon={<GoogleIcon />}
                     onClick={handleStartAuth}
-                    sx={{ bgcolor: '#4285f4', '&:hover': { bgcolor: '#357ae8' } }}
                   >
-                    连接 Google 账号
+                    {t('googleCalendar.connectAccount')}
                   </Button>
                 )}
               </Box>
             ) : (
-              <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', p: 2, bgcolor: 'success.lighter', borderRadius: 1, border: '1px solid', borderColor: 'success.light' }}>
+              <Box
+                sx={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'space-between',
+                  p: 2,
+                }}
+              >
                 <Box sx={{ display: 'flex', alignItems: 'center' }}>
                   <CheckCircle color="success" sx={{ mr: 1 }} />
                   <Typography variant="body2">
-                    已连接到 Google Calendar
+                    {t('googleCalendar.connected')}
                   </Typography>
                 </Box>
                 <Button
@@ -250,12 +312,16 @@ const GoogleCalendarSettings = () => {
                   startIcon={<LinkOff />}
                   onClick={handleDisconnect}
                 >
-                  断开连接
+                  {t('googleCalendar.disconnect')}
                 </Button>
               </Box>
             )}
           </Box>
         </ListItem>
+
+        <Divider />
+
+
 
         {/* 日历选择 */}
         {config.connected && calendars.length > 0 && (
@@ -263,31 +329,37 @@ const GoogleCalendarSettings = () => {
             <Divider />
             <ListItem>
               <Box sx={{ width: '100%' }}>
-                <Typography variant="subtitle2" sx={{ mb: 2 }}>选择日历</Typography>
+                <Typography variant="subtitle2" sx={{ mb: 1 }}>
+                  {t('googleCalendar.selectCalendar')}
+                </Typography>
                 <List disablePadding>
                   {calendars.map((cal) => (
                     <ListItem
                       key={cal.id}
-                      button
-                      selected={config.calendarId === cal.id}
-                      onClick={() => handleSelectCalendar(cal.id)}
-                      sx={{
-                        border: '1px solid',
-                        borderColor: config.calendarId === cal.id ? 'primary.main' : 'divider',
-                        borderRadius: 1,
-                        mb: 1,
-                      }}
+                      disablePadding
+                      sx={{ mb: 1 }}
                     >
-                      <ListItemText
-                        primary={
-                          <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-                            {cal.displayName}
-                            {cal.primary && <Chip label="主日历" size="small" color="primary" />}
-                          </Box>
-                        }
-                        secondary={cal.description || `访问权限: ${cal.accessRole}`}
-                      />
-                      {config.calendarId === cal.id && <CheckCircle color="primary" />}
+                      <ListItemButton
+                        selected={config.calendarId === cal.id}
+                        onClick={() => handleSelectCalendar(cal.id)}
+                        sx={{
+                          border: '1px solid',
+                          borderColor: config.calendarId === cal.id ? 'primary.main' : 'divider',
+                          borderRadius: 1,
+                        }}
+                      >
+                        <ListItemText
+                          primary={
+                            <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+                              {cal.displayName}
+                              {cal.primary && <Chip label={t('googleCalendar.primaryCalendar')} size="small" color="primary" />}
+                            </Box>
+                          }
+                          primaryTypographyProps={{ component: 'div' }}
+                          secondary={cal.description || `访问权限: ${cal.accessRole}`}
+                        />
+                        {config.calendarId === cal.id && <CheckCircle color="primary" />}
+                      </ListItemButton>
                     </ListItem>
                   ))}
                 </List>
@@ -302,35 +374,58 @@ const GoogleCalendarSettings = () => {
             <Divider />
             <ListItem>
               <Box sx={{ width: '100%' }}>
-                <Typography variant="subtitle2" sx={{ mb: 2 }}>同步选项</Typography>
+                <Typography variant="subtitle2" sx={{ mb: 1 }}>
+                  {t('googleCalendar.syncOptions')}
+                </Typography>
                 <FormControl fullWidth sx={{ mb: 2 }} size="small">
-                  <InputLabel>同步方向</InputLabel>
+                  <InputLabel>{t('googleCalendar.syncDirection')}</InputLabel>
                   <Select
                     value={config.syncDirection}
-                    label="同步方向"
-                    onChange={(e) => setConfig({ ...config, syncDirection: e.target.value })}
+                    label={t('googleCalendar.syncDirection')}
+                    onChange={async (e) => {
+                      const newDirection = e.target.value;
+                      setConfig({ ...config, syncDirection: newDirection });
+                      // 立即保存以保持与 SyncStatusIndicator 同步
+                      try {
+                        const result = await window.electronAPI.invoke('google-calendar:save-config', {
+                          ...config,
+                          syncDirection: newDirection
+                        });
+                        if (result.success) {
+                          await loadStatus();
+                        }
+                      } catch (error) {
+                        console.error('保存配置失败:', error);
+                      }
+                    }}
                   >
                     <MenuItem value="bidirectional">
                       <Box>
-                        <Typography>双向同步</Typography>
-                        <Typography variant="caption" color="text.secondary">
-                          FlashNote ↔ Google Calendar (推荐)
+                        <Typography variant="body2" sx={{ fontWeight: 600 }}>
+                          {t('googleCalendar.directionBidirectionalTitle')}
+                        </Typography>
+                        <Typography variant="caption" color="text.secondary" sx={{ display: 'block' }}>
+                          {t('googleCalendar.directionBidirectionalDesc')}
                         </Typography>
                       </Box>
                     </MenuItem>
                     <MenuItem value="upload">
                       <Box>
-                        <Typography>仅上传</Typography>
-                        <Typography variant="caption" color="text.secondary">
-                          FlashNote → Google Calendar
+                        <Typography variant="body2" sx={{ fontWeight: 600 }}>
+                          {t('googleCalendar.directionUploadTitle')}
+                        </Typography>
+                        <Typography variant="caption" color="text.secondary" sx={{ display: 'block' }}>
+                          {t('googleCalendar.directionUploadDesc')}
                         </Typography>
                       </Box>
                     </MenuItem>
                     <MenuItem value="download">
                       <Box>
-                        <Typography>仅下载</Typography>
-                        <Typography variant="caption" color="text.secondary">
-                          Google Calendar → FlashNote
+                        <Typography variant="body2" sx={{ fontWeight: 600 }}>
+                          {t('googleCalendar.directionDownloadTitle')}
+                        </Typography>
+                        <Typography variant="caption" color="text.secondary" sx={{ display: 'block' }}>
+                          {t('googleCalendar.directionDownloadDesc')}
                         </Typography>
                       </Box>
                     </MenuItem>
@@ -338,11 +433,26 @@ const GoogleCalendarSettings = () => {
                 </FormControl>
 
                 <FormControl fullWidth size="small">
-                  <InputLabel>自动同步间隔</InputLabel>
+                  <InputLabel>{t('googleCalendar.syncInterval')}</InputLabel>
                   <Select
                     value={config.syncInterval}
-                    label="自动同步间隔"
-                    onChange={(e) => setConfig({ ...config, syncInterval: e.target.value })}
+                    label={t('googleCalendar.syncInterval')}
+                    onChange={async (e) => {
+                      const newInterval = e.target.value;
+                      setConfig({ ...config, syncInterval: newInterval });
+                      // 立即保存以保持与 SyncStatusIndicator 同步
+                      try {
+                        const result = await window.electronAPI.invoke('google-calendar:save-config', {
+                          ...config,
+                          syncInterval: newInterval
+                        });
+                        if (result.success) {
+                          await loadStatus();
+                        }
+                      } catch (error) {
+                        console.error('保存配置失败:', error);
+                      }
+                    }}
                   >
                     <MenuItem value="15">15 分钟</MenuItem>
                     <MenuItem value="30">30 分钟</MenuItem>
@@ -365,7 +475,7 @@ const GoogleCalendarSettings = () => {
                   startIcon={<CheckCircle />}
                   onClick={handleSave}
                 >
-                  保存配置
+                  {t('googleCalendar.saveConfig')}
                 </Button>
 
                 <Button
@@ -375,7 +485,7 @@ const GoogleCalendarSettings = () => {
                   onClick={handleSyncNow}
                   disabled={!config.enabled || syncing || !config.calendarId}
                 >
-                  立即同步
+                  {t('googleCalendar.syncNow')}
                 </Button>
               </Box>
             </ListItem>
@@ -388,7 +498,7 @@ const GoogleCalendarSettings = () => {
         <ListItem>
           <Box>
             <Typography variant="subtitle2" gutterBottom color="text.secondary">
-              ✨ 特点
+              特点
             </Typography>
             <Typography variant="body2" color="text.secondary">
               • 使用 OAuth 2.0 安全授权,无需密码<br />
@@ -399,7 +509,7 @@ const GoogleCalendarSettings = () => {
             </Typography>
             
             <Typography variant="subtitle2" gutterBottom color="text.secondary" sx={{ mt: 2 }}>
-              📖 使用说明
+              使用说明
             </Typography>
             <Typography variant="body2" color="text.secondary">
               1. 点击"连接 Google 账号"按钮<br />

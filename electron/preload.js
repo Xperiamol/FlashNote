@@ -324,6 +324,10 @@ contextBridge.exposeInMainWorld('electronAPI', {
     repair: () => ipcRenderer.invoke('db:repair')
   },
 
+  // 同步诊断和修复
+  diagnoseSync: () => ipcRenderer.invoke('sync:diagnose'),
+  fixMissingSyncId: () => ipcRenderer.invoke('sync:fix-missing-sync-id'),
+
   // 悬浮球相关API
   floatingBall: {
     create: () => ipcRenderer.invoke('floating-ball:create'),
@@ -333,8 +337,8 @@ contextBridge.exposeInMainWorld('electronAPI', {
 
   // 快捷键相关API
   shortcuts: {
-    // 更新快捷键
-    update: (shortcutId, newShortcut) => ipcRenderer.invoke('shortcut:update', shortcutId, newShortcut),
+    // 更新快捷键（支持传递完整配置）
+    update: (shortcutId, newShortcut, action, allShortcuts) => ipcRenderer.invoke('shortcut:update', shortcutId, newShortcut, action, allShortcuts),
 
     // 重置单个快捷键
     reset: (shortcutId) => ipcRenderer.invoke('shortcut:reset', shortcutId),
@@ -372,8 +376,11 @@ contextBridge.exposeInMainWorld('electronAPI', {
     // 保存白板图片
     saveImages: (files) => ipcRenderer.invoke('whiteboard:save-images', files),
 
-    // 加载白板图片
+    // 加载白板图片（批量）
     loadImages: (fileMap) => ipcRenderer.invoke('whiteboard:load-images', fileMap),
+
+    // 加载单个白板图片
+    loadImage: (fileName) => ipcRenderer.invoke('whiteboard:load-image', fileName),
 
     // 删除白板图片
     deleteImages: (fileMap) => ipcRenderer.invoke('whiteboard:delete-images', fileMap),

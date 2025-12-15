@@ -42,5 +42,6 @@
     }
   ],
   "minAppVersion": "2.1.0",
-  "author": "FlashNote Team"
+  "author": "FlashNote Team",
+  "categories": ["AI"]
 }

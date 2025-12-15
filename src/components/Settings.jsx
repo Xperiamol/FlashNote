@@ -131,6 +131,14 @@ const Settings = () => {
 
     const loadShortcuts = async () => {
         try {
+            // 如果ShortcutManager已经初始化且有配置，直接使用
+            if (shortcutManager.isInitialized && shortcutManager.shortcuts && Object.keys(shortcutManager.shortcuts).length > 0) {
+                console.log('使用已初始化的快捷键配置');
+                setShortcuts(shortcutManager.shortcuts);
+                return;
+            }
+            
+            // 否则才初始化
             await shortcutManager.initialize();
             // 确保shortcuts不为空对象
             if (shortcutManager.shortcuts && Object.keys(shortcutManager.shortcuts).length > 0) {
@@ -296,18 +304,31 @@ const Settings = () => {
 
     // 快捷键管理 - 提取公共逻辑，遵循DRY原则
     const saveShortcut = async (shortcutId, updatedShortcuts) => {
-        // 通过ShortcutManager更新配置
-        shortcutManager.updateShortcuts(updatedShortcuts);
+        try {
+            // 1. 通过ShortcutManager更新前端配置
+            shortcutManager.updateShortcuts(updatedShortcuts);
 
-        // 保存到设置
-        if (window.electronAPI?.settings) {
-            await window.electronAPI.settings.set('shortcuts', updatedShortcuts);
-        }
-
-        // 通知主进程更新全局快捷键
-        const shortcut = updatedShortcuts[shortcutId];
-        if (shortcut.type === 'global' && window.electronAPI?.shortcuts) {
-            await window.electronAPI.shortcuts.update(shortcutId, shortcut.currentKey, shortcut.action);
+            // 2. 通知主进程更新快捷键配置（主进程会保存完整配置到数据库）
+            const shortcut = updatedShortcuts[shortcutId];
+            if (window.electronAPI?.shortcuts) {
+                // 调用 shortcut:update IPC handler，传递完整配置
+                const result = await window.electronAPI.shortcuts.update(
+                    shortcutId, 
+                    shortcut.currentKey, 
+                    shortcut.action,
+                    updatedShortcuts // 传递完整配置，让主进程保存
+                );
+                
+                if (!result.success) {
+                    console.error(`更新快捷键 ${shortcutId} 失败:`, result.error);
+                    throw new Error(result.error || '更新快捷键失败');
+                }
+                
+                console.log(`快捷键 ${shortcutId} 已成功更新并保存`);
+            }
+        } catch (error) {
+            console.error(`保存快捷键 ${shortcutId} 失败:`, error);
+            throw error;
         }
     };
 
@@ -336,15 +357,19 @@ const Settings = () => {
                     currentKey: newKey
                 }
             };
-            setShortcuts(updatedShortcuts);
 
-            // 4. 保存快捷键
+            // 4. 保存快捷键（先保存再更新UI，确保数据一致性）
             await saveShortcut(shortcutId, updatedShortcuts);
+            
+            // 5. 保存成功后才更新UI状态
+            setShortcuts(updatedShortcuts);
 
             showSnackbar(t('settings.shortcutUpdated'), 'success');
         } catch (error) {
             console.error('Failed to update shortcut:', error);
             showSnackbar(t('settings.shortcutUpdateFailed'), 'error');
+            // 保存失败，重新加载以恢复正确状态
+            await loadShortcuts();
         }
     };
 
@@ -405,6 +430,7 @@ const Settings = () => {
                                         variant={settings.theme === 'light' ? 'filled' : 'outlined'}
                                         onClick={() => handleSettingChange('theme', 'light')}
                                         size="small"
+                                        color={settings.theme === 'light' ? 'primary' : 'default'}
                                     />
                                     <Chip
                                         icon={<Brightness4 />}
@@ -412,6 +438,7 @@ const Settings = () => {
                                         variant={settings.theme === 'dark' ? 'filled' : 'outlined'}
                                         onClick={() => handleSettingChange('theme', 'dark')}
                                         size="small"
+                                        color={settings.theme === 'dark' ? 'primary' : 'default'}
                                     />
                                     <Chip
                                         icon={<Computer />}
@@ -419,6 +446,7 @@ const Settings = () => {
                                         variant={settings.theme === 'system' ? 'filled' : 'outlined'}
                                         onClick={() => handleSettingChange('theme', 'system')}
                                         size="small"
+                                        color={settings.theme === 'system' ? 'primary' : 'default'}
                                     />
                                 </Box>
                             </ListItemSecondaryAction>
@@ -476,7 +504,7 @@ const Settings = () => {
                                             variant={settings.language === lang.code ? 'filled' : 'outlined'}
                                             onClick={() => handleSettingChange('language', lang.code)}
                                             size="small"
-                                            color={settings.language === lang.code ? 'primary' : 'primary'}
+                                            color={settings.language === lang.code ? 'primary' : 'default'}
                                         />
                                     ))}
                                 </Box>
@@ -568,6 +596,7 @@ const Settings = () => {
                             <Box sx={{ width: '100%', pt: 1, pb: 1 }}>
                                 <TextField
                                     fullWidth
+                                    size="small"
                                     label={t('settings.userName')}
                                     value={settings.userName}
                                     onChange={(e) => {
@@ -740,10 +769,10 @@ const Settings = () => {
 
                         return (
                             <Box key={categoryKey} sx={{ mb: 3 }}>
-                                <Typography variant="subtitle1" sx={{ mb: 2, fontWeight: 'bold' }}>
+                                <Typography variant="subtitle2" sx={{ mb: 1.5, fontWeight: 700 }}>
                                     {category.name}
                                 </Typography>
-                                <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
+                                <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mb: 2 }}>
                                     {category.description}
                                 </Typography>
 
@@ -774,9 +803,9 @@ const Settings = () => {
                                                         onValidationChange={(isValid) => {
                                                             // 可以在这里处理验证状态
                                                         }}
-                                                        disabled={true}
+                                                        disabled={false}
                                                         label=""
-                                                        placeholder={t('settings.shortcutDisabled')}
+                                                        placeholder={t('settings.clickToSetShortcut')}
                                                     />
                                                 </Box>
                                             </ListItem>
@@ -825,6 +854,7 @@ const Settings = () => {
                             <ListItemSecondaryAction>
                                 <Button
                                     variant="contained"
+                                    size="small"
                                     startIcon={<ImportIcon />}
                                     onClick={handleImportData}
                                 >
@@ -874,6 +904,7 @@ const Settings = () => {
                         <Box sx={{ display: 'flex', justifyContent: 'center', gap: 2 }}>
                             <Button
                                 variant="outlined"
+                                size="small"
                                 startIcon={<Launch />}
                                 onClick={() => {
                                     if (window.electronAPI?.system) {
@@ -904,7 +935,7 @@ const Settings = () => {
                     <LinearProgress variant="determinate" value={importProgress} />
                 </DialogContent>
                 <DialogActions>
-                    <Button onClick={() => setImportDialog(false)} disabled={importProgress > 0 && importProgress < 100}>
+                    <Button size="small" onClick={() => setImportDialog(false)} disabled={importProgress > 0 && importProgress < 100}>
                         {importProgress === 100 ? t('dialog.done') : t('dialog.cancel')}
                     </Button>
                 </DialogActions>

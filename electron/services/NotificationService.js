@@ -1,4 +1,4 @@
-const { Notification } = require('electron');
+const { Notification, nativeImage } = require('electron');
 const EventEmitter = require('events');
 const TimeZoneUtils = require('../utils/timeZoneUtils');
 
@@ -135,14 +135,15 @@ class NotificationService extends EventEmitter {
     }
 
     try {
+      const iconPath = this.getNotificationIcon(todo);
       const notification = new Notification({
-        title: '待办事项提醒',
+        title: '待办提醒',
         body: this.formatNotificationBody(todo),
-        icon: this.getNotificationIcon(todo),
+        icon: iconPath ? nativeImage.createFromPath(iconPath) : undefined,
         urgency: this.getNotificationUrgency(todo),
-        timeoutType: 'never', // 通知不会自动消失
-        silent: false, // 确保有声音提示
-        hasReply: false // Windows 特定选项
+        timeoutType: 'never',
+        silent: false,
+        hasReply: false
       });
 
       notification.on('click', () => {
@@ -205,9 +206,11 @@ class NotificationService extends EventEmitter {
    * @returns {string} 图标路径
    */
   getNotificationIcon(todo) {
-    // 可以根据待办事项的优先级返回不同的图标
-    // 这里暂时返回null，使用系统默认图标
-    return null;
+    const path = require('path');
+    const isDev = process.env.NODE_ENV !== 'production';
+    return isDev 
+      ? path.join(__dirname, '../../logo.png')
+      : path.join(process.resourcesPath, 'logo.png');
   }
 
   /**

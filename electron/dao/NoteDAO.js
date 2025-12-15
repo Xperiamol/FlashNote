@@ -1,6 +1,7 @@
 const { getInstance } = require('./DatabaseManager');
 const TagService = require('../services/TagService');
 const ChangeLogDAO = require('./ChangeLogDAO');
+const crypto = require('crypto');
 
 class NoteDAO {
   constructor() {
@@ -18,10 +19,16 @@ class NoteDAO {
 
   /**
    * 创建新笔记
+   * @param {object} noteData - 笔记数据
+   * @param {object} options - 选项
+   * @param {boolean} options.skipChangeLog - 是否跳过变更日志（同步时使用，防止无限循环）
    */
-  create(noteData) {
+  create(noteData, options = {}) {
+    const { skipChangeLog = false } = options;
     const db = this.getDB();
     const { 
+      id, // 支持指定 ID（UUID 同步时需要）
+      sync_id, // 同步 ID（跨设备唯一标识）
       title = '', 
       content = '', 
       tags = '', 
@@ -29,22 +36,37 @@ class NoteDAO {
       note_type = 'markdown' // 新增：笔记类型
     } = noteData;
     
-    const stmt = db.prepare(`
-      INSERT INTO notes (title, content, tags, category, note_type, created_at, updated_at)
-      VALUES (?, ?, ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
-    `);
+    // 自动生成 sync_id（如果未提供）
+    const finalSyncId = sync_id || crypto.randomUUID();
     
-    const result = stmt.run(title, content, tags, category, note_type);
+    let result;
+    if (id) {
+      // 如果指定了 ID（从远程同步），使用 INSERT OR REPLACE
+      const stmt = db.prepare(`
+        INSERT OR REPLACE INTO notes (id, sync_id, title, content, tags, category, note_type, created_at, updated_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, COALESCE((SELECT created_at FROM notes WHERE id = ?), CURRENT_TIMESTAMP), CURRENT_TIMESTAMP)
+      `);
+      result = stmt.run(id, finalSyncId, title, content, tags, category, note_type, id);
+      result.lastInsertRowid = id;
+    } else {
+      const stmt = db.prepare(`
+        INSERT INTO notes (sync_id, title, content, tags, category, note_type, created_at, updated_at)
+        VALUES (?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+      `);
+      result = stmt.run(finalSyncId, title, content, tags, category, note_type);
+    }
     
     // 更新标签使用次数
     if (tags) {
       this.tagService.updateTagsUsage(tags);
     }
     
-    const note = this.findById(result.lastInsertRowid);
+    const note = this.findById(result.lastInsertRowid) || this.findByIdIncludeDeleted(result.lastInsertRowid);
     
-    // 记录变更日志
-    this.changeLog.logChange('note', note.id, 'create', note);
+    // 记录变更日志（同步来源的操作不记录，防止无限循环）
+    if (!skipChangeLog) {
+      this.changeLog.logChange('note', note.id, 'create', note);
+    }
     
     return note;
   }
@@ -63,6 +85,29 @@ class NoteDAO {
   }
 
   /**
+   * 根据 sync_id 查找笔记
+   * @param {string} syncId - 同步 ID
+   */
+  findBySyncId(syncId) {
+    const db = this.getDB();
+    const stmt = db.prepare(`
+      SELECT * FROM notes 
+      WHERE sync_id = ? AND is_deleted = 0
+    `);
+    return stmt.get(syncId);
+  }
+
+  /**
+   * 根据 sync_id 查找笔记（包括已删除）
+   * @param {string} syncId - 同步 ID
+   */
+  findBySyncIdIncludeDeleted(syncId) {
+    const db = this.getDB();
+    const stmt = db.prepare('SELECT * FROM notes WHERE sync_id = ?');
+    return stmt.get(syncId);
+  }
+
+  /**
    * 根据ID查找笔记(包括已删除)
    */
   findByIdIncludeDeleted(id) {
@@ -73,8 +118,13 @@ class NoteDAO {
 
   /**
    * 更新笔记
+   * @param {number|string} id - 笔记 ID
+   * @param {object} noteData - 笔记数据
+   * @param {object} options - 选项
+   * @param {boolean} options.skipChangeLog - 是否跳过变更日志（同步时使用，防止无限循环）
    */
-  update(id, noteData) {
+  update(id, noteData, options = {}) {
+    const { skipChangeLog = false } = options;
     const db = this.getDB();
     const { title, content, tags, category, is_pinned, note_type } = noteData;
     
@@ -131,17 +181,31 @@ class NoteDAO {
     
     stmt.run(...values);
     
-    // 记录变更日志
-    this.changeLog.logChange('note', id, 'update', noteData);
+    // 获取更新后的完整笔记数据（包含 sync_id）
+    const updatedNote = this.findById(id);
     
-    return this.findById(id);
+    // 记录变更日志（同步来源的操作不记录，防止无限循环）
+    if (!skipChangeLog && updatedNote) {
+      // 传递完整实体数据以确保 sync_id 被记录
+      this.changeLog.logChange('note', id, 'update', updatedNote);
+    }
+    
+    return updatedNote;
   }
 
   /**
    * 软删除笔记
+   * @param {number|string} id - 笔记 ID
+   * @param {object} options - 选项
+   * @param {boolean} options.skipChangeLog - 是否跳过变更日志（同步时使用，防止无限循环）
    */
-  softDelete(id) {
+  softDelete(id, options = {}) {
+    const { skipChangeLog = false } = options;
     const db = this.getDB();
+    
+    // 先获取完整实体数据（包含 sync_id），用于记录变更日志
+    const noteBeforeDelete = this.findByIdIncludeDeleted(id);
+    
     const stmt = db.prepare(`
       UPDATE notes 
       SET is_deleted = 1, deleted_at = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP
@@ -150,9 +214,10 @@ class NoteDAO {
     
     const result = stmt.run(id).changes > 0;
     
-    if (result) {
-      // 记录变更日志
-      this.changeLog.logChange('note', id, 'delete');
+    if (result && !skipChangeLog && noteBeforeDelete) {
+      // 记录变更日志（同步来源的操作不记录，防止无限循环）
+      // 传递完整实体数据以确保 sync_id 被记录
+      this.changeLog.logChange('note', id, 'delete', noteBeforeDelete);
     }
     
     return result;
@@ -160,8 +225,12 @@ class NoteDAO {
 
   /**
    * 恢复已删除的笔记
+   * @param {number|string} id - 笔记 ID
+   * @param {object} options - 选项
+   * @param {boolean} options.skipChangeLog - 是否跳过变更日志（同步时使用，防止无限循环）
    */
-  restore(id) {
+  restore(id, options = {}) {
+    const { skipChangeLog = false } = options;
     const db = this.getDB();
     const stmt = db.prepare(`
       UPDATE notes 
@@ -171,9 +240,12 @@ class NoteDAO {
     
     const result = stmt.run(id).changes > 0;
     
-    if (result) {
-      // 记录变更日志
-      this.changeLog.logChange('note', id, 'restore');
+    if (result && !skipChangeLog) {
+      // 获取恢复后的完整实体数据（包含 sync_id）
+      const restoredNote = this.findById(id);
+      // 记录变更日志（同步来源的操作不记录，防止无限循环）
+      // 传递完整实体数据以确保 sync_id 被记录
+      this.changeLog.logChange('note', id, 'restore', restoredNote);
     }
     
     return result;

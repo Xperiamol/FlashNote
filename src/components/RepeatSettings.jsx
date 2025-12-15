@@ -7,9 +7,11 @@ import {
   Paper,
   Grid,
   IconButton,
+  TextField,
   useTheme,
   Fade
 } from '@mui/material';
+import { alpha } from '@mui/material/styles';
 import {
   Repeat as RepeatIcon,
   CalendarToday as CalendarIcon,
@@ -215,27 +217,13 @@ const RepeatSettings = ({ value = {}, onChange }) => {
                 <Typography variant="body2" sx={{ color: theme.palette.text.secondary }}>
                   每
                 </Typography>
-                <input
+                <TextField
                   type="number"
-                  min="1"
-                  max="365"
+                  size="small"
                   value={repeatInterval}
                   onChange={(e) => handleIntervalChange(parseInt(e.target.value) || 1)}
-                  style={{
-                    width: '60px',
-                    padding: '8px 12px',
-                    border: `1px solid ${theme.palette.divider}`,
-                    borderRadius: '8px',
-                    fontSize: '14px',
-                    outline: 'none',
-                    textAlign: 'center'
-                  }}
-                  onFocus={(e) => {
-                    e.target.style.borderColor = theme.palette.primary.main;
-                  }}
-                  onBlur={(e) => {
-                    e.target.style.borderColor = theme.palette.divider;
-                  }}
+                  inputProps={{ min: 1, max: 365, inputMode: 'numeric' }}
+                  sx={{ width: 96 }}
                 />
                 <Typography variant="body2" sx={{ color: theme.palette.text.secondary }}>
                   {repeatType === 'daily' && '天'}
@@ -290,8 +278,8 @@ const RepeatSettings = ({ value = {}, onChange }) => {
             <Box sx={{ 
               p: 2, 
               borderRadius: 2, 
-              backgroundColor: theme.palette.primary.light + '20',
-              border: `1px solid ${theme.palette.primary.light}`,
+              backgroundColor: alpha(theme.palette.primary.main, 0.08),
+              border: `1px solid ${alpha(theme.palette.primary.main, 0.2)}`,
             }}>
               <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
                 <CalendarIcon sx={{ fontSize: 16, color: theme.palette.primary.main }} />
