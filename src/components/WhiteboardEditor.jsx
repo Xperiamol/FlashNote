@@ -11,7 +11,7 @@ import '@excalidraw/excalidraw/index.css'
  * 白板编辑器组件
  * 直接使用 @excalidraw/excalidraw React 组件
  */
-const WhiteboardEditor = ({ noteId, showToolbar = true, isStandaloneMode = false, onSaveWhiteboard, onExportPNG }) => {
+const WhiteboardEditor = ({ noteId, showToolbar = true, isStandaloneMode = false, onSaveWhiteboard, onGetContent, onExportPNG }) => {
   // Get context from either main store or standalone context
   let store
   let actualIsStandaloneMode = isStandaloneMode
@@ -24,7 +24,7 @@ const WhiteboardEditor = ({ noteId, showToolbar = true, isStandaloneMode = false
     actualIsStandaloneMode = false
   }
   
-  const { notes, updateNote } = store
+  const { notes, updateNote, currentView } = store
   const [excalidrawAPI, setExcalidrawAPI] = useState(null)
   const [isLoading, setIsLoading] = useState(true)
   const [error, setError] = useState(null)
@@ -45,6 +45,24 @@ const WhiteboardEditor = ({ noteId, showToolbar = true, isStandaloneMode = false
   const isApplyingRemoteDataRef = useRef(true)
   // 记录最近一次渲染的完整场景，用于在组件重挂载时仍能保存
   const latestSceneRef = useRef({ elements: [], appState: {}, files: {} })
+  // 标记是否正在进行类型转换，用于避免卸载时自动保存覆盖转换结果
+  const isTypeConvertingRef = useRef(false)
+  
+  // 监听类型转换事件
+  useEffect(() => {
+    const handleTypeConversion = () => {
+      console.log('[WhiteboardEditor] 收到类型转换事件，标记为正在转换')
+      isTypeConvertingRef.current = true
+      // 同时清除未保存标记，防止卸载时保存
+      hasUnsavedChangesRef.current = false
+      setHasUnsavedChanges(false)
+    }
+    
+    window.addEventListener('whiteboard-type-converting', handleTypeConversion)
+    return () => {
+      window.removeEventListener('whiteboard-type-converting', handleTypeConversion)
+    }
+  }, [])
   
   // 同步 hasUnsavedChanges 到 ref
   useEffect(() => {
@@ -136,20 +154,41 @@ const WhiteboardEditor = ({ noteId, showToolbar = true, isStandaloneMode = false
       const elements = excalidrawData.elements || []
       const appState = excalidrawData.appState || { viewBackgroundColor: '#ffffff' }
       
-      // 从文件系统加载图片
+      // 处理图片文件
       let files = {}
       if (excalidrawData.fileMap && Object.keys(excalidrawData.fileMap).length > 0) {
         if (process.env.NODE_ENV === 'development') {
-          console.log('[WhiteboardEditor] 从文件系统加载图片', {
+          console.log('[WhiteboardEditor] 处理图片文件', {
             filesCount: Object.keys(excalidrawData.fileMap).length
           })
         }
         
-        const result = await window.electronAPI.whiteboard.loadImages(excalidrawData.fileMap)
-        if (result.success) {
-          files = result.data
+        // 检查 fileMap 中是否已经包含 dataURL（从 Markdown 转换过来的情况）
+        const hasInlineDataURL = Object.values(excalidrawData.fileMap).some(
+          f => f.dataURL && f.dataURL.startsWith('data:')
+        )
+        
+        if (hasInlineDataURL) {
+          // fileMap 中已经有 dataURL，直接使用
+          for (const [fileId, fileData] of Object.entries(excalidrawData.fileMap)) {
+            if (fileData.dataURL && fileData.dataURL.startsWith('data:')) {
+              files[fileId] = {
+                mimeType: fileData.mimeType || 'image/png',
+                id: fileId,
+                dataURL: fileData.dataURL,
+                created: fileData.created || Date.now()
+              }
+            }
+          }
+          console.log('[WhiteboardEditor] 使用内联 dataURL 图片:', Object.keys(files).length)
         } else {
-          console.error('[WhiteboardEditor] 加载图片失败', result.error)
+          // 从文件系统加载图片
+          const result = await window.electronAPI.whiteboard.loadImages(excalidrawData.fileMap)
+          if (result.success) {
+            files = result.data
+          } else {
+            console.error('[WhiteboardEditor] 加载图片失败', result.error)
+          }
         }
       }
       
@@ -233,25 +272,46 @@ const WhiteboardEditor = ({ noteId, showToolbar = true, isStandaloneMode = false
         // 解析白板数据
         const excalidrawData = JSON.parse(note.content)
 
-        // 从文件系统加载图片
+        // 处理图片文件
         let files = {}
         if (excalidrawData.fileMap && Object.keys(excalidrawData.fileMap).length > 0) {
           if (process.env.NODE_ENV === 'development') {
-            console.log('[WhiteboardEditor] 初始加载 - 从文件系统加载图片', {
+            console.log('[WhiteboardEditor] 初始加载 - 处理图片文件', {
               filesCount: Object.keys(excalidrawData.fileMap).length
             })
           }
           
-          const result = await window.electronAPI.whiteboard.loadImages(excalidrawData.fileMap)
-          if (result.success) {
-            files = result.data
-            if (process.env.NODE_ENV === 'development') {
-              console.log('[WhiteboardEditor] 图片加载成功', {
-                filesCount: Object.keys(files).length
-              })
+          // 检查 fileMap 中是否已经包含 dataURL（从 Markdown 转换过来的情况）
+          const hasInlineDataURL = Object.values(excalidrawData.fileMap).some(
+            f => f.dataURL && f.dataURL.startsWith('data:')
+          )
+          
+          if (hasInlineDataURL) {
+            // fileMap 中已经有 dataURL，直接使用
+            for (const [fileId, fileData] of Object.entries(excalidrawData.fileMap)) {
+              if (fileData.dataURL && fileData.dataURL.startsWith('data:')) {
+                files[fileId] = {
+                  mimeType: fileData.mimeType || 'image/png',
+                  id: fileId,
+                  dataURL: fileData.dataURL,
+                  created: fileData.created || Date.now()
+                }
+              }
             }
+            console.log('[WhiteboardEditor] 初始加载 - 使用内联 dataURL 图片:', Object.keys(files).length)
           } else {
-            console.error('[WhiteboardEditor] 加载图片失败', result.error)
+            // 从文件系统加载图片
+            const result = await window.electronAPI.whiteboard.loadImages(excalidrawData.fileMap)
+            if (result.success) {
+              files = result.data
+              if (process.env.NODE_ENV === 'development') {
+                console.log('[WhiteboardEditor] 图片加载成功', {
+                  filesCount: Object.keys(files).length
+                })
+              }
+            } else {
+              console.error('[WhiteboardEditor] 加载图片失败', result.error)
+            }
           }
         }
 
@@ -427,24 +487,35 @@ const WhiteboardEditor = ({ noteId, showToolbar = true, isStandaloneMode = false
   const performSave = useCallback(async () => {
     // 保存当前正在编辑的noteId的快照，避免切换时写错对象
     const currentNoteId = activeNoteIdRef.current
-    const currentExcalidrawAPI = excalidrawAPI
-
     if (process.env.NODE_ENV === 'development') {
       console.log('[WhiteboardEditor] performSave调用', {
         currentNoteId,
         componentNoteId: noteId,
-        hasExcalidrawAPI: !!currentExcalidrawAPI
+        hasExcalidrawAPI: !!excalidrawAPI,
+        hasLatestScene: !!latestSceneRef.current
       })
     }
 
-    if (!currentExcalidrawAPI || !currentNoteId) {
+    // 优先使用 latestSceneRef 中的数据（即使组件卸载也能获取）
+    let elements, appState, files
+    
+    if (latestSceneRef.current && latestSceneRef.current.elements && latestSceneRef.current.elements.length > 0) {
+      elements = latestSceneRef.current.elements
+      appState = latestSceneRef.current.appState
+      files = latestSceneRef.current.files
+    } else if (excalidrawAPI) {
+      elements = excalidrawAPI.getSceneElements()
+      appState = excalidrawAPI.getAppState()
+      files = excalidrawAPI.getFiles()
+    } else {
+      return
+    }
+
+    if (!currentNoteId) {
       return
     }
 
     try {
-      const elements = currentExcalidrawAPI.getSceneElements()
-      const appState = currentExcalidrawAPI.getAppState()
-      const files = currentExcalidrawAPI.getFiles()
 
       // 将图片保存到文件系统
       let fileMap = {}
@@ -560,10 +631,70 @@ const WhiteboardEditor = ({ noteId, showToolbar = true, isStandaloneMode = false
     }
   }, [actualIsStandaloneMode, noteId, saveNow])
 
+  // 监听视图切换，从笔记视图切换出去时触发保存（仅非独立窗口模式）
+  const prevViewRef = useRef(currentView)
+  useEffect(() => {
+    // 独立窗口模式下不需要监听视图切换（没有视图概念）
+    if (actualIsStandaloneMode || !currentView) {
+      return
+    }
+    
+    const prevView = prevViewRef.current
+    
+    // 如果从笔记视图切换到其他视图，且有选中的笔记且有未保存的更改，立即保存
+    if (prevView === 'notes' && currentView !== 'notes' && noteId && hasUnsavedChangesRef.current) {
+      console.log('[WhiteboardEditor] 切换视图前保存白板，从', prevView, '切换到', currentView)
+      // 先取消防抖保存
+      cancelSave()
+      // 立即保存
+      saveNow().catch(error => {
+        console.error('[WhiteboardEditor] 切换视图时保存失败:', error)
+      })
+    }
+    
+    // 更新前一个视图
+    prevViewRef.current = currentView
+  }, [currentView, noteId, saveNow, cancelSave, actualIsStandaloneMode])
+
   // 保存白板
   const saveWhiteboard = useCallback(async () => {
     await saveNow()
   }, [saveNow])
+
+  // 获取当前白板内容（用于类型转换）
+  const getCurrentContent = useCallback(async () => {
+    if (!excalidrawAPI) return null
+
+    const elements = excalidrawAPI.getSceneElements()
+    const appState = excalidrawAPI.getAppState()
+    const files = excalidrawAPI.getFiles()
+
+    // 保存图片到文件系统
+    let fileMap = {}
+    if (files && Object.keys(files).length > 0) {
+      const result = await window.electronAPI.whiteboard.saveImages(files)
+      if (result.success) {
+        fileMap = result.data
+      }
+    }
+
+    const persistedAppState = {
+      viewBackgroundColor: appState.viewBackgroundColor,
+      currentItemFontFamily: appState.currentItemFontFamily,
+      gridSize: appState.gridSize
+    }
+
+    const data = {
+      type: 'excalidraw',
+      version: 2,
+      source: 'flashnote-local',
+      elements,
+      appState: persistedAppState,
+      fileMap
+    }
+
+    return JSON.stringify(data)
+  }, [excalidrawAPI])
 
   // 导出 PNG
   const exportPNG = useCallback(async () => {
@@ -589,12 +720,18 @@ const WhiteboardEditor = ({ noteId, showToolbar = true, isStandaloneMode = false
     }
   }, [excalidrawAPI, noteId])
 
-  // 将保存和导出函数暴露给父组件
+  // 将保存、获取内容和导出函数暴露给父组件
   useEffect(() => {
     if (onSaveWhiteboard) {
       onSaveWhiteboard(saveWhiteboard)
     }
   }, [saveWhiteboard, onSaveWhiteboard])
+
+  useEffect(() => {
+    if (onGetContent) {
+      onGetContent(getCurrentContent)
+    }
+  }, [getCurrentContent, onGetContent])
 
   useEffect(() => {
     if (onExportPNG) {
@@ -609,6 +746,14 @@ const WhiteboardEditor = ({ noteId, showToolbar = true, isStandaloneMode = false
       if (isSwitchingNoteRef.current) {
         if (process.env.NODE_ENV === 'development') {
           console.log('[WhiteboardEditor] 组件卸载，但正在切换笔记，跳过保存')
+        }
+        return
+      }
+      
+      // 如果正在进行类型转换，不要保存（会覆盖转换结果）
+      if (isTypeConvertingRef.current) {
+        if (process.env.NODE_ENV === 'development') {
+          console.log('[WhiteboardEditor] 组件卸载，但正在类型转换，跳过保存')
         }
         return
       }

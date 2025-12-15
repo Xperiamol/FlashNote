@@ -3,6 +3,15 @@ const path = require('path');
 const fs = require('fs');
 const { app } = require('electron');
 
+// ========== 数据库日志工具 ==========
+const dbLogFile = path.join(app.getPath('userData'), 'startup-debug.log');
+function dbLog(...args) {
+  const timestamp = new Date().toISOString();
+  const message = `[${timestamp}] [DB] ${args.map(a => typeof a === 'object' ? JSON.stringify(a) : a).join(' ')}\n`;
+  console.log('[DB]', ...args);
+  try { fs.appendFileSync(dbLogFile, message); } catch (e) { /* ignore */ }
+}
+
 class DatabaseManager {
   constructor() {
     this.db = null;
@@ -18,15 +27,21 @@ class DatabaseManager {
       const userDataPath = app.getPath('userData');
       const dbDir = path.join(userDataPath, 'database');
       
+      dbLog('用户数据目录:', userDataPath);
+      
       // 确保数据库目录存在
       if (!fs.existsSync(dbDir)) {
         fs.mkdirSync(dbDir, { recursive: true });
+        dbLog('创建数据库目录:', dbDir);
       }
       
       this.dbPath = path.join(dbDir, 'flashnote.db');
+      const dbExists = fs.existsSync(this.dbPath);
+      dbLog('数据库路径:', this.dbPath, '是否存在:', dbExists);
       
       // 创建数据库连接
       this.db = new Database(this.dbPath);
+      dbLog('数据库连接已创建');
       
       // 启用外键约束
       this.db.pragma('foreign_keys = ON');
@@ -35,15 +50,19 @@ class DatabaseManager {
       this.db.pragma('journal_mode = WAL');
       
       // 创建表结构
-    await this.createTables();
+      dbLog('开始创建表结构...');
+      await this.createTables();
+      dbLog('表结构创建完成');
     
-    // 执行数据库迁移
-    await this.runMigrations();
+      // 执行数据库迁移
+      dbLog('开始执行数据库迁移...');
+      await this.runMigrations();
+      dbLog('数据库迁移完成');
     
-    console.log('数据库初始化成功:', this.dbPath);
+      dbLog('数据库初始化成功');
       return true;
     } catch (error) {
-      console.error('数据库初始化失败:', error);
+      dbLog('数据库初始化失败:', error.message, error.stack);
       throw error;
     }
   }
@@ -53,15 +72,17 @@ class DatabaseManager {
    */
   async createTables() {
     const tables = [
-      // 笔记表
+      // 笔记表 - 包含 sync_id 用于跨设备同步
       `CREATE TABLE IF NOT EXISTS notes (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
+        sync_id TEXT UNIQUE,
         title TEXT NOT NULL DEFAULT '',
         content TEXT NOT NULL DEFAULT '',
         tags TEXT DEFAULT '',
         category TEXT DEFAULT 'default',
         is_pinned INTEGER DEFAULT 0,
         is_deleted INTEGER DEFAULT 0,
+        note_type TEXT DEFAULT 'markdown',
         created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
         updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
         deleted_at DATETIME NULL
@@ -98,29 +119,44 @@ class DatabaseManager {
         updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
       )`,
       
-      // 待办事项表
+      // 待办事项表 - 包含 sync_id 用于跨设备同步
       `CREATE TABLE IF NOT EXISTS todos (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
+        sync_id TEXT UNIQUE,
         content TEXT NOT NULL,
+        description TEXT DEFAULT '',
         tags TEXT DEFAULT '',
         is_completed INTEGER DEFAULT 0,
         is_important INTEGER DEFAULT 0,
         is_urgent INTEGER DEFAULT 0,
         due_date DATETIME NULL,
+        end_date DATETIME NULL,
+        item_type TEXT DEFAULT 'todo',
+        has_time INTEGER DEFAULT 0,
         focus_time_seconds INTEGER DEFAULT 0,
+        repeat_type TEXT DEFAULT 'none',
+        repeat_days TEXT DEFAULT '',
+        repeat_interval INTEGER DEFAULT 1,
+        next_due_date DATETIME NULL,
+        is_recurring INTEGER DEFAULT 0,
+        parent_todo_id INTEGER NULL,
+        is_deleted INTEGER DEFAULT 0,
+        deleted_at DATETIME NULL,
         created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
         updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
         completed_at DATETIME NULL
       )`,
       
       // 变更日志表 - 用于增量同步
+      // 注意：entity_id 存储 sync_id (UUID)，用于跨设备同步
       `CREATE TABLE IF NOT EXISTS changes (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         entity_type TEXT NOT NULL,
-        entity_id INTEGER NOT NULL,
+        entity_id TEXT NOT NULL,
         operation TEXT NOT NULL,
         change_data TEXT,
-        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        device_id TEXT,
+        created_at DATETIME DEFAULT (STRFTIME('%Y-%m-%d %H:%M:%f', 'NOW')),
         synced INTEGER DEFAULT 0,
         synced_at DATETIME NULL
       )`,
@@ -143,12 +179,14 @@ class DatabaseManager {
       'CREATE INDEX IF NOT EXISTS idx_notes_is_pinned ON notes(is_pinned)',
       'CREATE INDEX IF NOT EXISTS idx_notes_is_deleted ON notes(is_deleted)',
       'CREATE INDEX IF NOT EXISTS idx_notes_title ON notes(title)',
+      'CREATE INDEX IF NOT EXISTS idx_notes_sync_id ON notes(sync_id)',
       'CREATE INDEX IF NOT EXISTS idx_settings_key ON settings(key)',
       'CREATE INDEX IF NOT EXISTS idx_todos_created_at ON todos(created_at DESC)',
       'CREATE INDEX IF NOT EXISTS idx_todos_due_date ON todos(due_date)',
       'CREATE INDEX IF NOT EXISTS idx_todos_is_completed ON todos(is_completed)',
       'CREATE INDEX IF NOT EXISTS idx_todos_is_important ON todos(is_important)',
       'CREATE INDEX IF NOT EXISTS idx_todos_is_urgent ON todos(is_urgent)',
+      'CREATE INDEX IF NOT EXISTS idx_todos_sync_id ON todos(sync_id)',
       'CREATE INDEX IF NOT EXISTS idx_changes_entity ON changes(entity_type, entity_id)',
       'CREATE INDEX IF NOT EXISTS idx_changes_synced ON changes(synced)',
       'CREATE INDEX IF NOT EXISTS idx_changes_created_at ON changes(created_at DESC)',
@@ -230,7 +268,7 @@ class DatabaseManager {
    */
   async runMigrations() {
     try {
-      // 检查todos表是否有tags字段，如果没有则添加
+      // 迁移1：检查todos表是否有tags字段，如果没有则添加
       const tableInfo = this.db.prepare("PRAGMA table_info(todos)").all();
       const hasTagsColumn = tableInfo.some(column => column.name === 'tags');
       
@@ -238,6 +276,19 @@ class DatabaseManager {
         console.log('添加tags字段到todos表...');
         this.db.exec("ALTER TABLE todos ADD COLUMN tags TEXT DEFAULT ''");
         console.log('todos表迁移完成');
+      }
+      
+      // 迁移2：修复 changes 表的 entity_id 类型
+      await this.migrateChangesTableType();
+
+      // 迁移3：添加 device_id 到 changes 表
+      const changesTableInfo = this.db.prepare("PRAGMA table_info(changes)").all();
+      const hasDeviceIdColumn = changesTableInfo.some(column => column.name === 'device_id');
+      
+      if (!hasDeviceIdColumn) {
+        console.log('添加device_id字段到changes表...');
+        this.db.exec("ALTER TABLE changes ADD COLUMN device_id TEXT");
+        console.log('changes表 device_id 字段添加完成');
       }
       
       // 检查并添加重复事项相关字段
@@ -459,6 +510,10 @@ class DatabaseManager {
       
       console.log('✅ 性能索引创建完成');
       
+      // ===== 多设备同步 sync_id 迁移 (2025-11-19) =====
+      // 添加 sync_id 字段用于跨设备同步识别，避免整数 ID 冲突
+      await this._migrateSyncId();
+      
       // 6. FTS5 全文搜索
       try {
         const ftsTables = this.db.prepare(
@@ -525,6 +580,78 @@ class DatabaseManager {
       console.error('数据库迁移失败:', error);
       // 不抛出错误，允许应用继续运行
     }
+  }
+
+  /**
+   * 迁移 sync_id 字段
+   * 为 notes 和 todos 表添加 UUID 格式的 sync_id 用于跨设备同步
+   */
+  async _migrateSyncId() {
+    try {
+      dbLog('开始 sync_id 迁移...');
+      
+      // 检查 notes 表
+      const notesTableInfo = this.db.prepare("PRAGMA table_info(notes)").all();
+      const notesHasSyncId = notesTableInfo.some(col => col.name === 'sync_id');
+      dbLog('notes 表是否有 sync_id:', notesHasSyncId);
+      
+      if (!notesHasSyncId) {
+        dbLog('添加 sync_id 字段到 notes 表...');
+        this.db.exec("ALTER TABLE notes ADD COLUMN sync_id TEXT UNIQUE");
+        
+        // 为现有记录生成 sync_id
+        const notes = this.db.prepare('SELECT id FROM notes').all();
+        const updateStmt = this.db.prepare('UPDATE notes SET sync_id = ? WHERE id = ?');
+        
+        for (const note of notes) {
+          const syncId = this._generateSyncId();
+          updateStmt.run(syncId, note.id);
+        }
+        
+        // 创建索引
+        this.db.exec('CREATE INDEX IF NOT EXISTS idx_notes_sync_id ON notes(sync_id)');
+        
+        dbLog(`✅ notes 表 sync_id 迁移完成（已更新 ${notes.length} 条记录）`);
+      }
+      
+      // 检查 todos 表
+      const todosTableInfo = this.db.prepare("PRAGMA table_info(todos)").all();
+      const todosHasSyncId = todosTableInfo.some(col => col.name === 'sync_id');
+      dbLog('todos 表是否有 sync_id:', todosHasSyncId);
+      
+      if (!todosHasSyncId) {
+        dbLog('添加 sync_id 字段到 todos 表...');
+        this.db.exec("ALTER TABLE todos ADD COLUMN sync_id TEXT UNIQUE");
+        
+        // 为现有记录生成 sync_id
+        const todos = this.db.prepare('SELECT id FROM todos').all();
+        const updateStmt = this.db.prepare('UPDATE todos SET sync_id = ? WHERE id = ?');
+        
+        for (const todo of todos) {
+          const syncId = this._generateSyncId();
+          updateStmt.run(syncId, todo.id);
+        }
+        
+        // 创建索引
+        this.db.exec('CREATE INDEX IF NOT EXISTS idx_todos_sync_id ON todos(sync_id)');
+        
+        dbLog(`✅ todos 表 sync_id 迁移完成（已更新 ${todos.length} 条记录）`);
+      }
+      
+      dbLog('sync_id 迁移检查完成');
+      
+    } catch (error) {
+      dbLog('sync_id 迁移失败:', error.message, error.stack);
+      // 不抛出错误，允许应用继续运行
+    }
+  }
+
+  /**
+   * 生成同步 ID (UUID v4 格式)
+   */
+  _generateSyncId() {
+    const crypto = require('crypto');
+    return crypto.randomUUID();
   }
 
   /**
@@ -668,6 +795,86 @@ class DatabaseManager {
       this.db.close();
       this.db = null;
       console.log('数据库连接已关闭');
+    }
+  }
+
+  /**
+   * 迁移 changes 表的 entity_id 类型从 INTEGER 到 TEXT
+   */
+  async migrateChangesTableType() {
+    try {
+      const changesTableInfo = this.db.prepare("PRAGMA table_info(changes)").all();
+      const entityIdColumn = changesTableInfo.find(col => col.name === 'entity_id');
+      
+      if (!entityIdColumn) {
+        console.log('[迁移] changes 表不存在 entity_id 字段，跳过迁移');
+        return;
+      }
+      
+      if (entityIdColumn.type === 'TEXT') {
+        console.log('[迁移] changes 表的 entity_id 已经是 TEXT 类型，跳过迁移');
+        return;
+      }
+      
+      console.log('[迁移] 开始修复 changes 表的 entity_id 类型...');
+      console.log(`[迁移] 当前类型: ${entityIdColumn.type} → 目标类型: TEXT`);
+      
+      // 开始事务
+      this.db.exec('BEGIN TRANSACTION');
+      
+      try {
+        // 统计数据
+        const stats = this.db.prepare('SELECT COUNT(*) as total FROM changes').get();
+        console.log(`[迁移] 当前 changes 表有 ${stats.total} 条记录`);
+        
+        if (stats.total > 0) {
+          // 有数据时，创建备份表
+          const backupTableName = `changes_backup_${Date.now()}`;
+          this.db.exec(`CREATE TABLE ${backupTableName} AS SELECT * FROM changes`);
+          console.log(`[迁移] 已备份到 ${backupTableName}`);
+        }
+        
+        // 删除旧表
+        this.db.exec('DROP TABLE IF EXISTS changes');
+        
+        // 创建新表（entity_id 为 TEXT）
+        this.db.exec(`
+          CREATE TABLE changes (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            entity_type TEXT NOT NULL,
+            entity_id TEXT NOT NULL,
+            operation TEXT NOT NULL,
+            change_data TEXT,
+            created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+            synced INTEGER DEFAULT 0,
+            synced_at DATETIME NULL
+          )
+        `);
+        
+        // 重建索引
+        this.db.exec('CREATE INDEX IF NOT EXISTS idx_changes_entity ON changes(entity_type, entity_id)');
+        this.db.exec('CREATE INDEX IF NOT EXISTS idx_changes_synced ON changes(synced)');
+        this.db.exec('CREATE INDEX IF NOT EXISTS idx_changes_created_at ON changes(created_at DESC)');
+        
+        // 删除同步标记，触发全量同步
+        const syncMarkerPath = path.join(app.getPath('userData'), 'sync-initialized.marker');
+        if (fs.existsSync(syncMarkerPath)) {
+          fs.unlinkSync(syncMarkerPath);
+          console.log('[迁移] 已删除同步标记，下次将触发全量同步');
+        }
+        
+        // 提交事务
+        this.db.exec('COMMIT');
+        
+        console.log('[迁移] ✅ changes 表迁移完成');
+        console.log('[迁移] 📝 下次同步将自动执行全量同步');
+      } catch (error) {
+        this.db.exec('ROLLBACK');
+        throw error;
+      }
+    } catch (error) {
+      console.error('[迁移] ❌ changes 表迁移失败:', error);
+      // 不抛出错误，避免影响应用启动
     }
   }
 

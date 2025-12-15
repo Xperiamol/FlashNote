@@ -147,7 +147,7 @@ import { injectUIBridge } from './utils/pluginUIBridge'
 import themeManager from './utils/pluginThemeManager'
 
 function App() {
-  const { theme, setTheme, primaryColor, loadNotes, currentView, initializeSettings, setCurrentView, createNote, batchDeleteNotes, batchDeleteTodos, batchCompleteTodos, batchRestoreNotes, batchPermanentDeleteNotes, getAllTags, batchSetTags, setSelectedNoteId, updateNoteInList, maskOpacity } = useStore()
+  const { theme, setTheme, primaryColor, loadNotes, currentView, initializeSettings, setCurrentView, createNote, batchDeleteNotes, batchDeleteTodos, batchCompleteTodos, batchRestoreNotes, batchPermanentDeleteNotes, getAllTags, batchSetTags, selectedNoteId, setSelectedNoteId, updateNoteInList, maskOpacity } = useStore()
   const refreshPluginCommands = useStore((state) => state.refreshPluginCommands)
   const addPluginCommand = useStore((state) => state.addPluginCommand)
   const removePluginCommand = useStore((state) => state.removePluginCommand)
@@ -184,6 +184,13 @@ function App() {
   const [calendarCurrentDate, setCalendarCurrentDate] = useState(new Date())
   const [selectedDate, setSelectedDate] = useState(null)
   const [calendarShowCompleted, setCalendarShowCompleted] = useState(false)
+  const [calendarViewMode, setCalendarViewMode] = useState('todos') // 'todos', 'notes', 'focus'
+  
+  // 日历视图模式变化处理（带调试）
+  const handleCalendarViewModeChange = (mode) => {
+    console.log('Calendar view mode changing from', calendarViewMode, 'to', mode);
+    setCalendarViewMode(mode);
+  }
 
   // 多选状态管理
   const [multiSelectState, setMultiSelectState] = useState({
@@ -538,6 +545,16 @@ function App() {
           setCurrentView('notes')
           createNote()
         })
+
+        // 监听刷新笔记列表事件（用于首次启动显示欢迎笔记）
+        window.electronAPI.ipcRenderer.on('refresh-notes', async (event, data) => {
+          console.log('[App] 收到refresh-notes事件:', data)
+          await loadNotes()
+          if (data && data.selectNoteId) {
+            setSelectedNoteId(data.selectNoteId)
+            setCurrentView('notes')
+          }
+        })
       }
     }
 
@@ -563,6 +580,7 @@ function App() {
         window.electronAPI.ipcRenderer.removeAllListeners('create-new-todo')
         window.electronAPI.ipcRenderer.removeAllListeners('open-settings')
         window.electronAPI.ipcRenderer.removeAllListeners('quick-input')
+        window.electronAPI.ipcRenderer.removeAllListeners('refresh-notes')
       }
     }
   }, [createNote, loadNotes])
@@ -800,6 +818,8 @@ function App() {
                   onCalendarShowCompletedChange={setCalendarShowCompleted}
                   onSelectedDateChange={setSelectedDate}
                   selectedDate={selectedDate}
+                  calendarViewMode={calendarViewMode}
+                  onCalendarViewModeChange={handleCalendarViewModeChange}
                 />
               </AppBar>
 
@@ -1042,7 +1062,7 @@ function App() {
                       onTodoSelect={setSelectedTodo}
                     />
                   )}
-                  {currentView === 'calendar' && <CalendarView currentDate={calendarCurrentDate} onDateChange={setCalendarCurrentDate} onTodoSelect={setSelectedTodo} selectedDate={selectedDate} onSelectedDateChange={setSelectedDate} refreshToken={calendarRefreshTrigger} showCompleted={calendarShowCompleted} onShowCompletedChange={setCalendarShowCompleted} onTodoUpdated={handleTodoUpdated} />}
+                  {currentView === 'calendar' && <CalendarView currentDate={calendarCurrentDate} onDateChange={setCalendarCurrentDate} onTodoSelect={setSelectedTodo} selectedDate={selectedDate} onSelectedDateChange={setSelectedDate} refreshToken={calendarRefreshTrigger} showCompleted={calendarShowCompleted} onShowCompletedChange={setCalendarShowCompleted} onTodoUpdated={handleTodoUpdated} viewMode={calendarViewMode} />}
                   {currentView === 'settings' && <Settings />}
                   {currentView === 'plugins' && (
                     <Box sx={{ p: 3, height: '100%', boxSizing: 'border-box' }}>

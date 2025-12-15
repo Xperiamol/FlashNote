@@ -194,7 +194,7 @@ const AISettings = ({ showSnackbar }) => {
         {/* 提供商选择 */}
         <ListItem>
           <Box sx={{ width: '100%', pt: 1, pb: 1 }}>
-            <FormControl fullWidth>
+            <FormControl fullWidth size="small">
               <InputLabel>{t('ai.provider')}</InputLabel>
               <Select
                 value={config.provider}
@@ -204,8 +204,10 @@ const AISettings = ({ showSnackbar }) => {
                 {providers.map(provider => (
                   <MenuItem key={provider.id} value={provider.id}>
                     <Box>
-                      <Typography variant="body1">{provider.name}</Typography>
-                      <Typography variant="caption" color="text.secondary">
+                      <Typography variant="body2" sx={{ fontWeight: 600 }}>
+                        {provider.name}
+                      </Typography>
+                      <Typography variant="caption" color="text.secondary" sx={{ display: 'block' }}>
                         {provider.description}
                       </Typography>
                     </Box>
@@ -223,6 +225,7 @@ const AISettings = ({ showSnackbar }) => {
           <Box sx={{ width: '100%', pt: 1, pb: 1 }}>
             <TextField
               fullWidth
+              size="small"
               label={t('ai.apiKey')}
               type="password"
               value={config.apiKey}
@@ -256,6 +259,7 @@ const AISettings = ({ showSnackbar }) => {
               <Box sx={{ width: '100%', pt: 1, pb: 1 }}>
                 <TextField
                   fullWidth
+                  size="small"
                   label={t('ai.apiUrl')}
                   value={config.apiUrl}
                   onChange={(e) => handleConfigChange('apiUrl', e.target.value)}
@@ -274,7 +278,7 @@ const AISettings = ({ showSnackbar }) => {
         <ListItem>
           <Box sx={{ width: '100%', pt: 1, pb: 1 }}>
             {selectedProvider && selectedProvider.models && selectedProvider.models.length > 0 ? (
-              <FormControl fullWidth>
+              <FormControl fullWidth size="small">
                 <InputLabel>{t('ai.model')}</InputLabel>
                 <Select
                   value={config.model}
@@ -291,6 +295,7 @@ const AISettings = ({ showSnackbar }) => {
             ) : (
               <TextField
                 fullWidth
+                size="small"
                 label={t('ai.modelName')}
                 value={config.model}
                 onChange={(e) => handleConfigChange('model', e.target.value)}
@@ -359,9 +364,11 @@ const AISettings = ({ showSnackbar }) => {
 
         {/* 操作按钮 */}
         <ListItem>
-          <Box sx={{ display: 'flex', gap: 2, pt: 1, pb: 1 }}>
+          <Box sx={{ display: 'flex', alignItems: 'center', gap: 2, pt: 1, pb: 1, width: '100%' }}>
+            <Box sx={{ flex: 1 }} />
             <Button
               variant="outlined"
+              size="small"
               onClick={handleTestConnection}
               disabled={!config.apiKey || testing}
               startIcon={testing ? <CircularProgress size={16} /> : <CheckIcon />}
@@ -378,11 +385,13 @@ const AISettings = ({ showSnackbar }) => {
           <strong>{t('ai.usageInstructions')}：</strong>
         </Typography>
         <Typography variant="body2" component="div">
-          <ul style={{ margin: 0, paddingLeft: 20 }}>
+          <Box component="ul" sx={{ m: 0, pl: 3 }}>
             {t('ai.usageInstructionsList', { returnObjects: true }).map((item, index) => (
-              <li key={index}>{item}</li>
+              <Box component="li" key={index}>
+                {item}
+              </Box>
             ))}
-          </ul>
+          </Box>
         </Typography>
       </Alert>
     </Box>

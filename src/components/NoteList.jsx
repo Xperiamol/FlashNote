@@ -360,7 +360,7 @@ const NoteList = ({ showDeleted = false, onMultiSelectChange, onMultiSelectRefCh
     }
   }
 
-  const getPreviewText = (content, noteType) => {
+  const getPreviewText = (content, noteType, skipChars = 0) => {
     if (!content) return t('notes.emptyNote')
 
     // Handle whiteboard notes specially
@@ -374,7 +374,45 @@ const NoteList = ({ showDeleted = false, onMultiSelectChange, onMultiSelectRefCh
     }
 
     // Handle markdown notes normally
-    return content.replace(/[#*`\n]/g, '').substring(0, 100)
+    const cleanContent = content.replace(/[#*`\n]/g, '')
+    // 如果需要跳过前面的字符（用于标题已显示的部分）
+    if (skipChars > 0) {
+      const remainingContent = cleanContent.substring(skipChars).trim()
+      // 如果跳过后没有内容，返回null（不显示预览）
+      return remainingContent.substring(0, 100) || null
+    }
+    return cleanContent.substring(0, 100) || null
+  }
+
+  // 获取笔记显示标题：如果有标题则显示标题，否则显示内容前9个字
+  const getNoteDisplayTitle = (note) => {
+    if (note.title && note.title !== '无标题' && note.title !== 'Untitled') {
+      return note.title
+    }
+    // 没有标题时，显示内容前9个字
+    if (note.content) {
+      // 白板笔记特殊处理
+      if (note.note_type === 'whiteboard') {
+        return t('notes.whiteboardNote')
+      }
+      const cleanContent = note.content.replace(/[#*`\n]/g, '').trim()
+      if (cleanContent) {
+        return cleanContent.substring(0, 9) + (cleanContent.length > 9 ? '...' : '')
+      }
+    }
+    return t('notes.untitled')
+  }
+
+  // 获取笔记内容预览：如果标题显示的是内容前9个字，则预览从第9个字开始
+  const getNotePreviewText = (note) => {
+    const hasRealTitle = note.title && note.title !== '无标题' && note.title !== 'Untitled'
+    if (hasRealTitle) {
+      // 有真实标题，预览显示完整内容
+      return getPreviewText(note.content, note.note_type, 0)
+    } else {
+      // 标题显示的是内容前9个字，预览从第9个字开始
+      return getPreviewText(note.content, note.note_type, 9)
+    }
   }
 
   // 渲染加载状态
@@ -659,7 +697,7 @@ const NoteList = ({ showDeleted = false, onMultiSelectChange, onMultiSelectRefCh
                                   flex: 1
                                 }}
                               >
-                                {note.title || t('notes.untitled')}
+                                {getNoteDisplayTitle(note)}
                               </Typography>
                               {note.category && (
                                 <Chip
@@ -673,26 +711,29 @@ const NoteList = ({ showDeleted = false, onMultiSelectChange, onMultiSelectRefCh
                           }
                           secondary={
                             <Box component="span" sx={{ display: 'block', mt: 0.5 }}>
-                              <Typography
-                                component="span"
-                                variant="body2"
-                                color="text.secondary"
-                                sx={{
-                                  overflow: 'hidden',
-                                  textOverflow: 'ellipsis',
-                                  whiteSpace: 'nowrap',
-                                  mb: 0.5,
-                                  display: 'block',
-                                  fontSize: '0.85rem'
-                                }}
-                              >
-                                {getPreviewText(note.content, note.note_type)}
-                              </Typography>
+                              {getNotePreviewText(note) && (
+                                <Typography
+                                  component="span"
+                                  variant="body2"
+                                  color="text.secondary"
+                                  sx={{
+                                    overflow: 'hidden',
+                                    textOverflow: 'ellipsis',
+                                    whiteSpace: 'nowrap',
+                                    mb: 0.5,
+                                    display: 'block',
+                                    fontSize: '0.85rem'
+                                  }}
+                                >
+                                  {getNotePreviewText(note)}
+                                </Typography>
+                              )}
                               <Typography component="span" variant="caption" color="text.secondary" sx={{ display: 'block', opacity: 0.8 }}>
                                 {formatDate(note.updated_at)}
                               </Typography>
                             </Box>
                           }
+                          primaryTypographyProps={{ component: 'div' }}
                           secondaryTypographyProps={{ component: 'div' }}
                         />
                         {/* 菜单按钮 - 绝对定位在右上角 */}

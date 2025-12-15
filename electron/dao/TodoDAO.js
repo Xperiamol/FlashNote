@@ -1,6 +1,7 @@
 const { getInstance } = require('./DatabaseManager');
 const TimeZoneUtils = require('../utils/timeZoneUtils');
 const ChangeLogDAO = require('./ChangeLogDAO');
+const crypto = require('crypto');
 
 class TodoDAO {
   constructor() {
@@ -36,10 +37,16 @@ class TodoDAO {
 
   /**
    * 创建新待办事项
+   * @param {object} todoData - 待办数据
+   * @param {object} options - 选项
+   * @param {boolean} options.skipChangeLog - 是否跳过变更日志（同步时使用，防止无限循环）
    */
-  create(todoData) {
+  create(todoData, options = {}) {
+    const { skipChangeLog = false } = options;
     const db = this.getDB();
     const { 
+      id, // 支持指定 ID（UUID 同步时需要）
+      sync_id, // 同步 ID（跨设备唯一标识）
       content, 
       description = '',
       tags = '',
@@ -57,33 +64,61 @@ class TodoDAO {
       parent_todo_id = null
     } = todoData;
     
+    // 自动生成 sync_id（如果未提供）
+    const finalSyncId = sync_id || crypto.randomUUID();
+    
     // 自动判断 has_time
     const has_time = todoData.has_time !== undefined 
       ? todoData.has_time 
       : this._hasTimeInfo(due_date);
     
-    const stmt = db.prepare(`
-      INSERT INTO todos (
-        content, description, tags, is_important, is_urgent, due_date, end_date, 
+    let result;
+    if (id) {
+      // 如果指定了 ID（从远程同步），使用 INSERT OR REPLACE
+      const stmt = db.prepare(`
+        INSERT OR REPLACE INTO todos (
+          id, sync_id, content, description, tags, is_important, is_urgent, due_date, end_date, 
+          item_type, has_time,
+          focus_time_seconds,
+          repeat_type, repeat_days, repeat_interval, next_due_date, is_recurring, parent_todo_id,
+          created_at, updated_at
+        )
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 
+          COALESCE((SELECT created_at FROM todos WHERE id = ?), CURRENT_TIMESTAMP), CURRENT_TIMESTAMP)
+      `);
+      result = stmt.run(
+        id, finalSyncId, content, description, tags, is_important, is_urgent, due_date, end_date,
         item_type, has_time,
         focus_time_seconds,
         repeat_type, repeat_days, repeat_interval, next_due_date, is_recurring, parent_todo_id,
-        created_at, updated_at
-      )
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
-    `);
+        id
+      );
+      result.lastInsertRowid = id;
+    } else {
+      const stmt = db.prepare(`
+        INSERT INTO todos (
+          sync_id, content, description, tags, is_important, is_urgent, due_date, end_date, 
+          item_type, has_time,
+          focus_time_seconds,
+          repeat_type, repeat_days, repeat_interval, next_due_date, is_recurring, parent_todo_id,
+          created_at, updated_at
+        )
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+      `);
+      result = stmt.run(
+        finalSyncId, content, description, tags, is_important, is_urgent, due_date, end_date,
+        item_type, has_time,
+        focus_time_seconds,
+        repeat_type, repeat_days, repeat_interval, next_due_date, is_recurring, parent_todo_id
+      );
+    }
     
-    const result = stmt.run(
-      content, description, tags, is_important, is_urgent, due_date, end_date,
-      item_type, has_time,
-      focus_time_seconds,
-      repeat_type, repeat_days, repeat_interval, next_due_date, is_recurring, parent_todo_id
-    );
+    const todo = this.findById(result.lastInsertRowid) || this.findByIdIncludeDeleted(result.lastInsertRowid);
     
-    const todo = this.findById(result.lastInsertRowid);
-    
-    // 记录变更日志
-    this.changeLog.logChange('todo', todo.id, 'create', todo);
+    // 记录变更日志（同步来源的操作不记录，防止无限循环）
+    if (!skipChangeLog) {
+      this.changeLog.logChange('todo', todo.id, 'create', todo);
+    }
     
     return todo;
   }
@@ -98,6 +133,26 @@ class TodoDAO {
   }
 
   /**
+   * 根据 sync_id 查找待办事项
+   * @param {string} syncId - 同步 ID
+   */
+  findBySyncId(syncId) {
+    const db = this.getDB();
+    const stmt = db.prepare('SELECT * FROM todos WHERE sync_id = ? AND is_deleted = 0');
+    return stmt.get(syncId);
+  }
+
+  /**
+   * 根据 sync_id 查找待办事项（包括已删除）
+   * @param {string} syncId - 同步 ID
+   */
+  findBySyncIdIncludeDeleted(syncId) {
+    const db = this.getDB();
+    const stmt = db.prepare('SELECT * FROM todos WHERE sync_id = ?');
+    return stmt.get(syncId);
+  }
+
+  /**
    * 根据ID查找待办事项(包括已删除)
    */
   findByIdIncludeDeleted(id) {
@@ -108,8 +163,13 @@ class TodoDAO {
 
   /**
    * 更新待办事项
+   * @param {number|string} id - 待办 ID
+   * @param {object} todoData - 待办数据
+   * @param {object} options - 选项
+   * @param {boolean} options.skipChangeLog - 是否跳过变更日志（同步时使用，防止无限循环）
    */
-  update(id, todoData) {
+  update(id, todoData, options = {}) {
+    const { skipChangeLog = false } = options;
     const db = this.getDB();
     const { 
       content,
@@ -243,8 +303,11 @@ class TodoDAO {
     
     if (result.changes > 0) {
       const updatedTodo = this.findById(id);
-      // 记录变更日志
-      this.changeLog.logChange('todo', id, 'update', todoData);
+      // 记录变更日志（同步来源的操作不记录，防止无限循环）
+      if (!skipChangeLog && updatedTodo) {
+        // 传递完整实体数据以确保 sync_id 被记录
+        this.changeLog.logChange('todo', id, 'update', updatedTodo);
+      }
       return updatedTodo;
     }
     
@@ -280,9 +343,17 @@ class TodoDAO {
 
   /**
    * 软删除待办事项
+   * @param {number|string} id - 待办 ID
+   * @param {object} options - 选项
+   * @param {boolean} options.skipChangeLog - 是否跳过变更日志（同步时使用，防止无限循环）
    */
-  softDelete(id) {
+  softDelete(id, options = {}) {
+    const { skipChangeLog = false } = options;
     const db = this.getDB();
+    
+    // 先获取完整实体数据（包含 sync_id），用于记录变更日志
+    const todoBeforeDelete = this.findByIdIncludeDeleted(id);
+    
     const stmt = db.prepare(`
       UPDATE todos 
       SET is_deleted = 1, deleted_at = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP
@@ -290,9 +361,10 @@ class TodoDAO {
     `);
     const result = stmt.run(id).changes > 0;
     
-    if (result) {
-      // 记录变更日志
-      this.changeLog.logChange('todo', id, 'delete');
+    if (result && !skipChangeLog && todoBeforeDelete) {
+      // 记录变更日志（同步来源的操作不记录，防止无限循环）
+      // 传递完整实体数据以确保 sync_id 被记录
+      this.changeLog.logChange('todo', id, 'delete', todoBeforeDelete);
     }
     
     return result;
@@ -300,8 +372,12 @@ class TodoDAO {
 
   /**
    * 恢复已删除的待办事项
+   * @param {number|string} id - 待办 ID
+   * @param {object} options - 选项
+   * @param {boolean} options.skipChangeLog - 是否跳过变更日志（同步时使用，防止无限循环）
    */
-  restore(id) {
+  restore(id, options = {}) {
+    const { skipChangeLog = false } = options;
     const db = this.getDB();
     const stmt = db.prepare(`
       UPDATE todos 
@@ -310,9 +386,12 @@ class TodoDAO {
     `);
     const result = stmt.run(id).changes > 0;
     
-    if (result) {
-      // 记录变更日志
-      this.changeLog.logChange('todo', id, 'restore');
+    if (result && !skipChangeLog) {
+      // 获取恢复后的完整实体数据（包含 sync_id）
+      const restoredTodo = this.findById(id);
+      // 记录变更日志（同步来源的操作不记录，防止无限循环）
+      // 传递完整实体数据以确保 sync_id 被记录
+      this.changeLog.logChange('todo', id, 'restore', restoredTodo);
     }
     
     return result;
@@ -505,13 +584,37 @@ class TodoDAO {
       WHERE is_deleted = 0 AND updated_at >= datetime(?, '-29 days')
     `);
     
+    // 获取按时完成率统计：completed_at <= due_date
+    // 比较完整的时间戳，如果due_date只有日期则会是当天00:00:00
+    const completedOnTimeStmt = db.prepare(`
+      SELECT COUNT(*) as count FROM todos 
+      WHERE is_deleted = 0 AND is_completed = 1 
+      AND due_date IS NOT NULL 
+      AND completed_at IS NOT NULL 
+      AND completed_at <= due_date
+    `);
+    
+    // 调试：获取有截止日期的已完成待办总数
+    const completedWithDueDateStmt = db.prepare(`
+      SELECT COUNT(*) as count FROM todos 
+      WHERE is_deleted = 0 AND is_completed = 1 AND due_date IS NOT NULL
+    `);
+    
+    const completed = completedStmt.get().count;
+    const completedOnTime = completedOnTimeStmt.get().count;
+    const completedWithDueDate = completedWithDueDateStmt.get().count;
+    
     return {
       total: totalStmt.get().count,
-      completed: completedStmt.get().count,
+      completed: completed,
       pending: pendingStmt.get().count,
       overdue: overdueStmt.get(nowUTC).count,
       dueToday: dueTodayStmt.get(todayStart.toISOString(), todayEnd.toISOString()).count,
       deleted: deletedStmt.get().count,
+      // 按时完成统计
+      completedOnTime: completedOnTime,
+      completedWithDueDate: completedWithDueDate,
+      onTimeRate: completedWithDueDate > 0 ? Math.round((completedOnTime / completedWithDueDate) * 100) : 0,
       // 专注时长统计（秒）
       totalFocusTime: totalFocusTimeStmt.get().total,
       todayFocusTime: todayFocusTimeStmt.get(nowUTC).total,

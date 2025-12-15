@@ -68,7 +68,14 @@ const formatPermissions = (permissions) => {
 const defaultPluginIcon = (name = '') => {
 	const initials = name.trim().slice(0, 2).toUpperCase() || 'P'
 	return (
-		<Avatar sx={{ bgcolor: 'primary.main', color: 'primary.contrastText' }}>
+		<Avatar 
+			variant="circular"
+			sx={{ 
+				bgcolor: 'primary.main', 
+				color: 'primary.contrastText',
+				borderRadius: '50%'
+			}}
+		>
 			{initials}
 		</Avatar>
 	)
@@ -113,7 +120,6 @@ const PluginCard = ({
 			variant="outlined"
 			sx={(muiTheme) => ({
 				position: 'relative',
-				borderRadius: 2,
 				height: '100%',
 				display: 'flex',
 				flexDirection: 'column',
@@ -122,117 +128,243 @@ const PluginCard = ({
 					: 'rgba(255, 255, 255, 0.85)',
 				backdropFilter: 'blur(12px) saturate(150%)',
 				WebkitBackdropFilter: 'blur(12px) saturate(150%)',
+				transition: 'all 0.2s ease',
 				'&:hover': {
 					borderColor: 'primary.main',
-					boxShadow: 3,
+					boxShadow: muiTheme.palette.mode === 'dark'
+						? '0 8px 32px rgba(0, 0, 0, 0.3)'
+						: '0 8px 32px rgba(0, 0, 0, 0.1)',
+					transform: 'translateY(-2px)',
 					cursor: 'pointer'
 				}
 			})}
 			onClick={() => onSelect(plugin.id)}
 		>
-			<CardContent sx={{ pb: 1.5, flex: 1, display: 'flex', flexDirection: 'column' }}>
-				<Stack direction="row" spacing={2} alignItems="center" sx={{ mb: 1.5 }}>
+			{/* 状态标签 - 右上角定位 */}
+			<Box sx={{ position: 'absolute', top: 12, right: 12, zIndex: 1 }}>
+				{isInstalled ? (
+					<Chip
+						size="small"
+						color={isEnabled ? 'success' : 'default'}
+						icon={isEnabled ? <CheckCircleOutline fontSize="small" /> : <PowerSettingsNewRounded fontSize="small" />}
+						label={isEnabled ? '已启用' : '已禁用'}
+						sx={{ 
+							fontWeight: 500,
+							'& .MuiChip-icon': { fontSize: '0.9rem' }
+						}}
+					/>
+				) : (
+					<Chip 
+						size="small" 
+						color="primary" 
+						variant="outlined" 
+						label="未安装"
+						sx={{ fontWeight: 500 }}
+					/>
+				)}
+			</Box>
+
+			<CardContent sx={{ pb: 1.5, flex: 1, display: 'flex', flexDirection: 'column', pt: 2 }}>
+				{/* 头部：图标和基本信息 */}
+				<Stack direction="row" spacing={2} alignItems="flex-start" sx={{ mb: 2 }}>
 					{plugin.icon ? (
-						<Avatar src={plugin.icon} alt={plugin.name} sx={{ width: 48, height: 48 }} />
+						<Avatar 
+							variant="circular"
+							src={plugin.icon} 
+							alt={plugin.name} 
+							sx={{ 
+								width: 52, 
+								height: 52,
+								boxShadow: 1,
+								flexShrink: 0,
+								borderRadius: '50%'
+							}} 
+						/>
 					) : (
-						defaultPluginIcon(plugin.name)
+						<Avatar 
+							variant="circular"
+							sx={{ 
+								bgcolor: 'primary.main', 
+								color: 'primary.contrastText',
+								width: 52,
+								height: 52,
+								fontSize: '1.25rem',
+								fontWeight: 600,
+								boxShadow: 1,
+								flexShrink: 0,
+								borderRadius: '50%'
+							}}
+						>
+							{(plugin.name || '').trim().slice(0, 2).toUpperCase() || 'P'}
+						</Avatar>
 					)}
-					<Box sx={{ flexGrow: 1 }}>
-						<Typography variant="h6" component="div" sx={{ lineHeight: 1.2 }}>
+					<Box sx={{ flexGrow: 1, minWidth: 0, pr: 8 }}>
+						<Typography 
+							variant="h6" 
+							component="div" 
+							sx={{ 
+								lineHeight: 1.3,
+								fontWeight: 600,
+								overflow: 'hidden',
+								textOverflow: 'ellipsis',
+								whiteSpace: 'nowrap'
+							}}
+						>
 							{plugin.manifest?.name || plugin.name || '未知插件'}
 						</Typography>
-						<Stack direction="row" spacing={1} alignItems="center" sx={{ mt: 0.5 }}>
-							<Typography variant="body2" color="text.secondary">
-								v{plugin.manifest?.version || plugin.version || '未知'}
+						<Stack 
+							direction="row" 
+							spacing={0.75} 
+							alignItems="center" 
+							sx={{ mt: 0.5, flexWrap: 'wrap', gap: 0.5 }}
+						>
+							<Typography 
+								variant="caption" 
+								sx={{ 
+									color: 'text.secondary',
+									fontWeight: 500,
+									backgroundColor: (theme) => theme.palette.mode === 'dark' 
+										? 'rgba(255,255,255,0.08)' 
+										: 'rgba(0,0,0,0.04)',
+									px: 0.75,
+									py: 0.25,
+									borderRadius: 0.5
+								}}
+							>
+								v{plugin.manifest?.version || plugin.version || '0.0.0'}
 							</Typography>
 							{plugin.author?.name && (
-								<Chip
-									size="small"
-									label={plugin.author.name}
-									variant="outlined"
-									sx={{ borderRadius: 1 }}
-								/>
-							)}
-							{plugin.sourceType && (
-								<Chip
-									size="small"
-									label={plugin.sourceType === 'development' ?
-										(plugin.sourceLabel === 'examples' ? '示例' : '本地') :
-										'已安装'
-									}
-									color={plugin.sourceType === 'development' ? 'secondary' : 'default'}
-									variant="outlined"
-									sx={{ borderRadius: 1 }}
-								/>
+								<Typography 
+									variant="caption" 
+									sx={{ color: 'text.secondary' }}
+								>
+									by {plugin.author.name}
+								</Typography>
 							)}
 						</Stack>
 					</Box>
-					{isInstalled ? (
-						<Chip
-							size="small"
-							color={isEnabled ? 'success' : 'default'}
-							icon={isEnabled ? <CheckCircleOutline /> : <PowerSettingsNewRounded fontSize="small" />}
-							label={isEnabled ? '已启用' : '已安装'}
-						/>
-					) : (
-						<Chip size="small" color="primary" variant="outlined" label="未安装" />
-					)}
 				</Stack>
 
+				{/* 描述区域 */}
 				<Typography 
 					variant="body2" 
 					color="text.secondary" 
 					sx={{ 
-						height: compact ? 'auto' : 60,
+						minHeight: compact ? 'auto' : 54,
 						overflow: 'hidden',
 						display: '-webkit-box',
-						WebkitLineClamp: 3,
+						WebkitLineClamp: compact ? 2 : 3,
 						WebkitBoxOrient: 'vertical',
 						textOverflow: 'ellipsis',
-						flex: compact ? 'none' : 1
+						lineHeight: 1.5,
+						mb: 1.5
 					}}
 				>
 					{description}
 				</Typography>
 
-				<Stack direction="row" spacing={1} sx={{ mt: 'auto', pt: 1.5, flexWrap: 'wrap', gap: 0.5 }}>
-					{categories.slice(0, 3).map((category) => (
-						<Chip key={category} size="small" label={category} variant="outlined" />
-					))}
-					{categories.length > 3 && (
-						<Chip size="small" label={`+${categories.length - 3}`} variant="outlined" />
-					)}
-					{hasUpdate && (
-						<Chip size="small" color="warning" label="可更新" />
-					)}
-				</Stack>
+				{/* 标签区域 */}
+				<Box sx={{ mt: 'auto' }}>
+					<Stack 
+						direction="row" 
+						sx={{ 
+							flexWrap: 'wrap', 
+							gap: 0.5,
+							'& .MuiChip-root': {
+								height: 22,
+								fontSize: '0.7rem'
+							}
+						}}
+					>
+						{plugin.sourceType && (
+							<Chip
+								size="small"
+								label={plugin.sourceType === 'development' ?
+									(plugin.sourceLabel === 'examples' ? '📦 示例' : '💻 本地') :
+									'☁️ 云端'
+								}
+								color={plugin.sourceType === 'development' ? 'secondary' : 'default'}
+								variant="filled"
+								sx={{ 
+									fontWeight: 500,
+									opacity: 0.9
+								}}
+							/>
+						)}
+						{categories.slice(0, 2).map((category) => (
+							<Chip 
+								key={category} 
+								size="small" 
+								label={category} 
+								variant="outlined"
+								sx={{ opacity: 0.8 }}
+							/>
+						))}
+						{categories.length > 2 && (
+							<Chip 
+								size="small" 
+								label={`+${categories.length - 2}`} 
+								variant="outlined"
+								sx={{ opacity: 0.6 }}
+							/>
+						)}
+						{hasUpdate && (
+							<Chip 
+								size="small" 
+								color="warning" 
+								label="🔄 可更新"
+								sx={{ fontWeight: 500 }}
+							/>
+						)}
+					</Stack>
+				</Box>
 			</CardContent>
 
-			<Divider sx={{ mx: 2 }} />
-
-			<CardActions sx={{ justifyContent: 'space-between', px: 2, py: 1.5 }}>
+			{/* 操作区域 */}
+			<Box 
+				sx={(muiTheme) => ({ 
+					px: 2, 
+					py: 1.5,
+					borderTop: `1px solid ${muiTheme.palette.divider}`,
+					backgroundColor: muiTheme.palette.mode === 'dark'
+						? 'rgba(0, 0, 0, 0.1)'
+						: 'rgba(0, 0, 0, 0.02)',
+					display: 'flex',
+					justifyContent: 'space-between',
+					alignItems: 'center'
+				})}
+			>
 				<Button
 					size="small"
 					color="primary"
-					startIcon={<RocketLaunchRounded />}
+					startIcon={<RocketLaunchRounded fontSize="small" />}
 					onClick={(event) => {
 						event.stopPropagation()
 						onSelect(plugin.id)
 					}}
+					sx={{ 
+						textTransform: 'none',
+						fontWeight: 500
+					}}
 				>
-					详情
+					查看详情
 				</Button>
 
-				<Stack direction="row" spacing={1}>
+				<Stack direction="row" spacing={0.75} alignItems="center">
 					{!isInstalled && (
 						<Button
 							size="small"
 							variant="contained"
-							startIcon={<CloudDownloadRounded />}
+							startIcon={<CloudDownloadRounded fontSize="small" />}
 							disabled={Boolean(pendingAction)}
 							onClick={(event) => {
 								event.stopPropagation()
 								onInstall(plugin.id)
+							}}
+							sx={{ 
+								textTransform: 'none',
+								fontWeight: 500,
+								boxShadow: 1
 							}}
 						>
 							安装
@@ -240,28 +372,26 @@ const PluginCard = ({
 					)}
 
 					{isInstalled && (
-						<Tooltip title={isEnabled ? '禁用插件' : '启用插件'}>
-							<span>
-								<Button
-									size="small"
-									variant={isEnabled ? 'outlined' : 'contained'}
-									color={isEnabled ? 'warning' : 'primary'}
-									disabled={Boolean(pendingAction)}
-									startIcon={<PowerSettingsNewRounded />}
-									onClick={(event) => {
-										event.stopPropagation()
-										onEnableToggle(plugin.id, !isEnabled)
-									}}
-								>
-									{isEnabled ? '禁用' : '启用'}
-								</Button>
-							</span>
-						</Tooltip>
-					)}
-
-					{isInstalled && (
-						<Tooltip title="卸载插件">
-							<span>
+						<>
+							<Button
+								size="small"
+								variant={isEnabled ? 'outlined' : 'contained'}
+								color={isEnabled ? 'warning' : 'success'}
+								disabled={Boolean(pendingAction)}
+								startIcon={<PowerSettingsNewRounded fontSize="small" />}
+								onClick={(event) => {
+									event.stopPropagation()
+									onEnableToggle(plugin.id, !isEnabled)
+								}}
+								sx={{ 
+									textTransform: 'none',
+									fontWeight: 500,
+									minWidth: 72
+								}}
+							>
+								{isEnabled ? '禁用' : '启用'}
+							</Button>
+							<Tooltip title="卸载插件">
 								<IconButton
 									size="small"
 									color="error"
@@ -270,16 +400,32 @@ const PluginCard = ({
 										event.stopPropagation()
 										onUninstall(plugin.id)
 									}}
+									sx={{
+										'&:hover': {
+											backgroundColor: 'error.main',
+											color: 'error.contrastText'
+										}
+									}}
 								>
 									<DeleteRounded fontSize="small" />
 								</IconButton>
-							</span>
-						</Tooltip>
+							</Tooltip>
+						</>
 					)}
 				</Stack>
-			</CardActions>
+			</Box>
 
-			{pendingAction && <LinearProgress sx={{ position: 'absolute', bottom: 0, left: 0, right: 0 }} />}
+			{pendingAction && (
+				<LinearProgress 
+					sx={{ 
+						position: 'absolute', 
+						bottom: 0, 
+						left: 0, 
+						right: 0,
+						borderRadius: '0 0 8px 8px'
+					}} 
+				/>
+			)}
 		</Card>
 	)
 }
@@ -346,7 +492,12 @@ const PluginDetailDrawer = ({
 			<Stack spacing={2}>
 				<Stack direction="row" spacing={2} alignItems="center">
 					{plugin.icon ? (
-						<Avatar src={plugin.icon} alt={plugin.name} sx={{ width: 56, height: 56 }} />
+						<Avatar 
+							variant="circular"
+							src={plugin.icon} 
+							alt={plugin.name} 
+							sx={{ width: 56, height: 56, borderRadius: '50%' }} 
+						/>
 					) : (
 						defaultPluginIcon(plugin.name)
 					)}
@@ -487,7 +638,9 @@ const PluginStore = () => {
 
 	const [availablePlugins, setAvailablePlugins] = useState([])
 	const [installedPlugins, setInstalledPlugins] = useState([])
+	const [localPlugins, setLocalPlugins] = useState([])
 	const [loading, setLoading] = useState(true)
+	const [localLoading, setLocalLoading] = useState(false)
 	const [error, setError] = useState(null)
 	const [pendingActions, setPendingActions] = useState({})
 	const [snackbar, setSnackbar] = useState({ open: false, severity: 'success', message: '' })
@@ -551,15 +704,6 @@ const PluginStore = () => {
 		}
 	}, [pluginStoreFilters.tab, loadLocalPlugins])
 
-	const updateAvailable = useCallback((updater) => {
-		setAvailablePlugins((prev) => {
-			const next = updater(prev)
-			// 不要在 setState 回调中调用另一个 setState
-			// 将 synchronizeCategories 移到 useEffect 中处理
-			return next
-		})
-	}, [])
-
 	// 当 availablePlugins 改变时，同步更新分类
 	useEffect(() => {
 		if (availablePlugins.length > 0) {
@@ -571,7 +715,7 @@ const PluginStore = () => {
 		const unsubscribe = subscribePluginEvents((event) => {
 			if (!event || !event.pluginId) return
 
-			updateAvailable((prev) => {
+			setAvailablePlugins((prev) => {
 				return prev.map((item) => {
 					if (item.id !== event.pluginId) return item
 
@@ -672,7 +816,7 @@ const PluginStore = () => {
 			unsubscribe && unsubscribe()
 			detachUi && detachUi()
 		}
-	}, [showMessage, updateAvailable])
+	}, [showMessage])
 
 	const withPendingAction = useCallback(async (pluginId, actionKey, runner, successMessage) => {
 		setPendingActions((prev) => ({ ...prev, [pluginId]: actionKey }))
@@ -762,9 +906,6 @@ const PluginStore = () => {
 		if (pluginStoreFilters.tab !== 'installed') return []
 		return filterPlugins(installedPlugins, pluginStoreFilters)
 	}, [installedPlugins, pluginStoreFilters])
-
-	const [localPlugins, setLocalPlugins] = useState([])
-	const [localLoading, setLocalLoading] = useState(false)
 
 	const filteredLocal = useMemo(() => {
 		if (pluginStoreFilters.tab !== 'local') return []
@@ -922,34 +1063,48 @@ const PluginStore = () => {
 					sx={{
 						display: 'grid',
 						gridTemplateColumns: 'repeat(auto-fill, minmax(280px, 1fr))',
-						gap: 2
+						gap: 2,
+						px: 1,
+						py: 0.5
 					}}
 				>
-					{filteredLocal.map((plugin) => (
-						<PluginCard
-							key={plugin.id}
-							plugin={plugin}
-							isInstalled={plugin.installed || installedPlugins.some((item) => item.id === plugin.id)}
-							isEnabled={plugin.enabled}
-							hasUpdate={plugin.hasUpdate}
-							pendingAction={pendingActionFor(plugin.id)}
-							onInstall={handleInstall}
-							onEnableToggle={handleEnableToggle}
-							onUninstall={handleUninstall}
-							onSelect={handleSelectPlugin}
-							compact={false}
-						/>
-					))}
+					{filteredLocal.map((plugin) => {
+						const status = getPluginStatus(plugin)
+						return (
+							<PluginCard
+								key={plugin.id}
+								plugin={plugin}
+								isInstalled={status.isInstalled}
+								isEnabled={status.isEnabled}
+								hasUpdate={plugin.hasUpdate}
+								pendingAction={pendingActionFor(plugin.id)}
+								onInstall={handleInstall}
+								onEnableToggle={handleEnableToggle}
+								onUninstall={handleUninstall}
+								onSelect={handleSelectPlugin}
+								compact={false}
+							/>
+						)
+					})}
 				</Box>
 			)}
 		</Box>
 	)
 
+	// 辅助函数：获取插件的安装和启用状态
+	const getPluginStatus = useCallback((plugin) => {
+		const installedPlugin = installedPlugins.find(p => p.id === plugin.id)
+		return {
+			isInstalled: Boolean(plugin.installed || installedPlugin),
+			isEnabled: installedPlugin?.enabled || false
+		}
+	}, [installedPlugins])
+
 	const pluginsToRender = pluginStoreFilters.tab === 'market' ? filteredAvailable : filteredInstalled
 
 	return (
 		<Box sx={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
-			<Stack direction={{ xs: 'column', sm: 'row' }} spacing={2} alignItems={{ xs: 'stretch', sm: 'center' }} sx={{ mb: 3 }}>
+			<Stack direction={{ xs: 'column', sm: 'row' }} spacing={2} alignItems={{ xs: 'stretch', sm: 'center' }} sx={{ mb: 3, px: 1 }}>
 				<TextField
 					placeholder="搜索插件"
 					size="small"
@@ -991,24 +1146,29 @@ const PluginStore = () => {
 						sx={{
 							display: 'grid',
 							gridTemplateColumns: 'repeat(auto-fill, minmax(280px, 1fr))',
-							gap: 2
+							gap: 2,
+							px: 1,
+							py: 0.5
 						}}
 					>
-						{pluginsToRender.map((plugin) => (
-							<PluginCard
-								key={plugin.id}
-								plugin={plugin}
-								isInstalled={plugin.installed || installedPlugins.some((item) => item.id === plugin.id)}
-								isEnabled={plugin.enabled}
-								hasUpdate={plugin.hasUpdate}
-								pendingAction={pendingActionFor(plugin.id)}
-								onInstall={handleInstall}
-								onEnableToggle={handleEnableToggle}
-								onUninstall={handleUninstall}
-								onSelect={handleSelectPlugin}
-								compact={false}
-							/>
-						))}
+						{pluginsToRender.map((plugin) => {
+							const status = getPluginStatus(plugin)
+							return (
+								<PluginCard
+									key={plugin.id}
+									plugin={plugin}
+									isInstalled={status.isInstalled}
+									isEnabled={status.isEnabled}
+									hasUpdate={plugin.hasUpdate}
+									pendingAction={pendingActionFor(plugin.id)}
+									onInstall={handleInstall}
+									onEnableToggle={handleEnableToggle}
+									onUninstall={handleUninstall}
+									onSelect={handleSelectPlugin}
+									compact={false}
+								/>
+							)
+						})}
 					</Box>
 				)}
 			</Box>

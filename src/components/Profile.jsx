@@ -70,7 +70,9 @@ const Profile = () => {
             completed: 0,
             pending: 0,
             overdue: 0,
-            dueToday: 0
+            dueToday: 0,
+            completedOnTime: 0,
+            onTimeRate: 0
           });
         }
 
@@ -106,7 +108,9 @@ const Profile = () => {
     completed: 0,
     pending: 0,
     overdue: 0,
-    dueToday: 0
+    dueToday: 0,
+    completedOnTime: 0,
+    onTimeRate: 0
   };
 
   const completionRate = todoStatsDisplay.total > 0
@@ -462,10 +466,35 @@ const Profile = () => {
                 }}
               />
             </Box>
+            <Box sx={{ mb: 2 }}>
+              <Box sx={{ display: 'flex', justifyContent: 'space-between', mb: 1 }}>
+                <Typography variant="caption">按时完成率</Typography>
+                <Typography variant="caption" sx={{ fontWeight: 600 }}>
+                  {todoStatsDisplay.onTimeRate || 0}%
+                </Typography>
+              </Box>
+              <LinearProgress
+                variant="determinate"
+                value={todoStatsDisplay.onTimeRate || 0}
+                sx={{
+                  height: 8,
+                  borderRadius: 4,
+                  bgcolor: 'grey.200',
+                  '& .MuiLinearProgress-bar': {
+                    bgcolor: 'info.main',
+                    borderRadius: 4
+                  }
+                }}
+              />
+            </Box>
             <Stack spacing={1}>
               <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                 <Typography variant="body2">已完成</Typography>
                 <Chip label={todoStatsDisplay.completed} size="small" color="success" />
+              </Box>
+              <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                <Typography variant="body2">按时完成</Typography>
+                <Chip label={todoStatsDisplay.completedOnTime || 0} size="small" color="info" />
               </Box>
               <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                 <Typography variant="body2">进行中</Typography>

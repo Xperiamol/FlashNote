@@ -608,8 +608,17 @@ class PluginManager extends EventEmitter {
 				// 读取目录内容
 				const entries = await fsp.readdir(baseDir, { withFileTypes: true })
 				
+				// 排除非插件目录（storage=插件存储，cache/temp=临时文件，examples/local=开发环境专用）
+				const excludeDirs = ['storage', 'cache', 'temp', '.git', 'node_modules', 'examples', 'local']
+				
 				for (const entry of entries) {
 					if (!entry.isDirectory()) continue
+					
+					// 跳过排除的目录
+					if (excludeDirs.includes(entry.name)) {
+						this.logger.debug(`[PluginManager] 跳过非插件目录 [${dirInfo.type}:${dirInfo.label}]: ${entry.name}`)
+						continue
+					}
 					
 					const pluginDir = path.join(baseDir, entry.name)
 					const manifestPath = path.join(pluginDir, 'manifest.json')

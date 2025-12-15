@@ -150,42 +150,37 @@ const ProxySettings = ({ showSnackbar }) => {
 
         <Divider />
 
-        {/* 主机地址 */}
+        {/* 配置 */}
         <ListItem>
-          <ListItemText
-            primary={t('proxy.hostAddress')}
-            secondary={t('proxy.hostAddressDesc')}
-          />
-          <ListItemSecondaryAction>
-            <TextField
-              value={config.host}
-              onChange={(e) => setConfig({ ...config, host: e.target.value })}
-              placeholder="127.0.0.1"
-              disabled={!config.enabled}
-              size="small"
-              sx={{ width: 200 }}
-            />
-          </ListItemSecondaryAction>
-        </ListItem>
+          <Box sx={{ width: '100%' }}>
+            <Typography variant="subtitle2" sx={{ mb: 1, fontWeight: 700 }}>
+              {t('proxy.hostAddress')}
+            </Typography>
+            <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mb: 1.5 }}>
+              {t('proxy.hostAddressDesc')}
+            </Typography>
 
-        <Divider />
-
-        {/* 端口 */}
-        <ListItem>
-          <ListItemText
-            primary={t('proxy.port')}
-            secondary={t('proxy.portDesc')}
-          />
-          <ListItemSecondaryAction>
-            <TextField
-              value={config.port}
-              onChange={(e) => setConfig({ ...config, port: e.target.value })}
-              placeholder="7890"
-              disabled={!config.enabled}
-              size="small"
-              sx={{ width: 120 }}
-            />
-          </ListItemSecondaryAction>
+            <Box sx={{ display: 'flex', gap: 2, flexWrap: 'wrap' }}>
+              <TextField
+                value={config.host}
+                onChange={(e) => setConfig({ ...config, host: e.target.value })}
+                placeholder="127.0.0.1"
+                disabled={!config.enabled}
+                size="small"
+                label={t('proxy.hostAddress')}
+                sx={{ flex: '1 1 220px' }}
+              />
+              <TextField
+                value={config.port}
+                onChange={(e) => setConfig({ ...config, port: e.target.value })}
+                placeholder="7890"
+                disabled={!config.enabled}
+                size="small"
+                label={t('proxy.port')}
+                sx={{ flex: '0 0 140px' }}
+              />
+            </Box>
+          </Box>
         </ListItem>
 
         <Divider />
@@ -193,7 +188,7 @@ const ProxySettings = ({ showSnackbar }) => {
         {/* 常用配置 */}
         <ListItem>
           <Box sx={{ width: '100%' }}>
-            <Typography variant="subtitle2" sx={{ mb: 1 }}>
+            <Typography variant="subtitle2" sx={{ mb: 1, fontWeight: 700 }}>
               {t('proxy.commonConfigs')}
             </Typography>
             <Box sx={{ display: 'flex', gap: 1, flexWrap: 'wrap' }}>
@@ -223,16 +218,20 @@ const ProxySettings = ({ showSnackbar }) => {
 
         {/* 操作按钮 */}
         <ListItem>
-          <Box sx={{ display: 'flex', gap: 2, width: '100%' }}>
+          <Box sx={{ display: 'flex', alignItems: 'center', gap: 2, width: '100%' }}>
             <Button
               variant="contained"
+              size="small"
               onClick={handleSave}
             >
               {t('proxy.saveConfig')}
             </Button>
 
+            <Box sx={{ flex: 1 }} />
+
             <Button
               variant="outlined"
+              size="small"
               onClick={handleTest}
               disabled={!config.enabled || testing}
             >
@@ -246,8 +245,8 @@ const ProxySettings = ({ showSnackbar }) => {
         {/* 帮助信息 */}
         <ListItem>
           <Box>
-            <Typography variant="subtitle2" gutterBottom color="text.secondary">
-              📖 {t('proxy.usageInstructions')}
+            <Typography variant="subtitle2" gutterBottom color="text.secondary" sx={{ fontWeight: 700 }}>
+              {t('proxy.usageInstructions')}
             </Typography>
             <Typography variant="body2" color="text.secondary">
               {t('proxy.usageInstructionsList', { returnObjects: true }).map((item, index) => (
@@ -256,8 +255,8 @@ const ProxySettings = ({ showSnackbar }) => {
                 </React.Fragment>
               ))}
             </Typography>
-            <Typography variant="subtitle2" gutterBottom color="text.secondary" sx={{ mt: 2 }}>
-              ⚠️ {t('proxy.importantNotes')}
+            <Typography variant="subtitle2" gutterBottom color="text.secondary" sx={{ mt: 2, fontWeight: 700 }}>
+              {t('proxy.importantNotes')}
             </Typography>
             <Typography variant="body2" color="text.secondary">
               {t('proxy.importantNotesList', { returnObjects: true }).map((item, index) => (

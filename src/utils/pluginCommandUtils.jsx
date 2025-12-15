@@ -63,7 +63,8 @@ export const getPluginCommandIcon = (command, options = {}) => {
           sx={{
             width: size,
             height: size,
-            objectFit: 'contain'
+            objectFit: 'cover',
+            borderRadius: '50%'
           }}
         />
       )

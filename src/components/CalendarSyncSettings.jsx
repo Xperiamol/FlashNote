@@ -222,15 +222,18 @@ const CalendarSyncSettings = () => {
                   helperText="建议使用应用专用密码而不是主密码"
                 />
 
-                <Button
-                  variant="outlined"
-                  size="small"
-                  startIcon={testing ? <CircularProgress size={16} /> : <CheckCircle />}
-                  onClick={handleTestConnection}
-                  disabled={testing}
-                >
-                  测试连接
-                </Button>
+                <Box sx={{ display: 'flex', alignItems: 'center', gap: 2 }}>
+                  <Box sx={{ flex: 1 }} />
+                  <Button
+                    variant="outlined"
+                    size="small"
+                    startIcon={testing ? <CircularProgress size={16} /> : <CheckCircle />}
+                    onClick={handleTestConnection}
+                    disabled={testing}
+                  >
+                    测试连接
+                  </Button>
+                </Box>
               </Box>
             </ListItem>
 
@@ -283,24 +286,30 @@ const CalendarSyncSettings = () => {
                   >
                     <MenuItem value="bidirectional">
                       <Box>
-                        <Typography>双向同步</Typography>
-                        <Typography variant="caption" color="text.secondary">
+                        <Typography variant="body2" sx={{ fontWeight: 600 }}>
+                          双向同步
+                        </Typography>
+                        <Typography variant="caption" color="text.secondary" sx={{ display: 'block' }}>
                           FlashNote ↔ 日历 (推荐)
                         </Typography>
                       </Box>
                     </MenuItem>
                     <MenuItem value="upload">
                       <Box>
-                        <Typography>仅上传</Typography>
-                        <Typography variant="caption" color="text.secondary">
+                        <Typography variant="body2" sx={{ fontWeight: 600 }}>
+                          仅上传
+                        </Typography>
+                        <Typography variant="caption" color="text.secondary" sx={{ display: 'block' }}>
                           FlashNote → 日历
                         </Typography>
                       </Box>
                     </MenuItem>
                     <MenuItem value="download">
                       <Box>
-                        <Typography>仅下载</Typography>
-                        <Typography variant="caption" color="text.secondary">
+                        <Typography variant="body2" sx={{ fontWeight: 600 }}>
+                          仅下载
+                        </Typography>
+                        <Typography variant="caption" color="text.secondary" sx={{ display: 'block' }}>
                           日历 → FlashNote
                         </Typography>
                       </Box>
@@ -310,7 +319,7 @@ const CalendarSyncSettings = () => {
 
                 <FormControl fullWidth size="small">
                   <InputLabel>自动同步间隔</InputLabel>
-                  <Select
+                  <Select size="small"
                     value={config.syncInterval}
                     label="自动同步间隔"
                     onChange={(e) => setConfig({ ...config, syncInterval: e.target.value })}
@@ -329,7 +338,7 @@ const CalendarSyncSettings = () => {
 
             {/* 操作按钮 */}
             <ListItem>
-              <Box sx={{ display: 'flex', gap: 2, width: '100%' }}>
+              <Box sx={{ display: 'flex', alignItems: 'center', gap: 2, width: '100%' }}>
                 <Button
                   variant="contained"
                   size="small"
@@ -338,6 +347,8 @@ const CalendarSyncSettings = () => {
                 >
                   保存配置
                 </Button>
+
+                <Box sx={{ flex: 1 }} />
 
                 <Button
                   variant="outlined"
@@ -357,7 +368,7 @@ const CalendarSyncSettings = () => {
             <ListItem>
               <Box>
                 <Typography variant="subtitle2" gutterBottom color="text.secondary">
-                  📝 支持的服务商
+                  支持的服务商
                 </Typography>
                 <Typography variant="body2" color="text.secondary">
                   • Google Calendar: https://www.google.com/calendar/dav<br />
@@ -367,7 +378,7 @@ const CalendarSyncSettings = () => {
                 </Typography>
 
                 <Typography variant="subtitle2" gutterBottom color="text.secondary" sx={{ mt: 2 }}>
-                  ⚡ 快速配置指南
+                  快速配置指南
                 </Typography>
                 <Typography variant="body2" color="text.secondary">
                   1. 填写 CalDAV 服务器地址<br />

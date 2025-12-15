@@ -43,7 +43,18 @@ const enUS = {
     profile: 'Profile',
     help: 'Help',
     about: 'About',
-    minibar: 'Minibar'
+    minibar: 'Minibar',
+    minibarMode: 'Minibar Mode',
+    macButtons: {
+      close: 'Close',
+      minimize: 'Minimize',
+      maximize: 'Maximize/Restore'
+    },
+    windowButtons: {
+      close: 'Close',
+      minimize: 'Minimize',
+      maximize: 'Maximize/Restore'
+    }
   },
   common: {
     notes: 'Notes',
@@ -156,6 +167,7 @@ const enUS = {
     resetAll: 'Reset All',
     shortcutConflict: 'Shortcut conflict: conflicts with "{name}"',
     shortcutDisabled: 'Shortcut settings are temporarily unavailable',
+    clickToSetShortcut: 'Click the input and press a key combination',
     importLegacyData: 'Import Legacy Data',
     importLegacyDataDesc: 'Import note data from FlashNote V1.x notes.json file',
     importData: 'Import Data',
@@ -194,6 +206,11 @@ const enUS = {
     calendar: 'Calendar',
     plugins: 'Plugins',
     settings: 'Settings',
+    calendarViewMode: {
+      todos: 'Todos View',
+      notes: 'Notes View',
+      focus: 'Focus Time'
+    },
     allNotes: 'All Notes',
     trash: 'Trash',
     myDay: 'My Day',
@@ -438,6 +455,11 @@ const enUS = {
     autoSyncEnabled: 'Auto sync enabled',
     conflictsDetected: 'Detected {count} sync conflicts that need manual resolution',
     viewConflicts: 'View Conflicts',
+    accountManagement: 'Account Management',
+    noAccountConnected: 'No cloud storage account connected',
+    addAccount: 'Add Account',
+    changeAccount: 'Change Account',
+    disconnectAccount: 'Disconnect',
     selectCloudService: 'Select Cloud Storage Service',
     nutcloudUsername: 'Nutstore Username',
     nutcloudUsernamePlaceholder: 'Enter Nutstore email address',
@@ -452,6 +474,7 @@ const enUS = {
     disableCloudSync: 'Disable Cloud Sync',
     disabling: 'Disabling...',
     syncOperations: 'Sync Operations',
+    syncConfig: 'Sync Configuration',
     syncImages: 'Sync Images',
     syncImagesDesc: 'Automatically sync images in notes to cloud. Note: Nutstore server may be busy, will auto-retry on 503 errors.',
     experimental: 'Experimental',
@@ -462,6 +485,8 @@ const enUS = {
     cleaning: 'Cleaning...',
     versionManagement: 'Version Management',
     forceStop: 'Force Stop',
+    maintenance: 'Maintenance',
+    maintenanceDesc: 'Clean up unreferenced images to free disk space.',
     syncConflicts: 'Sync Conflicts',
     localModifiedTime: 'Local modified time',
     remoteModifiedTime: 'Remote modified time',
@@ -473,6 +498,36 @@ const enUS = {
     orphanedImagesFound: 'Found {count} unused images ({sizeMB} MB){retentionText}',
     cleanupWarning: 'Note: This operation will permanently delete these image files. Images in notes in trash will be preserved, only cleaning images from completely deleted notes.',
     confirmDelete: 'Confirm Delete'
+  },
+  googleCalendar: {
+    accountConnection: 'Account Connection',
+    oauthHint: 'Secure OAuth 2.0 authorization, no password required',
+    authorizing: 'Authorizing, please complete in your browser...',
+    startAuthInfo: 'Starting authorization flow, your browser will open shortly...',
+    authSuccess: 'Authorization successful! Found {count} calendars',
+    connectAccount: 'Connect Google Account',
+    connected: 'Connected to Google Calendar',
+    disconnect: 'Disconnect',
+    disconnectSuccess: 'Disconnected from Google Calendar',
+    enableSync: 'Enable Calendar Sync',
+    needConnectFirst: 'Please connect your Google account first',
+    enableSyncDesc: 'Enable to automatically sync calendar events',
+    lastSync: 'Last sync: {time}',
+    selectCalendar: 'Select Calendar',
+    primaryCalendar: 'Primary',
+    syncOptions: 'Sync Options',
+    syncDirection: 'Sync Direction',
+    syncInterval: 'Auto Sync Interval',
+    directionBidirectionalTitle: 'Bidirectional',
+    directionBidirectionalDesc: 'FlashNote ↔ Google Calendar (recommended)',
+    directionUploadTitle: 'Upload only',
+    directionUploadDesc: 'FlashNote → Google Calendar',
+    directionDownloadTitle: 'Download only',
+    directionDownloadDesc: 'Google Calendar → FlashNote',
+    saveConfig: 'Save',
+    saveSuccess: 'Configuration saved',
+    syncNow: 'Sync Now',
+    syncComplete: 'Sync complete! Upload: {up}, Download: {down}'
   },
   proxy: {
     title: 'Network Proxy Settings',
@@ -554,9 +609,9 @@ const enUS = {
     ]
   },
   about: {
-    appName: 'FlashNote 2.2.2 Zeta',
+    appName: 'FlashNote',
     description: 'A simple and efficient note-taking app',
-    version: 'Version 2.2.2 Zeta',
+    version: 'Version 2.2.2 eta',
     githubRepo: 'GitHub Repository',
     copyright: '© 2025 FlashNote. All rights reserved.'
   },

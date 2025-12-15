@@ -29,7 +29,7 @@ const zhCN = {
     }
   },
   toolbar: {
-    newNote: '随记',
+    newNote: '随手记',
     newTodo: '新建待办',
     search: '搜索',
     filter: '筛选',
@@ -40,10 +40,21 @@ const zhCN = {
     calendar: '日历',
     notes: '笔记',
     todos: '待办',
-    profile: '个人资料',
+    profile: '个人',
     help: '帮助',
     about: '关于',
-    minibar: '迷你栏'
+    minibar: '迷你栏',
+    minibarMode: '迷你栏模式',
+    macButtons: {
+      close: '关闭',
+      minimize: '最小化',
+      maximize: '最大化/还原'
+    },
+    windowButtons: {
+      close: '关闭',
+      minimize: '最小化',
+      maximize: '最大化/还原'
+    }
   },
   common: {
     notes: '笔记',
@@ -157,6 +168,7 @@ const zhCN = {
     resetAll: '重置所有',
     shortcutConflict: '快捷键冲突：与"{name}"冲突',
     shortcutDisabled: '快捷键设置暂时不可更改',
+    clickToSetShortcut: '点击输入框并按下快捷键组合',
     importLegacyData: '导入旧版本数据',
     importLegacyDataDesc: '从 FlashNote V1.x 的 notes.json 文件导入笔记数据',
     importData: '导入数据',
@@ -195,6 +207,11 @@ const zhCN = {
     calendar: '日历',
     plugins: '插件',
     settings: '设置',
+    calendarViewMode: {
+      todos: '待办视图',
+      notes: '笔记视图',
+      focus: '专注时长'
+    },
     allNotes: '全部笔记',
     trash: '回收站',
     myDay: '我的一天',
@@ -451,6 +468,11 @@ const zhCN = {
     autoSyncEnabled: '自动同步已启用',
     conflictsDetected: '检测到 {count} 个同步冲突，需要手动解决',
     viewConflicts: '查看冲突',
+    accountManagement: '账户管理',
+    noAccountConnected: '尚未连接任何云存储账户',
+    addAccount: '新增账户',
+    changeAccount: '更改账户',
+    disconnectAccount: '断开连接',
     selectCloudService: '选择云存储服务',
     nutcloudUsername: '坚果云用户名',
     nutcloudUsernamePlaceholder: '输入坚果云邮箱地址',
@@ -465,6 +487,7 @@ const zhCN = {
     disableCloudSync: '禁用云同步',
     disabling: '禁用中...',
     syncOperations: '同步操作',
+    syncConfig: '同步配置',
     syncImages: '同步图片',
     syncImagesDesc: '自动同步笔记中的图片到云端。注意：坚果云服务器可能繁忙，如遇503错误会自动重试。',
     experimental: '实验性',
@@ -475,6 +498,8 @@ const zhCN = {
     cleaning: '清理中...',
     versionManagement: '版本管理',
     forceStop: '强制停止',
+    maintenance: '维护',
+    maintenanceDesc: '清理未引用图片，释放本地空间。',
     syncConflicts: '同步冲突',
     localModifiedTime: '本地修改时间',
     remoteModifiedTime: '远程修改时间',
@@ -486,6 +511,36 @@ const zhCN = {
     orphanedImagesFound: '发现 {count} 个未引用的图片（{sizeMB} MB）{retentionText}',
     cleanupWarning: '注意：此操作将永久删除这些图片文件。回收站中笔记的图片会保留，只清理已彻底删除笔记的图片。',
     confirmDelete: '确认删除'
+  },
+  googleCalendar: {
+    accountConnection: '账号连接',
+    oauthHint: '使用 OAuth 2.0 安全授权，无需密码',
+    authorizing: '正在授权，请在浏览器中完成操作...',
+    startAuthInfo: '正在启动授权流程，浏览器即将打开...',
+    authSuccess: '授权成功！找到 {count} 个日历',
+    connectAccount: '连接 Google 账号',
+    connected: '已连接到 Google Calendar',
+    disconnect: '断开连接',
+    disconnectSuccess: '已断开 Google Calendar 连接',
+    enableSync: '启用日历同步',
+    needConnectFirst: '请先连接 Google 账号',
+    enableSyncDesc: '开启后自动同步日历事件',
+    lastSync: '上次同步：{time}',
+    selectCalendar: '选择日历',
+    primaryCalendar: '主日历',
+    syncOptions: '同步选项',
+    syncDirection: '同步方向',
+    syncInterval: '自动同步间隔',
+    directionBidirectionalTitle: '双向同步',
+    directionBidirectionalDesc: 'FlashNote ↔ Google Calendar（推荐）',
+    directionUploadTitle: '仅上传',
+    directionUploadDesc: 'FlashNote → Google Calendar',
+    directionDownloadTitle: '仅下载',
+    directionDownloadDesc: 'Google Calendar → FlashNote',
+    saveConfig: '保存配置',
+    saveSuccess: '配置已保存',
+    syncNow: '立即同步',
+    syncComplete: '同步完成！上传: {up}, 下载: {down}'
   },
   proxy: {
     title: '网络代理设置',
@@ -567,9 +622,9 @@ const zhCN = {
     ]
   },
   about: {
-    appName: 'FlashNote 2.2.2 Zeta',
+    appName: 'FlashNote',
     description: '一个简洁高效的笔记应用',
-    version: '版本 2.2.2 Zeta',
+    version: '版本 2.2.2 eta',
     githubRepo: 'GitHub 仓库',
     copyright: '© 2025 FlashNote. All rights reserved.'
   },

@@ -47,7 +47,7 @@ import NoteTypeConversionDialog from './NoteTypeConversionDialog'
 import WYSIWYGEditor from './WYSIWYGEditor'
 import { useDebouncedSave } from '../hooks/useDebouncedSave'
 import { imageAPI } from '../api/imageAPI'
-import { convertMarkdownToWhiteboard } from '../utils/markdownToWhiteboardConverter'
+import { convertMarkdownToWhiteboard, convertWhiteboardToMarkdown, extractImageUrls } from '../utils/markdownToWhiteboardConverter'
 import { useTranslation } from '../utils/i18n'
 import { saveQueue } from '../utils/SaveQueue'
 
@@ -77,7 +77,8 @@ const NoteEditor = () => {
     togglePinNote,
     autoSaveNote,
     editorMode,
-    minibarMode
+    minibarMode,
+    currentView
   } = store
 
   const [title, setTitle] = useState('')
@@ -96,6 +97,7 @@ const NoteEditor = () => {
   const [conversionDialogOpen, setConversionDialogOpen] = useState(false)
   const [pendingNoteType, setPendingNoteType] = useState(null)
   const [whiteboardSaveFunc, setWhiteboardSaveFunc] = useState(null)
+  const [whiteboardGetContentFunc, setWhiteboardGetContentFunc] = useState(null)
   const [whiteboardExportFunc, setWhiteboardExportFunc] = useState(null)
   const [showToolbar, setShowToolbar] = useState(!isStandaloneMode && !minibarMode) // 独立窗口或minibar模式默认隐藏工具栏
   const [wikiLinkError, setWikiLinkError] = useState('') // wiki 链接错误提示
@@ -157,6 +159,49 @@ const NoteEditor = () => {
   // 使用防抖保存 Hook（减少延迟到1500ms）
   const { debouncedSave, saveNow, cancelSave } = useDebouncedSave(performSave, 1500)
 
+  /**
+   * 可撤销的文本插入辅助函数
+   * 使用 execCommand 或 insertText 保持浏览器原生撤销栈
+   * @param {HTMLTextAreaElement} textarea - textarea 元素
+   * @param {string} text - 要插入的文本
+   * @param {number} selStart - 选区起始位置
+   * @param {number} selEnd - 选区结束位置
+   * @param {number} cursorPos - 插入后光标位置（可选，默认为插入文本末尾）
+   */
+  const insertTextWithUndo = (textarea, text, selStart, selEnd, cursorPos = null) => {
+    if (!textarea) return false
+    
+    textarea.focus()
+    textarea.setSelectionRange(selStart, selEnd)
+    
+    // 尝试使用 execCommand 插入文本（支持撤销）
+    let success = false
+    try {
+      success = document.execCommand('insertText', false, text)
+    } catch (e) {
+      success = false
+    }
+    
+    if (!success) {
+      // 回退方案：直接修改内容
+      const newContent = content.substring(0, selStart) + text + content.substring(selEnd)
+      setContent(newContent)
+    }
+    
+    // 更新状态
+    setHasUnsavedChanges(true)
+    prevStateRef.current.content = textarea.value
+    debouncedSave()
+    
+    // 设置光标位置
+    const finalPos = cursorPos !== null ? cursorPos : selStart + text.length
+    setTimeout(() => {
+      textarea.setSelectionRange(finalPos, finalPos)
+    }, 0)
+    
+    return true
+  }
+
   // 同步 hasUnsavedChanges 到 ref
   useEffect(() => {
     hasUnsavedChangesRef.current = hasUnsavedChanges
@@ -192,7 +237,36 @@ const NoteEditor = () => {
 
     // 更新 prevNoteIdRef
     prevNoteIdRef.current = selectedNoteId
-  }, [selectedNoteId, updateNote, cancelSave])  // 检查笔记是否在独立窗口中打开（仅主窗口）
+  }, [selectedNoteId, updateNote, cancelSave])
+
+  // 监听视图切换，从笔记视图切换出去时触发保存
+  const prevViewRef = useRef(currentView)
+  useEffect(() => {
+    const prevView = prevViewRef.current
+    
+    // 如果从笔记视图切换到其他视图，且有选中的笔记且有未保存的更改，立即保存
+    if (prevView === 'notes' && currentView !== 'notes' && selectedNoteId && hasUnsavedChangesRef.current) {
+      console.log('[NoteEditor] 切换视图前保存笔记，从', prevView, '切换到', currentView)
+      cancelSave()
+      saveQueue.add(selectedNoteId, async () => {
+        const stateToSave = {
+          title: prevStateRef.current.title.trim() || '无标题',
+          content: prevStateRef.current.content,
+          category: prevStateRef.current.category.trim(),
+          tags: formatTags(parseTags(prevStateRef.current.tags)),
+          note_type: prevStateRef.current.noteType
+        }
+        await updateNote(selectedNoteId, stateToSave)
+      }).catch(error => {
+        console.error('[NoteEditor] 切换视图时保存失败:', error)
+      })
+    }
+    
+    // 更新前一个视图
+    prevViewRef.current = currentView
+  }, [currentView, selectedNoteId, updateNote, cancelSave])
+
+  // 检查笔记是否在独立窗口中打开（仅主窗口）
   useEffect(() => {
     if (isStandaloneMode || !selectedNoteId) {
       setIsOpenInStandaloneWindow(false)
@@ -217,6 +291,7 @@ const NoteEditor = () => {
   }, [selectedNoteId, isStandaloneMode])
 
   // 第二步：加载新笔记的数据
+  // 重要：只在 selectedNoteId 变化时加载新内容，避免同步更新时覆盖用户正在编辑的内容
   useEffect(() => {
     if (currentNote) {
       const newTitle = currentNote.title || ''
@@ -246,14 +321,16 @@ const NoteEditor = () => {
         noteType: newNoteType
       }
 
-      // 如果是新创建的笔记（标题为"新笔记"且内容为空），自动聚焦到标题输入框
-      if (currentNote.title === '新笔记' && !currentNote.content) {
+      // 如果是新创建的笔记（内容为空），自动聚焦到内容输入框
+      // 支持中文"无标题"和英文"Untitled"
+      const isNewNote = !currentNote.content && 
+        (currentNote.title === '无标题' || currentNote.title === 'Untitled' || currentNote.title === '新笔记');
+      if (isNewNote) {
         setTimeout(() => {
-          if (titleRef.current) {
-            const inputElement = titleRef.current.querySelector('input')
-            if (inputElement) {
-              inputElement.focus()
-              inputElement.select()
+          if (contentRef.current) {
+            const textarea = contentRef.current.querySelector('textarea')
+            if (textarea) {
+              textarea.focus()
             }
           }
         }, 100)
@@ -267,7 +344,8 @@ const NoteEditor = () => {
       setHasUnsavedChanges(false)
       prevStateRef.current = { title: '', content: '', category: '', tags: '' }
     }
-  }, [selectedNoteId, currentNote])
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedNoteId]) // 只依赖 selectedNoteId，不依赖 currentNote，防止同步更新覆盖编辑中的内容
 
   // 暴露保存函数供窗口关闭时调用
   useEffect(() => {
@@ -527,24 +605,103 @@ const NoteEditor = () => {
     }
   }
 
-  // Markdown 转白板
+  // Markdown 转白板（支持图片）
   const convertMarkdownToWhiteboardNote = async () => {
     if (!selectedNoteId) return
 
     try {
-      // 转换 Markdown 内容为白板数据
-      const whiteboardContent = convertMarkdownToWhiteboard(content)
+      // 先保存当前 MD 内容（和白板转换逻辑一样）
+      console.log('MD转白板: 先保存当前内容...')
+      
+      if (hasUnsavedChangesRef.current) {
+        console.log('MD转白板: 检测到未保存的更改，立即保存')
+        cancelSave()
+        saveNow()
+        // 等待保存完成
+        await new Promise(resolve => setTimeout(resolve, 300))
+      }
+      
+      // 从 store 重新获取最新的笔记内容
+      const latestNote = notes.find(n => n.id === selectedNoteId)
+      const markdownContent = latestNote?.content || content || ''
+      
+      console.log('MD转白板: 获取到MD内容长度:', markdownContent.length)
+      
+      // 提取 Markdown 中的图片 URL
+      const imageUrls = extractImageUrls(markdownContent)
+      console.log('MD转白板: 提取到图片URL:', imageUrls)
+      
+      const imageDataMap = {}
+      
+      // 加载图片数据
+      for (const url of imageUrls) {
+        try {
+          // 如果是本地图片路径，读取图片数据
+          if (url.startsWith('flashnote://') || url.startsWith('images/')) {
+            const dataURL = await imageAPI.getBase64(url)
+            if (dataURL) {
+              // 从 dataURL 解析 mimeType
+              const mimeMatch = dataURL.match(/^data:([^;]+);/)
+              const mimeType = mimeMatch ? mimeMatch[1] : 'image/png'
+              imageDataMap[url] = {
+                dataURL: dataURL,
+                mimeType: mimeType
+              }
+              console.log('MD转白板: 加载图片成功:', url)
+            }
+          }
+        } catch (error) {
+          console.warn('MD转白板: 加载图片失败:', url, error)
+        }
+      }
+      
+      // 转换 Markdown 内容为白板数据（包含图片）
+      console.log('MD转白板: 开始转换，图片数据:', Object.keys(imageDataMap).length)
+      const whiteboardContentStr = convertMarkdownToWhiteboard(markdownContent, imageDataMap)
+      console.log('MD转白板: 转换结果长度:', whiteboardContentStr?.length || 0)
+      
+      // 解析白板数据，将图片保存到文件系统（和白板保存逻辑一致）
+      const whiteboardData = JSON.parse(whiteboardContentStr)
+      let finalFileMap = {}
+      
+      if (whiteboardData.fileMap && Object.keys(whiteboardData.fileMap).length > 0) {
+        console.log('MD转白板: 保存图片到文件系统...')
+        const files = whiteboardData.fileMap
+        const result = await window.electronAPI.whiteboard.saveImages(files)
+        
+        if (result.success) {
+          finalFileMap = result.data
+          console.log('MD转白板: 图片保存成功，数量:', Object.keys(finalFileMap).length)
+        } else {
+          console.warn('MD转白板: 图片保存失败:', result.error)
+          // 继续，但图片可能丢失
+        }
+      }
+      
+      // 构建最终的白板数据（使用保存后的 fileMap）
+      const finalWhiteboardData = {
+        ...whiteboardData,
+        fileMap: finalFileMap
+      }
+      const finalWhiteboardContent = JSON.stringify(finalWhiteboardData)
+      console.log('MD转白板: 最终数据长度:', finalWhiteboardContent.length)
 
-      // 更新笔记
-      await updateNote(selectedNoteId, {
-        content: whiteboardContent,
+      // 先更新笔记到数据库（在切换类型之前，确保数据已保存）
+      const updateResult = await updateNote(selectedNoteId, {
+        content: finalWhiteboardContent,
         note_type: 'whiteboard',
         title: title.trim() || '无标题',
         category: category.trim(),
         tags: formatTags(parseTags(tags))
       })
+      
+      if (!updateResult || !updateResult.success) {
+        throw new Error('保存失败: ' + (updateResult?.error || '未知错误'))
+      }
+      
+      console.log('MD转白板: 数据库更新完成')
 
-      // 更新本地状态
+      // 然后更新本地状态，触发 WhiteboardEditor 挂载
       setNoteType('whiteboard')
       setContent('') // 清空 Markdown content 状态（白板数据存储在 note.content 中）
       prevStateRef.current.noteType = 'whiteboard'
@@ -552,43 +709,121 @@ const NoteEditor = () => {
       setHasUnsavedChanges(false)
       hasUnsavedChangesRef.current = false
 
-      console.log('Markdown 转白板成功')
+      console.log('Markdown 转白板成功，处理了', imageUrls.length, '张图片')
     } catch (error) {
       console.error('Markdown 转白板失败:', error)
       throw error
     }
   }
 
-  // 白板转 Markdown
+  // 白板转 Markdown（智能提取内容和图片）
   const convertWhiteboardToMarkdownNote = async () => {
     if (!selectedNoteId) return
 
     try {
-      // 清空内容，切换类型
+      // 直接从白板编辑器获取最新内容（包括图片）
+      console.log('白板转MD: 从编辑器获取最新内容...')
+      
+      if (!whiteboardGetContentFunc) {
+        console.error('白板转MD: whiteboardGetContentFunc 未初始化')
+        return
+      }
+      
+      // 直接获取当前编辑器的内容（会自动保存图片到文件系统）
+      const whiteboardContent = await whiteboardGetContentFunc()
+      
+      if (!whiteboardContent) {
+        console.error('白板转MD: 获取内容失败')
+        return
+      }
+      
+      console.log('白板转MD: 获取到内容长度:', whiteboardContent.length)
+      
+      // 通知白板编辑器正在进行类型转换，避免卸载时自动保存覆盖转换结果
+      window.dispatchEvent(new CustomEvent('whiteboard-type-converting'))
+      
+      // 转换白板为 Markdown
+      const { markdown, imageMap } = convertWhiteboardToMarkdown(whiteboardContent)
+      
+      console.log('白板转MD: 原始markdown长度:', markdown.length)
+      console.log('白板转MD: 图片数量:', Object.keys(imageMap).length)
+      console.log('白板转MD: 图片映射:', imageMap)
+      
+      // 处理图片：将白板中的图片保存为 Markdown 可用的格式
+      let finalMarkdown = markdown
+      
+      for (const [fileName, imageData] of Object.entries(imageMap)) {
+        console.log('白板转MD: 处理图片:', fileName, imageData)
+        
+        try {
+          let dataURL = imageData.dataURL
+          
+          // 如果没有 dataURL，尝试从文件系统加载
+          if (!dataURL && imageData.sourceFileName) {
+            console.log('白板转MD: 从文件系统加载图片:', imageData.sourceFileName)
+            // 加载白板图片
+            const loadResult = await window.electronAPI.whiteboard.loadImage(imageData.sourceFileName)
+            if (loadResult.success) {
+              dataURL = loadResult.data
+              console.log('白板转MD: 图片加载成功，dataURL长度:', dataURL?.length || 0)
+            } else {
+              console.warn('白板转MD: 图片加载失败:', loadResult.error)
+            }
+          }
+          
+          if (dataURL) {
+            // 从 dataURL 提取 buffer 并保存
+            const base64Data = dataURL.split(',')[1]
+            const buffer = Uint8Array.from(atob(base64Data), c => c.charCodeAt(0))
+            const imagePath = await imageAPI.saveFromBuffer(buffer, fileName)
+            console.log('白板转MD: 图片保存成功:', imagePath)
+            
+            // 替换占位符为实际路径
+            const placeholder = `{{IMAGE_PLACEHOLDER:${fileName}}}`
+            finalMarkdown = finalMarkdown.replace(placeholder, imagePath)
+          } else {
+            console.warn('白板转MD: 无法获取图片数据:', fileName)
+            // 移除无法保存的图片占位符
+            finalMarkdown = finalMarkdown.replace(
+              new RegExp(`!\\[[^\\]]*\\]\\(\\{\\{IMAGE_PLACEHOLDER:${fileName}\\}\\}\\)\\n?`, 'g'),
+              ''
+            )
+          }
+        } catch (error) {
+          console.warn('保存图片失败:', fileName, error)
+          // 移除无法保存的图片占位符
+          finalMarkdown = finalMarkdown.replace(
+            new RegExp(`!\\[[^\\]]*\\]\\(\\{\\{IMAGE_PLACEHOLDER:${fileName}\\}\\}\\)\\n?`, 'g'),
+            ''
+          )
+        }
+      }
+      
+      // 先更新本地状态，避免 store 更新触发重渲染时状态不一致
+      setNoteType('markdown')
+      setContent(finalMarkdown)
+      prevStateRef.current.noteType = 'markdown'
+      prevStateRef.current.content = finalMarkdown
+      setHasUnsavedChanges(false)
+      hasUnsavedChangesRef.current = false
+      
+      // 更新笔记到数据库
       await updateNote(selectedNoteId, {
-        content: '',
+        content: finalMarkdown,
         note_type: 'markdown',
         title: title.trim() || '无标题',
         category: category.trim(),
         tags: formatTags(parseTags(tags))
       })
 
-      // 更新本地状态
-      setNoteType('markdown')
-      setContent('')
-      prevStateRef.current.noteType = 'markdown'
-      prevStateRef.current.content = ''
-      setHasUnsavedChanges(false)
-      hasUnsavedChangesRef.current = false
-
-      console.log('白板转 Markdown 成功')
+      console.log('白板转 Markdown 成功，提取了', Object.keys(imageMap).length, '张图片')
     } catch (error) {
       console.error('白板转 Markdown 失败:', error)
       throw error
     }
   }
 
-  // 处理Markdown工具栏插入文本
+  // 处理Markdown工具栏插入文本（支持撤销）
   const handleMarkdownInsert = (before, after = '', placeholder = '') => {
     if (!contentRef.current) return
 
@@ -599,16 +834,27 @@ const NoteEditor = () => {
     const end = textarea.selectionEnd
     const selectedText = content.substring(start, end)
     const textToInsert = selectedText || placeholder
+    const insertedText = before + textToInsert + after
 
-    const newContent =
-      content.substring(0, start) +
-      before + textToInsert + after +
-      content.substring(end)
-
-    setContent(newContent)
+    // 使用可撤销的方式插入文本
+    textarea.focus()
+    textarea.setSelectionRange(start, end)
+    
+    let success = false
+    try {
+      success = document.execCommand('insertText', false, insertedText)
+    } catch (e) {
+      success = false
+    }
+    
+    if (!success) {
+      // 回退方案：直接修改内容
+      const newContent = content.substring(0, start) + insertedText + content.substring(end)
+      setContent(newContent)
+    }
+    
     setHasUnsavedChanges(true)
-    prevStateRef.current.content = newContent
-    // 触发防抖保存
+    prevStateRef.current.content = textarea.value
     debouncedSave()
 
     // 设置新的光标位置
@@ -651,23 +897,98 @@ const NoteEditor = () => {
   const handleKeyDown = (e) => {
     // 只在Markdown模式下处理特殊键盘事件
     if (editorMode === 'markdown') {
-      // 处理Tab键缩进
+      // 处理退格键和删除键 - 整块删除图片
+      if (e.key === 'Backspace' || e.key === 'Delete') {
+        const textarea = e.target
+        const start = textarea.selectionStart
+        const end = textarea.selectionEnd
+        
+        // 只有在没有选中文本时才处理整块删除
+        if (start === end) {
+          // 匹配图片语法: ![alt](url)
+          const imageRegex = /!\[[^\]]*\]\([^)]+\)/g
+          let match
+          
+          while ((match = imageRegex.exec(content)) !== null) {
+            const matchStart = match.index
+            const matchEnd = match.index + match[0].length
+            
+            // 检查光标是否在图片块内部或紧邻图片块
+            const cursorInImage = start > matchStart && start <= matchEnd
+            const cursorBeforeImage = e.key === 'Delete' && start === matchStart
+            const cursorAfterImage = e.key === 'Backspace' && start === matchEnd
+            
+            if (cursorInImage || cursorBeforeImage || cursorAfterImage) {
+              e.preventDefault()
+              
+              // 删除整个图片块（包括前后可能的换行符）
+              let deleteStart = matchStart
+              let deleteEnd = matchEnd
+              
+              // 如果图片前面是换行符，也删除它
+              if (deleteStart > 0 && content[deleteStart - 1] === '\n') {
+                deleteStart--
+              }
+              // 如果图片后面是换行符，也删除它
+              if (deleteEnd < content.length && content[deleteEnd] === '\n') {
+                deleteEnd++
+              }
+              
+              // 使用原生方式删除，保持撤销栈
+              textarea.focus()
+              textarea.setSelectionRange(deleteStart, deleteEnd)
+              
+              // 使用 execCommand 删除选中内容，支持 Ctrl+Z 撤销
+              const deleted = document.execCommand('delete', false)
+              
+              if (!deleted) {
+                // 如果 execCommand 不支持，回退到直接修改
+                const newContent = content.substring(0, deleteStart) + content.substring(deleteEnd)
+                setContent(newContent)
+                setTimeout(() => {
+                  textarea.selectionStart = textarea.selectionEnd = deleteStart
+                }, 0)
+              }
+              
+              setHasUnsavedChanges(true)
+              prevStateRef.current.content = textarea.value
+              debouncedSave()
+              return
+            }
+          }
+        }
+      }
+
+      // 处理Tab键缩进（支持撤销）
       if (e.key === 'Tab') {
         e.preventDefault()
+        const textarea = e.target
+        const start = textarea.selectionStart
+        const end = textarea.selectionEnd
 
-        const start = e.target.selectionStart
-        const end = e.target.selectionEnd
-
-        const newContent = content.substring(0, start) + '  ' + content.substring(end)
-        setContent(newContent)
+        // 使用可撤销的方式插入缩进
+        textarea.focus()
+        textarea.setSelectionRange(start, end)
+        
+        let success = false
+        try {
+          success = document.execCommand('insertText', false, '  ')
+        } catch (err) {
+          success = false
+        }
+        
+        if (!success) {
+          const newContent = content.substring(0, start) + '  ' + content.substring(end)
+          setContent(newContent)
+        }
+        
         setHasUnsavedChanges(true)
-        prevStateRef.current.content = newContent
-        // 触发防抖保存
+        prevStateRef.current.content = textarea.value
         debouncedSave()
 
         // 设置光标位置
         setTimeout(() => {
-          e.target.selectionStart = e.target.selectionEnd = start + 2
+          textarea.selectionStart = textarea.selectionEnd = start + 2
         }, 0)
         return
       }
@@ -706,17 +1027,31 @@ const NoteEditor = () => {
             const fileName = `clipboard_${Date.now()}.png`
             const imagePath = await imageAPI.saveFromBuffer(buffer, fileName)
 
-            // 插入图片到光标位置
+            // 插入图片到光标位置（支持撤销）
             const textarea = contentRef.current?.querySelector('textarea')
             if (textarea) {
               const start = textarea.selectionStart
               const end = textarea.selectionEnd
               const imageMarkdown = `![${fileName}](${imagePath})`
-              const newContent = content.substring(0, start) + imageMarkdown + content.substring(end)
               
-              setContent(newContent)
+              // 使用可撤销的方式插入
+              textarea.focus()
+              textarea.setSelectionRange(start, end)
+              
+              let success = false
+              try {
+                success = document.execCommand('insertText', false, imageMarkdown)
+              } catch (err) {
+                success = false
+              }
+              
+              if (!success) {
+                const newContent = content.substring(0, start) + imageMarkdown + content.substring(end)
+                setContent(newContent)
+              }
+              
               setHasUnsavedChanges(true)
-              prevStateRef.current.content = newContent
+              prevStateRef.current.content = textarea.value
               debouncedSave()
 
               // 设置光标位置到图片markdown之后
@@ -769,13 +1104,26 @@ const NoteEditor = () => {
     const start = position
     const end = position
 
-    // 优先处理文本
+    // 优先处理文本（支持撤销）
     const text = e.dataTransfer.getData('text/plain')
     if (text) {
-      const newContent = content.substring(0, start) + text + content.substring(end)
-      setContent(newContent)
+      textarea.focus()
+      textarea.setSelectionRange(start, end)
+      
+      let success = false
+      try {
+        success = document.execCommand('insertText', false, text)
+      } catch (err) {
+        success = false
+      }
+      
+      if (!success) {
+        const newContent = content.substring(0, start) + text + content.substring(end)
+        setContent(newContent)
+      }
+      
       setHasUnsavedChanges(true)
-      prevStateRef.current.content = newContent
+      prevStateRef.current.content = textarea.value
       debouncedSave()
 
       setTimeout(() => {
@@ -799,10 +1147,24 @@ const NoteEditor = () => {
         insertText += `![${file.name}](${imagePath})\n`
       }
       
-      const newContent = content.substring(0, start) + insertText + content.substring(end)
-      setContent(newContent)
+      // 使用可撤销的方式插入
+      textarea.focus()
+      textarea.setSelectionRange(start, end)
+      
+      let success = false
+      try {
+        success = document.execCommand('insertText', false, insertText)
+      } catch (err) {
+        success = false
+      }
+      
+      if (!success) {
+        const newContent = content.substring(0, start) + insertText + content.substring(end)
+        setContent(newContent)
+      }
+      
       setHasUnsavedChanges(true)
-      prevStateRef.current.content = newContent
+      prevStateRef.current.content = textarea.value
       debouncedSave()
 
       setTimeout(() => {
@@ -1253,15 +1615,7 @@ const NoteEditor = () => {
                           height: '100% !important',
                           overflow: 'auto !important'
                         },
-                        '& textarea': {
-                          // 纯纯写作风格: 消失→显现→消失 (1.5秒)
-                          '@keyframes caret-breath': {
-                            '0%': { caretColor: 'transparent' },
-                            '50%': { caretColor: 'currentColor' },
-                            '100%': { caretColor: 'transparent' }
-                          },
-                          animation: 'caret-breath 1.5s ease-in-out infinite'
-                        }
+
                       }}
                     />
                   ) : (
@@ -1317,6 +1671,7 @@ const NoteEditor = () => {
               showToolbar={showToolbar}
               isStandaloneMode={isStandaloneMode}
               onSaveWhiteboard={(func) => setWhiteboardSaveFunc(() => func)}
+              onGetContent={(func) => setWhiteboardGetContentFunc(() => func)}
               onExportPNG={(func) => setWhiteboardExportFunc(() => func)}
             />
           </Box>
