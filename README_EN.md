@@ -42,7 +42,7 @@ The old 1.x version has been phased out. Welcome to the new version that is more
 - **Two-way Sync**: Todo items and calendar events sync automatically
 - **Multi-device Synchronization**: Achieve multi-device data sync through calendar services
 
-### 🎤 Speech-to-Text (v2.2.2 Zeta+)
+### 🎤 Speech-to-Text (v2.3.0 Zeta+)
 - **Multiple Service Support**: OpenAI Whisper, Alibaba Cloud speech recognition, etc.
 - **High Accuracy**: Supports automatic multi-language recognition
 - **Plugin Invocation**: Provides API support for voice note scenarios

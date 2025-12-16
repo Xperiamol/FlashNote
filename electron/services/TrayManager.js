@@ -158,13 +158,14 @@ class TrayManager {
   showFirstTimeNotification() {
     if (!global.hasShownTrayNotification) {
       const isDev = process.env.NODE_ENV !== 'production';
+      const fs = require('fs');
       const iconPath = isDev
         ? path.join(__dirname, '../../logo.png')
         : path.join(process.resourcesPath, 'logo.png');
       new Notification({
-        title: '闪念速记',
+        title: 'FlashNote',
         body: '应用已最小化到系统托盘，双击托盘图标可重新打开窗口',
-        icon: nativeImage.createFromPath(iconPath)
+        icon: fs.existsSync(iconPath) ? nativeImage.createFromPath(iconPath) : undefined
       }).show();
       global.hasShownTrayNotification = true;
     }

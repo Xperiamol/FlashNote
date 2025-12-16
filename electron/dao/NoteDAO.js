@@ -33,7 +33,9 @@ class NoteDAO {
       content = '', 
       tags = '', 
       category = 'default',
-      note_type = 'markdown' // 新增：笔记类型
+      note_type = 'markdown', // 新增：笔记类型
+      created_at,
+      updated_at
     } = noteData;
     
     // 自动生成 sync_id（如果未提供）
@@ -44,16 +46,18 @@ class NoteDAO {
       // 如果指定了 ID（从远程同步），使用 INSERT OR REPLACE
       const stmt = db.prepare(`
         INSERT OR REPLACE INTO notes (id, sync_id, title, content, tags, category, note_type, created_at, updated_at)
-        VALUES (?, ?, ?, ?, ?, ?, ?, COALESCE((SELECT created_at FROM notes WHERE id = ?), CURRENT_TIMESTAMP), CURRENT_TIMESTAMP)
+        VALUES (?, ?, ?, ?, ?, ?, ?, 
+          COALESCE((SELECT created_at FROM notes WHERE id = ?), COALESCE(?, CURRENT_TIMESTAMP)),
+          COALESCE(?, CURRENT_TIMESTAMP))
       `);
-      result = stmt.run(id, finalSyncId, title, content, tags, category, note_type, id);
+      result = stmt.run(id, finalSyncId, title, content, tags, category, note_type, id, created_at, updated_at);
       result.lastInsertRowid = id;
     } else {
       const stmt = db.prepare(`
         INSERT INTO notes (sync_id, title, content, tags, category, note_type, created_at, updated_at)
-        VALUES (?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+        VALUES (?, ?, ?, ?, ?, ?, COALESCE(?, CURRENT_TIMESTAMP), COALESCE(?, CURRENT_TIMESTAMP))
       `);
-      result = stmt.run(finalSyncId, title, content, tags, category, note_type);
+      result = stmt.run(finalSyncId, title, content, tags, category, note_type, created_at, updated_at);
     }
     
     // 更新标签使用次数
@@ -126,31 +130,31 @@ class NoteDAO {
   update(id, noteData, options = {}) {
     const { skipChangeLog = false } = options;
     const db = this.getDB();
-    const { title, content, tags, category, is_pinned, note_type } = noteData;
-    
+    const { title, content, tags, category, is_pinned, is_deleted, deleted_at, note_type, updated_at } = noteData;
+
     const updates = [];
     const values = [];
-    
+
     if (title !== undefined) {
       updates.push('title = ?');
       values.push(title);
     }
-    
+
     if (content !== undefined) {
       updates.push('content = ?');
       values.push(content);
     }
-    
+
     if (tags !== undefined) {
       updates.push('tags = ?');
       values.push(tags);
-      
+
       // 更新标签使用次数
     if (tags) {
       this.tagService.updateTagsUsage(tags);
     }
     }
-    
+
     if (category !== undefined) {
       updates.push('category = ?');
       values.push(category);
@@ -160,36 +164,57 @@ class NoteDAO {
       updates.push('note_type = ?');
       values.push(note_type);
     }
-    
+
     if (is_pinned !== undefined) {
       updates.push('is_pinned = ?');
       values.push(is_pinned ? 1 : 0);
     }
-    
+
+    if (is_deleted !== undefined) {
+      updates.push('is_deleted = ?');
+      values.push(is_deleted ? 1 : 0);
+      
+      // 处理 deleted_at
+      if (is_deleted) {
+        updates.push('deleted_at = CURRENT_TIMESTAMP');
+      } else {
+        updates.push('deleted_at = NULL');
+      }
+    } else if (deleted_at !== undefined) {
+      updates.push('deleted_at = ?');
+      values.push(deleted_at);
+    }
+
     if (updates.length === 0) {
       return this.findById(id);
     }
-    
-    updates.push('updated_at = CURRENT_TIMESTAMP');
+
+    // 如果提供了 updated_at（同步时），使用提供的值；否则使用当前时间
+    if (updated_at !== undefined) {
+      updates.push('updated_at = ?');
+      values.push(updated_at);
+    } else {
+      updates.push('updated_at = CURRENT_TIMESTAMP');
+    }
     values.push(id);
-    
+
     const stmt = db.prepare(`
-      UPDATE notes 
+      UPDATE notes
       SET ${updates.join(', ')}
       WHERE id = ? AND is_deleted = 0
     `);
-    
+
     stmt.run(...values);
-    
+
     // 获取更新后的完整笔记数据（包含 sync_id）
     const updatedNote = this.findById(id);
-    
+
     // 记录变更日志（同步来源的操作不记录，防止无限循环）
     if (!skipChangeLog && updatedNote) {
       // 传递完整实体数据以确保 sync_id 被记录
       this.changeLog.logChange('note', id, 'update', updatedNote);
     }
-    
+
     return updatedNote;
   }
 

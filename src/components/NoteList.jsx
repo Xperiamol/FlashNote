@@ -347,11 +347,36 @@ const NoteList = ({ showDeleted = false, onMultiSelectChange, onMultiSelectRefCh
     setLocalSearchQuery('')
   }
 
-  const formatDate = (dateString) => {
+  const formatDate = (value) => {
+    if (!value) return t('notes.unknownTime')
+
     try {
-      // SQLite的CURRENT_TIMESTAMP返回UTC时间，需要转换为本地时间
-      const utcDate = new Date(dateString + 'Z') // 添加Z表示UTC时间
-      return formatDistanceToNow(utcDate, {
+      let date
+
+      // 数字 / 纯数字字符串：视为毫秒时间戳
+      if (typeof value === 'number') {
+        date = new Date(value)
+      } else {
+        const str = String(value)
+        if (/^\d+$/.test(str)) {
+          date = new Date(Number(str))
+        } else if (str.includes('T') || str.includes('Z')) {
+          // ISO 格式
+          date = new Date(str)
+        } else {
+          // SQLite CURRENT_TIMESTAMP（UTC，无时区）："YYYY-MM-DD HH:MM:SS"
+          date = new Date(str.replace(' ', 'T') + 'Z')
+        }
+
+        // 兜底再尝试一次
+        if (isNaN(date.getTime())) {
+          date = new Date(str)
+        }
+      }
+
+      if (isNaN(date.getTime())) return t('notes.unknownTime')
+
+      return formatDistanceToNow(date, {
         addSuffix: true,
         locale: dateFnsZhCN
       })

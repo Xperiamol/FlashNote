@@ -42,6 +42,7 @@ import TodoEditDialog from './components/TodoEditDialog'
 import CreateTodoModal from './components/CreateTodoModal'
 import Profile from './components/Profile'
 import CommandPalette from './components/CommandPalette'
+import ConflictResolutionDialog from './components/ConflictResolutionDialog'
 
 function rewriteCssUrls(cssText, sheetHref) {
   if (!cssText || !sheetHref) {
@@ -223,6 +224,10 @@ function App() {
   // 标签选择对话框状态
   const [tagSelectionDialogOpen, setTagSelectionDialogOpen] = useState(false)
   const [selectedNotesForTagging, setSelectedNotesForTagging] = useState([])
+
+  // 同步冲突解决对话框状态
+  const [conflictDialogOpen, setConflictDialogOpen] = useState(false)
+  const [currentConflict, setCurrentConflict] = useState(null)
 
   const appTheme = createAppTheme(theme, primaryColor)
 
@@ -420,6 +425,54 @@ function App() {
       unsubscribe && unsubscribe()
     }
   }, [addPluginCommand, removePluginCommand, refreshPluginCommands])
+
+  // 监听同步冲突事件
+  useEffect(() => {
+    if (!window.electronAPI?.sync?.onConflictDetected) return
+
+    const handleConflict = (conflict) => {
+      console.log('[App] 检测到同步冲突:', conflict)
+      setCurrentConflict(conflict)
+      setConflictDialogOpen(true)
+    }
+
+    const unsubscribe = window.electronAPI.sync.onConflictDetected(handleConflict)
+
+    return () => {
+      if (typeof unsubscribe === 'function') {
+        unsubscribe()
+      }
+    }
+  }, [])
+
+  // 处理冲突解决
+  const handleConflictResolve = async (resolution) => {
+    if (!currentConflict) return
+
+    try {
+      await window.electronAPI.sync.resolveConflict(currentConflict.conflictId, resolution)
+      console.log('[App] 冲突已解决:', resolution)
+      setConflictDialogOpen(false)
+      setCurrentConflict(null)
+    } catch (error) {
+      console.error('[App] 冲突解决失败:', error)
+      // 可以在这里显示错误提示
+    }
+  }
+
+  // 处理冲突取消
+  const handleConflictCancel = async () => {
+    if (!currentConflict) return
+
+    try {
+      await window.electronAPI.sync.resolveConflict(currentConflict.conflictId, 'cancel')
+      console.log('[App] 用户取消冲突解决')
+      setConflictDialogOpen(false)
+      setCurrentConflict(null)
+    } catch (error) {
+      console.error('[App] 取消冲突解决失败:', error)
+    }
+  }
 
   // 创建新待办事项
   const handleCreateTodo = async () => {
@@ -967,49 +1020,6 @@ function App() {
                           }
                         },
                         color: 'success'
-                      },
-                      {
-                        label: todoPermanentDeleteConfirm ? '确认删除' : '永久删除',
-                        icon: <DeleteForeverIcon />,
-                        onClick: async () => {
-                          if (multiSelectState.selectedIds.length === 0) return;
-
-                          if (!todoPermanentDeleteConfirm) {
-                            // 第一次点击，设置确认状态
-                            setTodoPermanentDeleteConfirm(true);
-                            // 3秒后自动重置状态
-                            setTimeout(() => {
-                              setTodoPermanentDeleteConfirm(false);
-                            }, 3000);
-                          } else {
-                            // 第二次点击，执行删除
-                            try {
-                              const result = await batchDeleteTodos(multiSelectState.selectedIds);
-                              if (result.success) {
-                                console.log(`成功永久删除 ${multiSelectState.selectedIds.length} 个待办事项`);
-                                // 触发待办事项列表刷新
-                                setTodoRefreshTrigger(prev => prev + 1);
-                              } else {
-                                console.error('批量删除待办事项失败:', result.error);
-                              }
-                            } catch (error) {
-                              console.error('批量删除失败:', error);
-                            } finally {
-                              setTodoPermanentDeleteConfirm(false);
-                              if (currentMultiSelectRef) {
-                                currentMultiSelectRef.exitMultiSelectMode();
-                              }
-                            }
-                          }
-                        },
-                        color: todoPermanentDeleteConfirm ? 'error' : 'inherit',
-                        sx: todoPermanentDeleteConfirm ? {
-                          backgroundColor: 'error.main',
-                          color: 'error.contrastText',
-                          '&:hover': {
-                            backgroundColor: 'error.dark'
-                          }
-                        } : {}
                       }
                     ] : []
                   }
@@ -1103,6 +1113,14 @@ function App() {
           onConfirm={handleConfirmBatchSetTags}
           noteIds={selectedNotesForTagging}
           getAllTags={getAllTags}
+        />
+
+        {/* 同步冲突解决对话框 */}
+        <ConflictResolutionDialog
+          open={conflictDialogOpen}
+          conflict={currentConflict}
+          onResolve={handleConflictResolve}
+          onCancel={handleConflictCancel}
         />
 
         {/* 插件窗口对话框 */}

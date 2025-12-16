@@ -78,16 +78,16 @@ const SyncStatusIndicator = () => {
         isSyncing: false,
         lastSyncTime: new Date(),
         stats: {
-          pushed: result.localChanges || 0,
-          pulled: result.remoteChanges || 0,
+          pushed: result.uploaded || 0,  // V3使用uploaded
+          pulled: result.downloaded || 0,  // V3使用downloaded
           conflicts: result.conflicts || 0
         },
         error: null  // 只有真正成功才清除错误
       }));
       console.log('[SyncStatusIndicator] 同步成功，清除错误状态');
-      
+
       // 如果有远程更改，刷新笔记和待办列表
-      if (result.remoteChanges > 0) {
+      if (result.downloaded > 0) {  // V3使用downloaded
         console.log('[SyncStatusIndicator] 检测到远程更改，刷新数据列表');
         loadNotes?.();
         loadTodos?.();
@@ -121,31 +121,32 @@ const SyncStatusIndicator = () => {
     try {
       const response = await window.electronAPI?.sync?.getStatus?.();
       console.log('[SyncStatusIndicator] getStatus response:', response); // 调试日志
-      
-      // 后端返回格式：{ hasActiveService, activeService, status: { isEnabled, isSyncing, ... } }
-      if (response && response.hasActiveService && response.status) {
+
+      // V3返回格式：{ v3: { enabled, status, lastSyncTime, config, lastError } }
+      if (response && response.v3) {
+        const v3Status = response.v3;
         setSyncStatus(prev => {
           // 如果前端有错误且后端没有错误，保留前端的错误
           // 因为后端可能没有持久化错误状态
-          const shouldKeepError = prev.error && !response.status.error && !response.status.isSyncing;
+          const shouldKeepError = prev.error && !v3Status.lastError && v3Status.status !== 'syncing';
 
           const nextSyncIntervalMinutes = (() => {
-            const raw = response.status?.config?.syncInterval;
+            const raw = v3Status.config?.autoSyncInterval;
             const n = parseInt(raw, 10);
             return Number.isFinite(n) && n > 0 ? n : prev.syncIntervalMinutes;
           })();
-          
+
           return {
             ...prev,
-            isEnabled: response.status.isEnabled || false,
-            isSyncing: response.status.isSyncing || false,
-            lastSyncTime: response.status.lastSyncTime ? new Date(response.status.lastSyncTime) : prev.lastSyncTime,
-            error: shouldKeepError ? prev.error : (response.status.error || null),
+            isEnabled: v3Status.enabled || false,
+            isSyncing: v3Status.status === 'syncing',
+            lastSyncTime: v3Status.lastSyncTime ? new Date(v3Status.lastSyncTime) : prev.lastSyncTime,
+            error: shouldKeepError ? prev.error : (v3Status.lastError || null),
             syncIntervalMinutes: nextSyncIntervalMinutes
           };
         });
       } else {
-        // 没有活跃服务时，标记为未启用
+        // V3未启用时，标记为未启用
         setSyncStatus(prev => ({
           ...prev,
           isEnabled: false,
@@ -287,50 +288,46 @@ const SyncStatusIndicator = () => {
     const now = new Date();
     const cloudTimeoutMs = getTimeoutMsFromIntervalMinutes(syncStatus.syncIntervalMinutes);
     const calendarTimeoutMs = getTimeoutMsFromIntervalMinutes(calendarStatus.syncIntervalMinutes);
-    
+
     // 检查云同步状态
     if (syncStatus.isEnabled) {
       let hasIssue = false;
-      
+
       // 1. 检查是否有错误
       if (syncStatus.error) {
         hasIssue = true;
       }
-      
-      // 2. 检查是否超过10分钟未同步
+
+      // 2. 检查是否超过 2 倍间隔时间未同步（给予宽限期）
       if (syncStatus.lastSyncTime) {
         const timeSinceLastSync = now - new Date(syncStatus.lastSyncTime);
-        if (timeSinceLastSync > cloudTimeoutMs) {
+        if (timeSinceLastSync > cloudTimeoutMs * 2) {
           hasIssue = true;
         }
-      } else {
-        // 启用了但从未同步过，也算异常
-        hasIssue = true;
       }
-      
+      // 注意：从未同步过（lastSyncTime 为空）不算异常，因为可能刚启用等待首次同步
+
       services.push({ name: 'cloud', error: hasIssue });
     }
-    
+
     // 检查日历同步状态
     if (calendarStatus.isEnabled) {
       let hasIssue = false;
-      
+
       // 1. 检查是否有错误
       if (calendarStatus.error) {
         hasIssue = true;
       }
-      
-      // 2. 检查是否超过10分钟未同步
+
+      // 2. 检查是否超过 2 倍间隔时间未同步（给予宽限期）
       if (calendarStatus.lastSyncTime) {
         const timeSinceLastSync = now - new Date(calendarStatus.lastSyncTime);
-        if (timeSinceLastSync > calendarTimeoutMs) {
+        if (timeSinceLastSync > calendarTimeoutMs * 2) {
           hasIssue = true;
         }
-      } else {
-        // 启用了但从未同步过，也算异常
-        hasIssue = true;
       }
-      
+      // 注意：从未同步过（lastSyncTime 为空）不算异常，因为可能刚启用等待首次同步
+
       services.push({ name: 'calendar', error: hasIssue });
     }
 
@@ -348,7 +345,7 @@ const SyncStatusIndicator = () => {
     if (services.length === 0) return 'disabled'; // 两个都未启用 -> 灰色
 
     const errorCount = services.filter(s => s.error).length;
-    
+
     // 修复：只要有一个服务有问题，就不能是绿色
     if (errorCount === 0) return 'success'; // 所有启用的服务都正常 -> 绿色
     if (errorCount === services.length) return 'error'; // 所有启用的服务都异常 -> 红色感叹号
@@ -423,7 +420,7 @@ const SyncStatusIndicator = () => {
     const now = new Date();
     const cloudTimeoutMs = getTimeoutMsFromIntervalMinutes(syncStatus.syncIntervalMinutes);
     const calendarTimeoutMs = getTimeoutMsFromIntervalMinutes(calendarStatus.syncIntervalMinutes);
-    
+
     if (syncStatus.isEnabled) {
       if (syncStatus.isSyncing) {
         parts.push('云端: 同步中...');
@@ -433,7 +430,7 @@ const SyncStatusIndicator = () => {
         parts.push('云端: 等待首次同步');
       } else {
         const timeSinceLastSync = now - new Date(syncStatus.lastSyncTime);
-        if (timeSinceLastSync > cloudTimeoutMs) {
+        if (timeSinceLastSync > cloudTimeoutMs * 2) {
           const minutesAgo = Math.floor(timeSinceLastSync / 60000);
           parts.push(`云端: ${minutesAgo}分钟前（超时）`);
         } else {
@@ -448,7 +445,7 @@ const SyncStatusIndicator = () => {
     } else {
       parts.push('云端: 未启用');
     }
-    
+
     if (calendarStatus.isEnabled) {
       if (calendarStatus.isSyncing) {
         parts.push('日历: 同步中...');
@@ -458,7 +455,7 @@ const SyncStatusIndicator = () => {
         parts.push('日历: 等待首次同步');
       } else {
         const timeSinceLastSync = now - new Date(calendarStatus.lastSyncTime);
-        if (timeSinceLastSync > calendarTimeoutMs) {
+        if (timeSinceLastSync > calendarTimeoutMs * 2) {
           const minutesAgo = Math.floor(timeSinceLastSync / 60000);
           parts.push(`日历: ${minutesAgo}分钟前（超时）`);
         } else {
@@ -474,7 +471,7 @@ const SyncStatusIndicator = () => {
       // 只有两个都未启用时才显示
       parts.push('日历: 未启用');
     }
-    
+
     if (parts.length === 0) return '同步未启用';
     return parts.join(' | ');
   };
@@ -576,7 +573,7 @@ const SyncStatusIndicator = () => {
                       (() => {
                         const now = new Date();
                         const timeoutMs = getTimeoutMsFromIntervalMinutes(syncStatus.syncIntervalMinutes);
-                        
+
                         if (syncStatus.isSyncing) {
                           return (
                             <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
@@ -585,23 +582,34 @@ const SyncStatusIndicator = () => {
                             </Box>
                           );
                         }
-                        
-                        // 检查是否处于挂起状态：有错误或超时未同步
-                        const isPending = syncStatus.error || 
-                                        (!syncStatus.lastSyncTime) ||
-                                        (syncStatus.lastSyncTime && (now - new Date(syncStatus.lastSyncTime)) > timeoutMs);
-                        
-                        if (isPending) {
+
+                        // 有错误，显示为挂起
+                        if (syncStatus.error) {
                           return (
                             <Typography variant="body2" color="warning.main">
-                              挂起
-                              {syncStatus.error && ` (上次同步失败)`}
-                              {!syncStatus.error && !syncStatus.lastSyncTime && ` (等待首次同步)`}
-                              {!syncStatus.error && syncStatus.lastSyncTime && (now - new Date(syncStatus.lastSyncTime)) > timeoutMs && ` (超时未同步)`}
+                              挂起 (上次同步失败)
                             </Typography>
                           );
                         }
-                        
+
+                        // 从未同步过，但这是正常状态（等待自动同步或用户手动同步）
+                        if (!syncStatus.lastSyncTime) {
+                          return (
+                            <Typography variant="body2" color="text.secondary">
+                              等待首次同步
+                            </Typography>
+                          );
+                        }
+
+                        // 超时未同步（超过预期间隔时间）
+                        if ((now - new Date(syncStatus.lastSyncTime)) > timeoutMs * 2) {
+                          return (
+                            <Typography variant="body2" color="warning.main">
+                              挂起 (超时未同步)
+                            </Typography>
+                          );
+                        }
+
                         return <Typography variant="body2" color="success.main">空闲</Typography>;
                       })()
                     }
@@ -678,7 +686,7 @@ const SyncStatusIndicator = () => {
                       (() => {
                         const now = new Date();
                         const timeoutMs = getTimeoutMsFromIntervalMinutes(calendarStatus.syncIntervalMinutes);
-                        
+
                         if (calendarStatus.isSyncing) {
                           return (
                             <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
@@ -687,23 +695,34 @@ const SyncStatusIndicator = () => {
                             </Box>
                           );
                         }
-                        
-                        // 检查是否处于挂起状态：有错误或超时未同步
-                        const isPending = calendarStatus.error || 
-                                        (!calendarStatus.lastSyncTime) ||
-                                        (calendarStatus.lastSyncTime && (now - new Date(calendarStatus.lastSyncTime)) > timeoutMs);
-                        
-                        if (isPending) {
+
+                        // 有错误，显示为挂起
+                        if (calendarStatus.error) {
                           return (
                             <Typography variant="body2" color="warning.main">
-                              挂起
-                              {calendarStatus.error && ` (上次同步失败)`}
-                              {!calendarStatus.error && !calendarStatus.lastSyncTime && ` (等待首次同步)`}
-                              {!calendarStatus.error && calendarStatus.lastSyncTime && (now - new Date(calendarStatus.lastSyncTime)) > timeoutMs && ` (超时未同步)`}
+                              挂起 (上次同步失败)
                             </Typography>
                           );
                         }
-                        
+
+                        // 从未同步过，但这是正常状态（等待自动同步或用户手动同步）
+                        if (!calendarStatus.lastSyncTime) {
+                          return (
+                            <Typography variant="body2" color="text.secondary">
+                              等待首次同步
+                            </Typography>
+                          );
+                        }
+
+                        // 超时未同步（超过预期间隔时间的 2 倍）
+                        if ((now - new Date(calendarStatus.lastSyncTime)) > timeoutMs * 2) {
+                          return (
+                            <Typography variant="body2" color="warning.main">
+                              挂起 (超时未同步)
+                            </Typography>
+                          );
+                        }
+
                         return <Typography variant="body2" color="success.main">空闲</Typography>;
                       })()
                     }

@@ -42,12 +42,32 @@ class DatabaseManager {
       // 创建数据库连接
       this.db = new Database(this.dbPath);
       dbLog('数据库连接已创建');
-      
-      // 启用外键约束
+
+      // ========== 关键SQLite配置 ==========
+
+      // 1. 设置busy_timeout（5秒）- 防止并发写入时立即失败导致corruption
+      this.db.pragma('busy_timeout = 5000');
+      dbLog('设置 busy_timeout = 5000ms');
+
+      // 2. 启用外键约束
       this.db.pragma('foreign_keys = ON');
-      
-      // 设置WAL模式以提高并发性能
+      dbLog('启用外键约束');
+
+      // 3. 设置WAL模式以提高并发性能
       this.db.pragma('journal_mode = WAL');
+      dbLog('设置 journal_mode = WAL');
+
+      // 4. 设置synchronous模式（NORMAL对WAL模式足够安全）
+      this.db.pragma('synchronous = NORMAL');
+      dbLog('设置 synchronous = NORMAL');
+
+      // 5. 配置WAL自动checkpoint（每1000页触发）
+      this.db.pragma('wal_autocheckpoint = 1000');
+      dbLog('设置 wal_autocheckpoint = 1000');
+
+      // 6. 设置缓存大小（提高性能）
+      this.db.pragma('cache_size = -8000'); // 8MB
+      dbLog('设置 cache_size = -8000 (8MB)');
       
       // 创建表结构
       dbLog('开始创建表结构...');
@@ -374,6 +394,15 @@ class DatabaseManager {
         console.log('✅ title字段添加完成');
       }
       
+      // ===== 笔记收藏功能 (2025-12-16) =====
+      if (!notesColumnNames.includes('is_favorite')) {
+        console.log('添加is_favorite字段到notes表 (收藏功能)...');
+        this.db.exec("ALTER TABLE notes ADD COLUMN is_favorite INTEGER DEFAULT 0");
+        // 创建索引
+        this.db.exec('CREATE INDEX IF NOT EXISTS idx_notes_is_favorite ON notes(is_favorite)');
+        console.log('✅ is_favorite字段添加完成');
+      }
+      
       // 检查FTS5表是否需要重建
       let needRebuildFTS = titleAdded;
       if (!needRebuildFTS) {
@@ -429,8 +458,8 @@ class DatabaseManager {
           
           this.db.exec(`
             CREATE TRIGGER IF NOT EXISTS notes_fts_update AFTER UPDATE ON notes BEGIN
-              UPDATE notes_fts SET title = new.title, content = new.content 
-              WHERE rowid = new.id;
+              DELETE FROM notes_fts WHERE rowid = old.id;
+              INSERT INTO notes_fts(rowid, title, content) VALUES (new.id, new.title, new.content);
             END
           `);
           
@@ -553,8 +582,8 @@ class DatabaseManager {
           
           this.db.exec(`
             CREATE TRIGGER IF NOT EXISTS notes_fts_update AFTER UPDATE ON notes BEGIN
-              UPDATE notes_fts SET title = new.title, content = new.content 
-              WHERE rowid = new.id;
+              DELETE FROM notes_fts WHERE rowid = old.id;
+              INSERT INTO notes_fts(rowid, title, content) VALUES (new.id, new.title, new.content);
             END
           `);
           
@@ -572,6 +601,77 @@ class DatabaseManager {
         console.warn('FTS5 创建失败（不影响应用）:', ftsError.message);
       }
       
+      // ===== 修复 FTS5 触发器错误 (2025-12-15) =====
+      // 之前的触发器在外部内容表模式下使用了错误的 UPDATE 语法，导致 SQLITE_CORRUPT_VTAB
+      console.log('检查并修复 FTS5 触发器...');
+      try {
+        // 检查是否需要修复（通过检查触发器定义）
+        const triggers = this.db.prepare(
+          "SELECT sql FROM sqlite_master WHERE type='trigger' AND name='notes_fts_update'"
+        ).all();
+
+        const needsFix = triggers.length === 0 ||
+                        (triggers[0].sql && triggers[0].sql.includes('UPDATE notes_fts SET'));
+
+        if (needsFix) {
+          console.log('检测到旧版 FTS5 触发器，开始重建...');
+
+          // 删除旧的触发器和 FTS5 表
+          this.db.exec('DROP TRIGGER IF EXISTS notes_fts_insert');
+          this.db.exec('DROP TRIGGER IF EXISTS notes_fts_update');
+          this.db.exec('DROP TRIGGER IF EXISTS notes_fts_delete');
+          this.db.exec('DROP TABLE IF EXISTS notes_fts');
+
+          // 重新创建 FTS5 表
+          this.db.exec(`
+            CREATE VIRTUAL TABLE notes_fts USING fts5(
+              title,
+              content,
+              content=notes,
+              content_rowid=id,
+              tokenize='unicode61 remove_diacritics 1'
+            )
+          `);
+
+          // 同步现有数据
+          const existingNotes = this.db.prepare('SELECT id, title, content FROM notes').all();
+          const insertStmt = this.db.prepare(
+            'INSERT INTO notes_fts(rowid, title, content) VALUES (?, ?, ?)'
+          );
+
+          for (const note of existingNotes) {
+            insertStmt.run(note.id, note.title || '', note.content || '');
+          }
+
+          // 创建正确的触发器（使用 DELETE + INSERT 而不是 UPDATE）
+          this.db.exec(`
+            CREATE TRIGGER notes_fts_insert AFTER INSERT ON notes BEGIN
+              INSERT INTO notes_fts(rowid, title, content)
+              VALUES (new.id, new.title, new.content);
+            END
+          `);
+
+          this.db.exec(`
+            CREATE TRIGGER notes_fts_update AFTER UPDATE ON notes BEGIN
+              DELETE FROM notes_fts WHERE rowid = old.id;
+              INSERT INTO notes_fts(rowid, title, content) VALUES (new.id, new.title, new.content);
+            END
+          `);
+
+          this.db.exec(`
+            CREATE TRIGGER notes_fts_delete AFTER DELETE ON notes BEGIN
+              DELETE FROM notes_fts WHERE rowid = old.id;
+            END
+          `);
+
+          console.log(`✅ FTS5 触发器已修复并重建（已同步 ${existingNotes.length} 条笔记）`);
+        } else {
+          console.log('FTS5 触发器已是最新版本，跳过修复');
+        }
+      } catch (ftsError) {
+        console.error('FTS5 修复失败:', ftsError);
+      }
+
       // 分析表优化查询计划
       this.db.exec('ANALYZE notes');
       console.log('✅ 数据库性能优化完成');
