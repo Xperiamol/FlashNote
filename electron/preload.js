@@ -389,24 +389,6 @@ contextBridge.exposeInMainWorld('electronAPI', {
     getStorageStats: () => ipcRenderer.invoke('whiteboard:get-storage-stats')
   },
 
-  // 版本管理API
-  versions: {
-    // 创建手动版本
-    createManual: (description) => ipcRenderer.invoke('version:create-manual', description),
-
-    // 获取版本列表
-    getList: () => ipcRenderer.invoke('version:get-list'),
-
-    // 恢复到指定版本
-    restore: (fileName) => ipcRenderer.invoke('version:restore', fileName),
-
-    // 删除版本
-    delete: (fileName) => ipcRenderer.invoke('version:delete', fileName),
-
-    // 获取版本详情
-    getDetails: (fileName) => ipcRenderer.invoke('version:get-details', fileName)
-  },
-
   // AI 相关 API
   ai: {
     // 获取AI配置
@@ -547,12 +529,21 @@ contextBridge.exposeInMainWorld('electronAPI', {
     // 导入数据
     importData: (filePath) => ipcRenderer.invoke('sync:import-data', filePath),
 
+    // V3 同步专用 API
+    forceFullSync: () => ipcRenderer.invoke('sync:force-full-sync'),
+    toggleAutoSync: (enabled) => ipcRenderer.invoke('sync:toggle-auto-sync', enabled),
+    setAutoSyncInterval: (minutes) => ipcRenderer.invoke('sync:set-auto-sync-interval', minutes),
+    clearAll: () => ipcRenderer.invoke('sync:clear-all'),
+
     // 图片同步相关
     downloadImage: (relativePath) => ipcRenderer.invoke('sync:download-image', relativePath),
     uploadImage: (localPath, relativePath) => ipcRenderer.invoke('sync:upload-image', localPath, relativePath),
     syncImages: () => ipcRenderer.invoke('sync:sync-images'),
     cleanupUnusedImages: (retentionDays) => ipcRenderer.invoke('sync:cleanup-unused-images', retentionDays),
     getUnusedImagesStats: (retentionDays) => ipcRenderer.invoke('sync:get-unused-images-stats', retentionDays),
+
+    // 冲突解决
+    resolveConflict: (conflictId, resolution) => ipcRenderer.invoke('sync:resolve-conflict', conflictId, resolution),
 
     // 同步事件监听
     onSyncStart: (callback) => {

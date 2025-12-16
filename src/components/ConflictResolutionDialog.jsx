@@ -7,100 +7,119 @@ import {
   Button,
   Box,
   Typography,
-  Card,
-  CardContent,
-  Chip,
-  Divider,
-  Alert,
-  Tab,
   Tabs,
-  TextField
+  Tab,
+  Paper,
+  Alert,
+  Divider,
+  Chip,
+  Stack
 } from '@mui/material';
 import {
-  CompareArrows as CompareIcon,
-  CheckCircle as CheckIcon
+  Warning as WarningIcon,
+  Schedule as ScheduleIcon,
+  Computer as LocalIcon,
+  Cloud as CloudIcon,
+  CompareArrows as CompareIcon
 } from '@mui/icons-material';
 
 /**
- * 冲突解决对话框
- * 显示冲突的详细信息并允许用户选择解决方案
+ * 冲突解决对话框组件
+ * 当同步时检测到冲突（本地和远程都有修改）时显示
  */
-const ConflictResolutionDialog = ({ open, conflict, onResolve, onClose }) => {
-  const [selectedVersion, setSelectedVersion] = useState('merged'); // 'local', 'remote', 'merged', 'custom'
-  const [customContent, setCustomContent] = useState('');
-  const [currentTab, setCurrentTab] = useState(0);
+const ConflictResolutionDialog = ({ open, conflict, onResolve, onCancel }) => {
+  const [selectedTab, setSelectedTab] = useState(0);
 
   if (!conflict) return null;
 
-  const { entityType, entityId, local, remote, conflicts, merged } = conflict;
+  const {
+    fileId,
+    fileName,
+    fileType,
+    localVersion,
+    remoteVersion,
+    localTime,
+    remoteTime
+  } = conflict;
 
-  const handleResolve = () => {
-    let resolvedData;
-    
-    switch (selectedVersion) {
-      case 'local':
-        resolvedData = local;
-        break;
-      case 'remote':
-        resolvedData = remote;
-        break;
-      case 'custom':
-        resolvedData = { ...merged, content: customContent };
-        break;
-      case 'merged':
-      default:
-        resolvedData = merged;
-        break;
-    }
-
-    onResolve(entityType, entityId, resolvedData);
-    onClose();
+  // 格式化时间
+  const formatTime = (timestamp) => {
+    if (!timestamp) return '未知';
+    const date = new Date(timestamp);
+    return date.toLocaleString('zh-CN', {
+      year: 'numeric',
+      month: '2-digit',
+      day: '2-digit',
+      hour: '2-digit',
+      minute: '2-digit',
+      second: '2-digit'
+    });
   };
 
-  const renderField = (label, localValue, remoteValue) => {
-    const isDifferent = localValue !== remoteValue;
-    
-    return (
-      <Box sx={{ mb: 2 }}>
-        <Typography variant="subtitle2" gutterBottom>
-          {label}
-          {isDifferent && (
-            <Chip
-              label="冲突"
-              size="small"
-              color="warning"
-              sx={{ ml: 1 }}
-            />
-          )}
-        </Typography>
-        
-        <Box sx={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 2 }}>
-          <Card variant="outlined" sx={{ 
-            bgcolor: selectedVersion === 'local' ? 'action.selected' : 'background.paper' 
-          }}>
-            <CardContent>
-              <Typography variant="caption" color="text.secondary" gutterBottom>
-                本地版本
-              </Typography>
-              <Typography variant="body2">
-                {localValue || <em>空</em>}
-              </Typography>
-            </CardContent>
-          </Card>
-          
-          <Card variant="outlined" sx={{ 
-            bgcolor: selectedVersion === 'remote' ? 'action.selected' : 'background.paper' 
-          }}>
-            <CardContent>
-              <Typography variant="caption" color="text.secondary" gutterBottom>
-                远程版本
-              </Typography>
-              <Typography variant="body2">
-                {remoteValue || <em>空</em>}
-              </Typography>
-            </CardContent>
-          </Card>
+  // 格式化文件类型
+  const getFileTypeLabel = (type) => {
+    switch (type) {
+      case 'note':
+        return '笔记';
+      case 'whiteboard':
+        return '白板';
+      case 'todos':
+        return '待办事项';
+      case 'settings':
+        return '设置';
+      default:
+        return '文件';
+    }
+  };
+
+  // 渲染内容预览
+  const renderContentPreview = (content, label, time) => {
+    if (!content) {
+      return (
+        <Box sx={{ p: 2, textAlign: 'center', color: 'text.secondary' }}>
+          无内容
         </Box>
+      );
+    }
+
+    // 对于 JSON 数据，美化显示
+    let displayContent = content;
+    if (typeof content === 'object') {
+      try {
+        displayContent = JSON.stringify(content, null, 2);
+      } catch (e) {
+        displayContent = String(content);
+      }
+    }
+
+    return (
+      <Box>
+        <Stack direction="row" spacing={1} alignItems="center" sx={{ mb: 1 }}>
+          <Typography variant="subtitle2" color="text.secondary">
+            {label}
+          </Typography>
+          <Chip
+            icon={<ScheduleIcon />}
+            label={formatTime(time)}
+            size="small"
+            variant="outlined"
+          />
+        </Stack>
+        <Paper
+          variant="outlined"
+          sx={{
+            p: 2,
+            maxHeight: 300,
+            overflow: 'auto',
+            bgcolor: 'background.default',
+            fontFamily: 'monospace',
+            fontSize: '0.875rem',
+            whiteSpace: 'pre-wrap',
+            wordBreak: 'break-word'
+          }}
+        >
+          {displayContent}
+        </Paper>
       </Box>
     );
   };
@@ -108,141 +127,104 @@ const ConflictResolutionDialog = ({ open, conflict, onResolve, onClose }) => {
   return (
     <Dialog
       open={open}
-      onClose={onClose}
+      onClose={onCancel}
       maxWidth="md"
       fullWidth
+      PaperProps={{
+        sx: { minHeight: '60vh' }
+      }}
     >
       <DialogTitle>
-        <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-          <CompareIcon />
+        <Stack direction="row" spacing={1} alignItems="center">
+          <WarningIcon color="warning" />
           <Typography variant="h6">
-            解决同步冲突
+            检测到同步冲突
           </Typography>
-        </Box>
+        </Stack>
       </DialogTitle>
 
-      <DialogContent>
+      <DialogContent dividers>
         <Alert severity="warning" sx={{ mb: 2 }}>
-          检测到 {entityType === 'note' ? '笔记' : '待办事项'} 的同步冲突。
-          本地和远程版本都有修改，请选择保留哪个版本。
+          <Typography variant="body2">
+            <strong>{getFileTypeLabel(fileType)}</strong> "{fileName || fileId}"
+            在本地和云端都有修改。请选择要保留的版本。
+          </Typography>
         </Alert>
 
-        <Typography variant="caption" color="text.secondary" gutterBottom>
-          {entityType === 'note' ? '笔记' : '待办事项'} ID: {entityId}
-        </Typography>
-
-        <Tabs value={currentTab} onChange={(e, v) => setCurrentTab(v)} sx={{ mb: 2 }}>
-          <Tab label="对比视图" />
-          <Tab label="自动合并结果" />
+        <Tabs
+          value={selectedTab}
+          onChange={(e, newValue) => setSelectedTab(newValue)}
+          sx={{ mb: 2, borderBottom: 1, borderColor: 'divider' }}
+        >
+          <Tab
+            icon={<LocalIcon />}
+            label="本地版本"
+            iconPosition="start"
+          />
+          <Tab
+            icon={<CloudIcon />}
+            label="远程版本"
+            iconPosition="start"
+          />
+          <Tab
+            icon={<CompareIcon />}
+            label="对比"
+            iconPosition="start"
+          />
         </Tabs>
 
-        {currentTab === 0 && (
+        {/* 本地版本 */}
+        {selectedTab === 0 && (
           <Box>
-            {renderField('标题', local?.title, remote?.title)}
-            {renderField('内容', local?.content, remote?.content)}
-            {renderField('标签', local?.tags, remote?.tags)}
-            {renderField('更新时间', 
-              local?.updated_at ? new Date(local.updated_at).toLocaleString('zh-CN') : '',
-              remote?.updated_at ? new Date(remote.updated_at).toLocaleString('zh-CN') : ''
-            )}
+            {renderContentPreview(localVersion, '本地版本', localTime)}
+            <Typography variant="caption" color="text.secondary" sx={{ mt: 1, display: 'block' }}>
+              最后修改：{formatTime(localTime)}
+            </Typography>
           </Box>
         )}
 
-        {currentTab === 1 && (
+        {/* 远程版本 */}
+        {selectedTab === 1 && (
           <Box>
-            <Alert severity="info" sx={{ mb: 2 }}>
-              系统已自动合并两个版本，以下是合并结果。你可以选择使用此结果或自定义内容。
-            </Alert>
-            
-            <Card variant="outlined" sx={{ mb: 2 }}>
-              <CardContent>
-                <Typography variant="subtitle2" gutterBottom>
-                  自动合并结果
-                </Typography>
-                <Divider sx={{ my: 1 }} />
-                <Typography variant="body2" gutterBottom>
-                  <strong>标题:</strong> {merged?.title || <em>无</em>}
-                </Typography>
-                <Typography variant="body2" gutterBottom>
-                  <strong>内容:</strong> {merged?.content || <em>无</em>}
-                </Typography>
-                <Typography variant="body2">
-                  <strong>标签:</strong> {merged?.tags || <em>无</em>}
-                </Typography>
-              </CardContent>
-            </Card>
-
-            {conflicts && conflicts.length > 0 && (
-              <Alert severity="warning" sx={{ mb: 2 }}>
-                <Typography variant="subtitle2" gutterBottom>
-                  自动合并无法完全解决以下字段:
-                </Typography>
-                {conflicts.map((c, i) => (
-                  <Chip
-                    key={i}
-                    label={c.field}
-                    size="small"
-                    sx={{ mr: 0.5, mb: 0.5 }}
-                  />
-                ))}
-              </Alert>
-            )}
+            {renderContentPreview(remoteVersion, '远程版本', remoteTime)}
+            <Typography variant="caption" color="text.secondary" sx={{ mt: 1, display: 'block' }}>
+              最后修改：{formatTime(remoteTime)}
+            </Typography>
           </Box>
         )}
 
-        <Divider sx={{ my: 2 }} />
-
-        <Typography variant="subtitle2" gutterBottom>
-          选择解决方案:
-        </Typography>
-
-        <Box sx={{ display: 'flex', gap: 1, mb: 2 }}>
-          <Button
-            variant={selectedVersion === 'local' ? 'contained' : 'outlined'}
-            onClick={() => setSelectedVersion('local')}
-            startIcon={selectedVersion === 'local' && <CheckIcon />}
-          >
-            使用本地版本
-          </Button>
-          <Button
-            variant={selectedVersion === 'remote' ? 'contained' : 'outlined'}
-            onClick={() => setSelectedVersion('remote')}
-            startIcon={selectedVersion === 'remote' && <CheckIcon />}
-          >
-            使用远程版本
-          </Button>
-          <Button
-            variant={selectedVersion === 'merged' ? 'contained' : 'outlined'}
-            onClick={() => setSelectedVersion('merged')}
-            startIcon={selectedVersion === 'merged' && <CheckIcon />}
-          >
-            使用自动合并
-          </Button>
-        </Box>
-
-        {selectedVersion === 'custom' && (
-          <TextField
-            fullWidth
-            multiline
-            rows={6}
-            label="自定义内容"
-            value={customContent}
-            onChange={(e) => setCustomContent(e.target.value)}
-            placeholder="输入自定义内容..."
-          />
+        {/* 对比视图 */}
+        {selectedTab === 2 && (
+          <Stack spacing={2}>
+            {renderContentPreview(localVersion, '本地版本', localTime)}
+            <Divider>
+              <Chip label="VS" size="small" />
+            </Divider>
+            {renderContentPreview(remoteVersion, '远程版本', remoteTime)}
+          </Stack>
         )}
       </DialogContent>
 
-      <DialogActions>
-        <Button onClick={onClose}>
-          取消
+      <DialogActions sx={{ px: 3, py: 2 }}>
+        <Button onClick={onCancel} color="inherit">
+          取消同步
+        </Button>
+        <Box sx={{ flex: 1 }} />
+        <Button
+          onClick={() => onResolve('local')}
+          variant="outlined"
+          startIcon={<LocalIcon />}
+          color="primary"
+        >
+          使用本地版本
         </Button>
         <Button
+          onClick={() => onResolve('remote')}
           variant="contained"
-          onClick={handleResolve}
-          disabled={selectedVersion === 'custom' && !customContent}
+          startIcon={<CloudIcon />}
+          color="primary"
         >
-          解决冲突
+          使用远程版本
         </Button>
       </DialogActions>
     </Dialog>

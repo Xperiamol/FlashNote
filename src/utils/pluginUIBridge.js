@@ -117,7 +117,7 @@ export function injectUIBridge(iframeWindow, theme, manifestOrOptions = null) {
    * FlashNote UI Bridge API
    */
   const bridge = {
-    version: '2.2.2 eta',
+    version: '2.3.0',
     
     /**
      * 获取当前主题配置

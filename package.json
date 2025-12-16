@@ -1,7 +1,7 @@
 {
   "name": "flashnote",
-  "version": "2.2.2",
-  "description": "FlashNote 2.2.2 eta - 现代化本地笔记应用",
+  "version": "2.3.0",
+  "description": "FlashNote 2.3.0 - 现代化本地笔记应用",
   "main": "electron/main.js",
   "homepage": "./",
   "scripts": {
@@ -50,6 +50,7 @@
     "markdown-it-container": "^4.0.0",
     "markdown-it-highlightjs": "^4.2.0",
     "markdown-it-mark": "^4.0.0",
+    "p-limit": "^7.2.0",
     "react": "^19.1.1",
     "react-dom": "^19.1.1",
     "react-i18next": "^16.3.5",
@@ -136,7 +137,7 @@
       "createDesktopShortcut": true,
       "createStartMenuShortcut": true,
       "deleteAppDataOnUninstall": false,
-      "uninstallDisplayName": "FlashNote 2.2.2 eta",
+      "uninstallDisplayName": "FlashNote 2.3.0",
       "include": "build/installer.nsh"
     }
   }

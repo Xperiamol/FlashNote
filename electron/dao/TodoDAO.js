@@ -61,7 +61,9 @@ class TodoDAO {
       repeat_interval = 1,
       next_due_date = null,
       is_recurring = 0,
-      parent_todo_id = null
+      parent_todo_id = null,
+      created_at,
+      updated_at
     } = todoData;
     
     // 自动生成 sync_id（如果未提供）
@@ -84,14 +86,17 @@ class TodoDAO {
           created_at, updated_at
         )
         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 
-          COALESCE((SELECT created_at FROM todos WHERE id = ?), CURRENT_TIMESTAMP), CURRENT_TIMESTAMP)
+          COALESCE((SELECT created_at FROM todos WHERE id = ?), COALESCE(?, CURRENT_TIMESTAMP)),
+          COALESCE(?, CURRENT_TIMESTAMP))
       `);
       result = stmt.run(
         id, finalSyncId, content, description, tags, is_important, is_urgent, due_date, end_date,
         item_type, has_time,
         focus_time_seconds,
         repeat_type, repeat_days, repeat_interval, next_due_date, is_recurring, parent_todo_id,
-        id
+        id,
+        created_at,
+        updated_at
       );
       result.lastInsertRowid = id;
     } else {
@@ -103,13 +108,14 @@ class TodoDAO {
           repeat_type, repeat_days, repeat_interval, next_due_date, is_recurring, parent_todo_id,
           created_at, updated_at
         )
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, COALESCE(?, CURRENT_TIMESTAMP), COALESCE(?, CURRENT_TIMESTAMP))
       `);
       result = stmt.run(
         finalSyncId, content, description, tags, is_important, is_urgent, due_date, end_date,
         item_type, has_time,
         focus_time_seconds,
         repeat_type, repeat_days, repeat_interval, next_due_date, is_recurring, parent_todo_id
+        , created_at, updated_at
       );
     }
     
@@ -171,13 +177,13 @@ class TodoDAO {
   update(id, todoData, options = {}) {
     const { skipChangeLog = false } = options;
     const db = this.getDB();
-    const { 
+    const {
       content,
       description,
       tags,
-      is_completed, 
-      is_important, 
-      is_urgent, 
+      is_completed,
+      is_important,
+      is_urgent,
       due_date,
       repeat_type,
       repeat_days,
@@ -185,12 +191,14 @@ class TodoDAO {
       next_due_date,
       is_recurring,
       parent_todo_id,
-      focus_time_seconds
+      focus_time_seconds,
+      is_deleted,
+      updated_at
     } = todoData;
-    
+
     let updateFields = [];
     let params = [];
-    
+
     if (content !== undefined) {
       updateFields.push('content = ?');
       params.push(content);
@@ -200,16 +208,16 @@ class TodoDAO {
       updateFields.push('description = ?');
       params.push(description);
     }
-    
+
     if (tags !== undefined) {
       updateFields.push('tags = ?');
       params.push(tags);
     }
-    
+
     if (is_completed !== undefined) {
       updateFields.push('is_completed = ?');
       params.push(is_completed);
-      
+
       // 如果标记为完成，设置完成时间
       if (is_completed) {
         updateFields.push('completed_at = CURRENT_TIMESTAMP');
@@ -217,69 +225,69 @@ class TodoDAO {
         updateFields.push('completed_at = NULL');
       }
     }
-    
+
     if (is_important !== undefined) {
       updateFields.push('is_important = ?');
       params.push(is_important);
     }
-    
+
     if (is_urgent !== undefined) {
       updateFields.push('is_urgent = ?');
       params.push(is_urgent);
     }
-    
+
     if (due_date !== undefined) {
       updateFields.push('due_date = ?');
       params.push(due_date);
-      
+
       // 自动更新 has_time（如果 todoData 没有明确指定）
       if (todoData.has_time === undefined) {
         updateFields.push('has_time = ?');
         params.push(this._hasTimeInfo(due_date));
       }
     }
-    
+
     // 明确指定的 has_time 和其他字段
     if (todoData.has_time !== undefined) {
       updateFields.push('has_time = ?');
       params.push(todoData.has_time);
     }
-    
+
     if (todoData.end_date !== undefined) {
       updateFields.push('end_date = ?');
       params.push(todoData.end_date);
     }
-    
+
     if (todoData.item_type !== undefined) {
       updateFields.push('item_type = ?');
       params.push(todoData.item_type);
     }
-    
+
     if (repeat_type !== undefined) {
       updateFields.push('repeat_type = ?');
       params.push(repeat_type);
     }
-    
+
     if (repeat_days !== undefined) {
       updateFields.push('repeat_days = ?');
       params.push(repeat_days);
     }
-    
+
     if (repeat_interval !== undefined) {
       updateFields.push('repeat_interval = ?');
       params.push(repeat_interval);
     }
-    
+
     if (next_due_date !== undefined) {
       updateFields.push('next_due_date = ?');
       params.push(next_due_date);
     }
-    
+
     if (is_recurring !== undefined) {
       updateFields.push('is_recurring = ?');
       params.push(is_recurring);
     }
-    
+
     if (parent_todo_id !== undefined) {
       updateFields.push('parent_todo_id = ?');
       params.push(parent_todo_id);
@@ -289,18 +297,39 @@ class TodoDAO {
       updateFields.push('focus_time_seconds = ?');
       params.push(focus_time_seconds);
     }
-    
-    updateFields.push('updated_at = CURRENT_TIMESTAMP');
+
+    // 处理删除状态
+    if (is_deleted !== undefined) {
+      updateFields.push('is_deleted = ?');
+      params.push(is_deleted);
+
+      // 如果恢复（is_deleted从1变为0），清除deleted_at
+      if (is_deleted === 0) {
+        updateFields.push('deleted_at = NULL');
+      }
+      // 如果删除（is_deleted从0变为1），设置deleted_at
+      else if (is_deleted === 1) {
+        updateFields.push('deleted_at = CURRENT_TIMESTAMP');
+      }
+    }
+
+    // 如果提供了 updated_at（同步时），使用提供的值；否则使用当前时间
+    if (updated_at !== undefined) {
+      updateFields.push('updated_at = ?');
+      params.push(updated_at);
+    } else {
+      updateFields.push('updated_at = CURRENT_TIMESTAMP');
+    }
     params.push(id);
-    
+
     const stmt = db.prepare(`
-      UPDATE todos 
+      UPDATE todos
       SET ${updateFields.join(', ')}
       WHERE id = ?
     `);
-    
+
     const result = stmt.run(...params);
-    
+
     if (result.changes > 0) {
       const updatedTodo = this.findById(id);
       // 记录变更日志（同步来源的操作不记录，防止无限循环）
@@ -310,7 +339,7 @@ class TodoDAO {
       }
       return updatedTodo;
     }
-    
+
     return null;
   }
 

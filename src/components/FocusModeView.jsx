@@ -778,8 +778,8 @@ const FocusModeView = ({
                 </Typography>
               </Box>
               
-              <Box sx={{ maxHeight: 'calc(60vh - 60px)', overflow: 'auto' }}>
-                <List sx={{ py: 1 }}>
+              <Box sx={{ maxHeight: 'calc(60vh - 60px)', overflowX: 'hidden', overflowY: 'auto' }}>
+                <List sx={{ py: 1, overflowX: 'hidden', width: '100%' }}>
                   {focusCandidates.length === 0 ? (
                     <ListItem>
                       <ListItemText
@@ -810,10 +810,16 @@ const FocusModeView = ({
                           }}
                           sx={{
                             backgroundColor: isActive ? 'action.selected' : 'transparent',
-                            borderRadius: 1,
-                            mx: 1,
+                            borderRadius: '8px',
                             mb: 0.5,
                             transition: 'all 0.2s ease',
+                            display: 'flex',
+                            alignItems: 'center',
+                            overflow: 'hidden',
+                            px: 2,
+                            mx: '12px',
+                            width: 'calc(100% - 24px)',
+                            boxSizing: 'border-box',
                             '&:hover': {
                               backgroundColor: 'action.hover'
                             }
@@ -883,7 +889,9 @@ const FocusModeView = ({
                               sx: {
                                 overflow: 'hidden',
                                 textOverflow: 'ellipsis',
-                                whiteSpace: 'nowrap'
+                                whiteSpace: 'normal',
+                                overflowWrap: 'break-word',
+                                wordBreak: 'break-word'
                               }
                             }}
                           />

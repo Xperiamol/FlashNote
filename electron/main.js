@@ -6,6 +6,11 @@ const path = require('path')
 const fs = require('fs')
 const isDev = process.env.NODE_ENV === 'development' || !app.isPackaged
 
+// 设置 Windows 通知的应用标识符（必须在 app.whenReady 之前）
+if (process.platform === 'win32') {
+  app.setAppUserModelId('com.flashnote.app')
+}
+
 // 注册自定义协议（必须在 app.whenReady 之前）
 protocol.registerSchemesAsPrivileged([
   {
@@ -29,7 +34,6 @@ const WindowManager = require('./services/WindowManager')
 const DataImportService = require('./services/DataImportService')
 const ShortcutService = require('./services/ShortcutService')
 const NotificationService = require('./services/NotificationService')
-const { CloudSyncManager } = require('./services/CloudSyncManager')
 const ImageService = require('./services/ImageService')
 const { getInstance: getImageStorageInstance } = require('./services/ImageStorageService')
 const PluginManager = require('./services/PluginManager')
@@ -41,6 +45,7 @@ const IpcHandlerFactory = require('./utils/ipcHandlerFactory')
 const CalDAVSyncService = require('./services/CalDAVSyncService')
 const GoogleCalendarService = require('./services/GoogleCalendarService')
 const ProxyService = require('./services/ProxyService')
+const { getInstance: getSyncIPCHandler } = require('./ipc/SyncIPCHandler')
 
 // 保持对窗口对象的全局引用，如果不这样做，当JavaScript对象被垃圾回收时，窗口将自动关闭
 let mainWindow
@@ -142,8 +147,7 @@ function createWindow() {
       })
     }
 
-    // 设置同步事件转发
-    setupSyncEventForwarding()
+    // 同步事件转发已由 SyncIPCHandler 自动处理
   })
 
   // 当窗口关闭时触发 - 最小化到托盘而不是退出
@@ -154,9 +158,14 @@ function createWindow() {
 
       // 首次最小化到托盘时显示提示
       if (!global.hasShownTrayNotification) {
+        const iconPath = isDev
+          ? path.join(__dirname, '../logo.png')
+          : path.join(process.resourcesPath, 'logo.png')
+        
         new Notification({
-          title: '闪念速记',
-          body: '应用已最小化到系统托盘，双击托盘图标可重新打开窗口'
+          title: 'FlashNote',
+          body: '应用已最小化到系统托盘，双击托盘图标可重新打开窗口',
+          icon: fs.existsSync(iconPath) ? nativeImage.createFromPath(iconPath) : undefined
         }).show()
         global.hasShownTrayNotification = true
       }
@@ -251,7 +260,7 @@ function createTray() {
     tray = new Tray(trayIcon)
 
     // 设置托盘提示文本
-    tray.setToolTip('FlashNote 2.2.2 Zeta - 快速笔记应用')
+    tray.setToolTip('FlashNote 2.3 Zeta - 快速笔记应用')
 
     // 创建托盘菜单
     const contextMenu = Menu.buildFromTemplate([
@@ -426,9 +435,10 @@ async function initializeServices() {
     // 初始化通知服务
     services.notificationService = new NotificationService()
 
-    // 初始化云同步管理器
-    services.cloudSyncManager = new CloudSyncManager()
-    await services.cloudSyncManager.initialize()
+    // 初始化 SyncIPCHandler（集成 V3 同步服务）
+    const syncIPCHandler = getSyncIPCHandler()
+    await syncIPCHandler.initialize()
+    services.syncIPCHandler = syncIPCHandler
 
     // 初始化 CalDAV 日历同步服务
     services.calDAVSyncService = new CalDAVSyncService()
@@ -526,7 +536,7 @@ async function initializeServices() {
       if (notesResult.success && notesResult.data && notesResult.data.notes && notesResult.data.notes.length === 0) {
         console.log('检测到首次启动，创建示例笔记')
         const welcomeNote = {
-          title: '欢迎使用 FlashNote 2.2.2 Zeta！',
+          title: '欢迎使用 FlashNote 2.3 Zeta！',
           content: `# 欢迎使用 FlashNote 2.3！ 🎉
 
 恭喜你成功安装了 FlashNote，这是一个现代化的本地笔记应用。
@@ -619,7 +629,7 @@ console.log('Hello, FlashNote!');
 祝你使用愉快！ 📝✨
 By Xperiamol
 `,
-          tags: ['欢迎', '教程', '2.2.2'],
+          tags: ['欢迎', '教程', '2.3'],
           category: 'default'
         }
 
@@ -1020,47 +1030,7 @@ ipcMain.handle('plugin-store:load-plugin-file', async (event, pluginId, filePath
 })
 
 // ==================== 云同步相关 IPC ====================
-// 注意：这些旧的处理器已被删除，新的处理器在文件末尾统一管理
-
-// 设置同步事件监听，将事件转发到渲染进程
-function setupSyncEventForwarding() {
-  if (!services.cloudSyncManager) return
-
-  // 使用 getActiveService() 获取当前活跃的同步服务实例
-  const activeService = services.cloudSyncManager.getActiveService()
-  if (!activeService) return
-
-  // 监听同步开始事件
-  activeService.on('syncStart', () => {
-    if (mainWindow && !mainWindow.isDestroyed()) {
-      mainWindow.webContents.send('sync:start')
-    }
-  })
-
-  // 监听同步完成事件
-  activeService.on('syncComplete', (result) => {
-    if (mainWindow && !mainWindow.isDestroyed()) {
-      mainWindow.webContents.send('sync:complete', result)
-    }
-  })
-
-  // 监听同步错误事件
-  activeService.on('syncError', (error) => {
-    if (mainWindow && !mainWindow.isDestroyed()) {
-      mainWindow.webContents.send('sync:error', { message: error.message })
-    }
-  })
-
-  // 监听冲突检测事件
-  activeService.on('conflictDetected', (conflict) => {
-    if (mainWindow && !mainWindow.isDestroyed()) {
-      mainWindow.webContents.send('sync:conflict', conflict)
-    }
-  })
-}
-
-// 在窗口创建后调用
-// setupSyncEventForwarding() - 需要在 createWindow 后调用
+// 注意：这些旧的处理器已被删除，新的处理器在 SyncIPCHandler 中统一管理
 
 // 数据库调试相关（用于排查持久化问题）
 ipcMain.handle('db:get-info', async () => {
@@ -1504,7 +1474,9 @@ ipcMain.handle('mem0:migrate-historical', async (event) => {
   }
 })
 
-// 云同步相关IPC处理
+// 云同步相关IPC处理 - 已迁移到 SyncIPCHandler
+// 以下处理器已由 SyncIPCHandler 统一管理，包含对 V3 同步服务的支持
+/*
 ipcMain.handle('sync:get-available-services', async (event) => {
   try {
     return services.cloudSyncManager.getAvailableServices()
@@ -1608,77 +1580,9 @@ ipcMain.handle('sync:import-data', async (event, filePath) => {
     return { success: false, message: error.message }
   }
 })
+*/
 
-// 版本管理IPC处理器
-ipcMain.handle('version:create-manual', async (event, description) => {
-  try {
-    const activeService = services.cloudSyncManager.getActiveService()
-    if (!activeService) {
-      return { success: false, message: '没有启用的同步服务' }
-    }
-    const result = await activeService.createManualVersion(description)
-    return { success: true, data: result }
-  } catch (error) {
-    console.error('创建手动版本失败:', error)
-    return { success: false, message: error.message }
-  }
-})
-
-ipcMain.handle('version:get-list', async (event) => {
-  try {
-    const activeService = services.cloudSyncManager.getActiveService()
-    if (!activeService) {
-      return { success: false, message: '没有启用的同步服务' }
-    }
-    const versions = await activeService.getVersionList()
-    return { success: true, data: versions }
-  } catch (error) {
-    console.error('获取版本列表失败:', error)
-    return { success: false, message: error.message }
-  }
-})
-
-ipcMain.handle('version:restore', async (event, fileName) => {
-  try {
-    const activeService = services.cloudSyncManager.getActiveService()
-    if (!activeService) {
-      return { success: false, message: '没有启用的同步服务' }
-    }
-    await activeService.restoreToVersion(fileName)
-    return { success: true, message: '版本恢复成功' }
-  } catch (error) {
-    console.error('版本恢复失败:', error)
-    return { success: false, message: error.message }
-  }
-})
-
-ipcMain.handle('version:delete', async (event, fileName) => {
-  try {
-    const activeService = services.cloudSyncManager.getActiveService()
-    if (!activeService) {
-      return { success: false, message: '没有启用的同步服务' }
-    }
-    await activeService.deleteVersion(fileName)
-    return { success: true, message: '版本删除成功' }
-  } catch (error) {
-    console.error('删除版本失败:', error)
-    return { success: false, message: error.message }
-  }
-})
-
-ipcMain.handle('version:get-details', async (event, fileName) => {
-  try {
-    const activeService = services.cloudSyncManager.getActiveService()
-    if (!activeService) {
-      return { success: false, message: '没有启用的同步服务' }
-    }
-    const details = await activeService.getVersionDetails(fileName)
-    return { success: true, data: details }
-  } catch (error) {
-    console.error('获取版本详情失败:', error)
-    return { success: false, message: error.message }
-  }
-})
+// ===== 图片存储相关 IPC 处理器（已移至上方） =====
 
 // 窗口管理IPC处理
 ipcMain.handle('window:ready', async (event) => {
@@ -1878,6 +1782,17 @@ ipcMain.handle('system:read-text', async (event) => {
 })
 
 ipcMain.handle('system:show-notification', async (event, options) => {
+  // 确保通知包含应用图标
+  if (!options.icon) {
+    const iconPath = isDev
+      ? path.join(__dirname, '../logo.png')
+      : path.join(process.resourcesPath, 'logo.png')
+    
+    if (fs.existsSync(iconPath)) {
+      options.icon = nativeImage.createFromPath(iconPath)
+    }
+  }
+  
   const notification = new Notification(options)
   notification.show()
   return { success: true }
@@ -2164,6 +2079,41 @@ ipcMain.handle('whiteboard:save-images', async (event, files) => {
   try {
     const imageStorage = getImageStorageInstance()
     const fileMap = await imageStorage.saveWhiteboardImages(files)
+
+    // 自动上传新保存的图片到云端（V3 同步）
+    try {
+      const { getInstance: getV3SyncService } = require('./services/sync/V3SyncService')
+      const v3Service = getV3SyncService()
+
+      if (v3Service && v3Service.isEnabled && v3Service.uploadImage) {
+        const uploadPromises = Object.entries(fileMap).map(async ([fileId, fileInfo]) => {
+          try {
+            const localPath = path.join(
+              app.getPath('userData'),
+              'images',
+              'whiteboard',
+              fileInfo.fileName
+            )
+            const relativePath = `images/whiteboard/${fileInfo.fileName}`
+
+            await v3Service.uploadImage(localPath, relativePath)
+            console.log(`[图片自动上传] 成功: ${fileInfo.fileName}`)
+          } catch (error) {
+            console.error(`[图片自动上传] 失败: ${fileInfo.fileName}`, error)
+            // 不阻塞保存流程
+          }
+        })
+
+        // 后台上传，不阻塞保存
+        Promise.all(uploadPromises).catch(err =>
+          console.error('[图片自动上传] 批量上传出错:', err)
+        )
+      }
+    } catch (error) {
+      console.error('[图片自动上传] 初始化失败:', error)
+      // 不阻塞保存流程
+    }
+
     return { success: true, data: fileMap }
   } catch (error) {
     console.error('保存白板图片失败:', error)
@@ -2178,6 +2128,18 @@ ipcMain.handle('whiteboard:load-images', async (event, fileMap) => {
     return { success: true, data: files }
   } catch (error) {
     console.error('加载白板图片失败:', error)
+    return { success: false, error: error.message }
+  }
+})
+
+// 加载单个白板图片（用于类型转换）
+ipcMain.handle('whiteboard:load-image', async (event, fileName) => {
+  try {
+    const imageStorage = getImageStorageInstance()
+    const dataURL = await imageStorage.loadWhiteboardImage(fileName)
+    return { success: true, data: dataURL }
+  } catch (error) {
+    console.error('加载单个白板图片失败:', fileName, error)
     return { success: false, error: error.message }
   }
 })
@@ -2207,9 +2169,11 @@ ipcMain.handle('whiteboard:get-storage-stats', async () => {
 // 图片云同步相关 IPC 处理器
 ipcMain.handle('sync:download-image', async (event, relativePath) => {
   try {
-    const activeService = services.cloudSyncManager.getActiveService()
-    if (!activeService || !activeService.downloadImage) {
-      return { success: false, error: '云同步服务未启用或不支持图片同步' }
+    const { getInstance: getV3SyncService } = require('./services/sync/V3SyncService')
+    const v3Service = getV3SyncService()
+
+    if (!v3Service || !v3Service.isEnabled) {
+      return { success: false, error: '云同步服务未启用' }
     }
 
     const localPath = path.join(
@@ -2219,7 +2183,7 @@ ipcMain.handle('sync:download-image', async (event, relativePath) => {
       path.basename(relativePath)
     )
 
-    await activeService.downloadImage(relativePath, localPath)
+    await v3Service.downloadImage(relativePath, localPath)
     return { success: true }
   } catch (error) {
     console.error('下载图片失败:', error)
@@ -2229,130 +2193,50 @@ ipcMain.handle('sync:download-image', async (event, relativePath) => {
 
 ipcMain.handle('sync:upload-image', async (event, localPath, relativePath) => {
   try {
-    const activeService = services.cloudSyncManager.getActiveService()
-    if (!activeService || !activeService.uploadImage) {
-      return { success: false, error: '云同步服务未启用或不支持图片同步' }
+    const { getInstance: getV3SyncService } = require('./services/sync/V3SyncService')
+    const v3Service = getV3SyncService()
+
+    if (!v3Service || !v3Service.isEnabled) {
+      return { success: false, error: '云同步服务未启用' }
     }
 
-    const appUrl = await activeService.uploadImage(localPath, relativePath)
-    return { success: true, data: appUrl }
+    await v3Service.uploadImage(localPath, relativePath)
+    return { success: true }
   } catch (error) {
     console.error('上传图片失败:', error)
     return { success: false, error: error.message }
   }
 })
 
-ipcMain.handle('sync:sync-images', async () => {
-  try {
-    const activeService = services.cloudSyncManager.getActiveService()
-    if (!activeService || !activeService.syncImagesOnly) {
-      return { success: false, error: '云同步服务未启用或不支持图片同步' }
-    }
+// ===== 以下图片管理功能已废弃，V3 同步系统不再需要这些功能 =====
+// sync:sync-images - V3 自动同步图片，无需手动批量同步
 
-    const result = await activeService.syncImagesOnly()
-    return { success: true, data: result }
-  } catch (error) {
-    console.error('同步图片失败:', error)
-    return { success: false, error: error.message }
-  }
-})
-
-// 清理未引用的图片
-ipcMain.handle('sync:cleanup-unused-images', async (event, retentionDays = 30) => {
-  console.log('[Main] 收到清理图片请求, retentionDays:', retentionDays);
-  try {
-    const activeService = services.cloudSyncManager.getActiveService()
-    console.log('[Main] activeService:', !!activeService);
-    console.log('[Main] imageSync:', !!activeService?.imageSync);
-
-    if (!activeService || !activeService.imageSync) {
-      console.log('[Main] 云同步服务未启用');
-      return { success: false, error: '云同步服务未启用或不支持图片清理' }
-    }
-
-    console.log('[Main] 开始调用 cleanupUnusedImages...');
-    const result = await activeService.imageSync.cleanupUnusedImages(retentionDays)
-    console.log('[Main] cleanupUnusedImages 完成, result:', result);
-    return { success: true, data: result }
-  } catch (error) {
-    console.error('[Main] 清理图片失败:', error)
-    return { success: false, error: error.message }
-  }
-})
-
-// 获取未引用图片的统计信息
+// 图片清理功能 - V3 同步集成版本
 ipcMain.handle('sync:get-unused-images-stats', async (event, retentionDays = 30) => {
-  console.log('[Main] 收到获取统计信息请求, retentionDays:', retentionDays);
   try {
-    const activeService = services.cloudSyncManager.getActiveService()
-    if (!activeService || !activeService.imageSync) {
-      return { success: false, error: '云同步服务未启用' }
-    }
-
-    // 获取未引用图片列表（但不删除）
-    const referencedImages = await activeService.imageSync.scanActiveNoteReferences()
-    const localImages = await activeService.imageSync.scanLocalImages(false)  // 不需要 hash，加快速度
-
-    console.log('[Main] 引用图片数:', referencedImages.size);
-    console.log('[Main] 本地图片数:', localImages.length);
-
-    const now = Date.now()
-    const retentionMs = retentionDays * 24 * 60 * 60 * 1000
-
-    let orphanedCount = 0
-    let totalSize = 0
-    let skippedByReference = 0
-    let skippedByAge = 0
-
-    for (const image of localImages) {
-      // 使用与 cleanupUnusedImages 相同的匹配逻辑
-      const relativePath = image.relativePath;
-
-      const pathVariants = [
-        relativePath,
-        relativePath.replace(/^images\//, ''),
-        relativePath.replace(/^images\/whiteboard\//, 'whiteboard/'),
-        image.fileName
-      ];
-
-      const isReferenced = pathVariants.some(variant => referencedImages.has(variant));
-
-      if (isReferenced) {
-        skippedByReference++;
-        continue;
-      }
-
-      const mtime = new Date(image.mtime).getTime();
-      const fileAge = now - mtime;
-      const fileAgeDays = Math.floor(fileAge / 86400000);
-
-      if (fileAge <= retentionMs) {
-        skippedByAge++;
-        continue;
-      }
-
-      orphanedCount++;
-      totalSize += image.size;
-      if (orphanedCount <= 5) {
-        console.log(`[Main] 孤立图片: ${relativePath}, 年龄: ${fileAgeDays}天`);
-      }
-    }
-
-    console.log(`[Main] 统计: 总计=${localImages.length}, 被引用=${skippedByReference}, 太新=${skippedByAge}, 孤立=${orphanedCount}, 总大小=${totalSize}`);
-
-    return {
-      success: true,
-      data: {
-        orphanedCount,
-        totalSize,
-        totalSizeMB: (totalSize / 1024 / 1024).toFixed(2)
-      }
-    }
+    console.log('[IPC] 收到 sync:get-unused-images-stats 请求, retentionDays:', retentionDays);
+    const v3Service = require('./services/sync/V3SyncService').getInstance();
+    const result = await v3Service.getUnusedImagesStats(retentionDays);
+    console.log('[IPC] getUnusedImagesStats 返回结果:', result);
+    return result;
   } catch (error) {
-    console.error('获取图片统计失败:', error)
-    return { success: false, error: error.message }
+    console.error('[IPC] 获取图片统计失败:', error);
+    return { success: false, error: error.message };
   }
-})
+});
+
+ipcMain.handle('sync:cleanup-unused-images', async (event, retentionDays = 30) => {
+  try {
+    console.log('[IPC] 收到 sync:cleanup-unused-images 请求, retentionDays:', retentionDays);
+    const v3Service = require('./services/sync/V3SyncService').getInstance();
+    const result = await v3Service.cleanupUnusedImages(retentionDays);
+    console.log('[IPC] cleanupUnusedImages 返回结果:', result);
+    return result;
+  } catch (error) {
+    console.error('[IPC] 清理图片失败:', error);
+    return { success: false, error: error.message };
+  }
+});
 
 // 应用退出时清理资源
 let isQuittingApp = false;

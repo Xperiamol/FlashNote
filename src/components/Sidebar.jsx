@@ -130,7 +130,7 @@ const Sidebar = ({ open = true, onClose }) => {
         display: 'flex',
         flexDirection: 'column',
         alignItems: 'center',
-        paddingTop: '16px',
+        paddingTop: '12px',
         paddingBottom: '16px',
         position: 'relative',
         zIndex: 100,
@@ -148,7 +148,7 @@ const Sidebar = ({ open = true, onClose }) => {
       <Box
         sx={{
           position: 'relative',
-          marginBottom: '16px',
+          marginBottom: '12px',
         }}
       >
         <Box
@@ -278,7 +278,7 @@ const Sidebar = ({ open = true, onClose }) => {
           width: '44px',
           height: '1px',
           backgroundColor: theme.palette.divider,
-          marginBottom: '8px',
+          marginBottom: '16px',
           opacity: 0.5,
         }}
       />

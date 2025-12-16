@@ -611,7 +611,7 @@ const enUS = {
   about: {
     appName: 'FlashNote',
     description: 'A simple and efficient note-taking app',
-    version: 'Version 2.2.2 eta',
+    version: 'Version 2.3.0',
     githubRepo: 'GitHub Repository',
     copyright: '© 2025 FlashNote. All rights reserved.'
   },

@@ -624,7 +624,7 @@ const zhCN = {
   about: {
     appName: 'FlashNote',
     description: '一个简洁高效的笔记应用',
-    version: '版本 2.2.2 eta',
+    version: '版本 2.3.0',
     githubRepo: 'GitHub 仓库',
     copyright: '© 2025 FlashNote. All rights reserved.'
   },
