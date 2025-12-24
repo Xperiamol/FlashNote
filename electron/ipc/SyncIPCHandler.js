@@ -237,6 +237,15 @@ class SyncIPCHandler {
       setTimeout(() => {
         if (this.pendingConflicts.has(conflictId)) {
           this.pendingConflicts.delete(conflictId);
+
+          // 通知前端冲突已超时，关闭对话框
+          const allWindows = BrowserWindow.getAllWindows();
+          allWindows.forEach(win => {
+            if (win && !win.isDestroyed()) {
+              win.webContents.send('sync:conflict-timeout', { conflictId });
+            }
+          });
+
           reject(new Error('冲突解决超时'));
         }
       }, 5 * 60 * 1000);
@@ -287,6 +296,26 @@ class SyncIPCHandler {
       windows.forEach(win => {
         if (win && !win.isDestroyed()) {
           win.webContents.send('sync:error', { message: error.message });
+        }
+      });
+    });
+
+    // 转发图片上传失败事件
+    this.v3SyncService.on('imageUploadFailed', (data) => {
+      const windows = BrowserWindow.getAllWindows();
+      windows.forEach(win => {
+        if (win && !win.isDestroyed()) {
+          win.webContents.send('sync:image-upload-failed', data);
+        }
+      });
+    });
+
+    // 转发图片下载失败事件
+    this.v3SyncService.on('imageDownloadFailed', (data) => {
+      const windows = BrowserWindow.getAllWindows();
+      windows.forEach(win => {
+        if (win && !win.isDestroyed()) {
+          win.webContents.send('sync:image-download-failed', data);
         }
       });
     });

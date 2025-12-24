@@ -12,10 +12,10 @@ class PluginThemeManager {
   constructor() {
     // 存储插件样式: Map<pluginId, Map<styleId, {css, priority, element}>>
     this.pluginStyles = new Map()
-    
+
     // 样式容器元素
     this.containerElement = null
-    
+
     // 初始化容器
     this.initializeContainer()
   }
@@ -26,14 +26,14 @@ class PluginThemeManager {
   initializeContainer() {
     // 创建或获取样式容器
     let container = document.getElementById('flashnote-plugin-themes')
-    
+
     if (!container) {
       container = document.createElement('div')
       container.id = 'flashnote-plugin-themes'
       container.style.display = 'none'
       document.head.appendChild(container)
     }
-    
+
     this.containerElement = container
   }
 
@@ -92,7 +92,7 @@ class PluginThemeManager {
    */
   insertStyleByPriority(newElement, priority) {
     const existingStyles = Array.from(this.containerElement.children)
-    
+
     // 找到第一个优先级更低的位置
     let insertBefore = null
     for (const style of existingStyles) {
@@ -118,16 +118,27 @@ class PluginThemeManager {
    */
   unregisterStyle(pluginId, styleId) {
     if (!pluginId || !styleId) {
+      console.warn('[PluginThemeManager] unregisterStyle: 参数不完整', { pluginId, styleId })
       return false
     }
 
     const pluginStylesMap = this.pluginStyles.get(pluginId)
+
+    // 即使内存中没有记录，也尝试从 DOM 中移除（兜底）
+    const elementId = `plugin-theme-${pluginId}-${styleId}`
+    const existingElement = document.getElementById(elementId)
+    if (existingElement) {
+      console.log(`[PluginThemeManager] 从DOM移除样式元素: ${elementId}`)
+      existingElement.remove()
+    }
+
     if (!pluginStylesMap || !pluginStylesMap.has(styleId)) {
-      return false
+      console.log(`[PluginThemeManager] 样式未在内存中注册: ${pluginId}/${styleId}`)
+      return existingElement ? true : false
     }
 
     const styleInfo = pluginStylesMap.get(styleId)
-    
+
     // 移除DOM元素
     if (styleInfo.element && styleInfo.element.parentNode) {
       styleInfo.element.parentNode.removeChild(styleInfo.element)
@@ -192,19 +203,26 @@ class PluginThemeManager {
       return 0
     }
 
-    const pluginStylesMap = this.pluginStyles.get(pluginId)
-    if (!pluginStylesMap) {
-      return 0
-    }
-
-    const styleIds = Array.from(pluginStylesMap.keys())
     let count = 0
 
-    for (const styleId of styleIds) {
-      if (this.unregisterStyle(pluginId, styleId)) {
-        count++
+    // 先从内存中移除
+    const pluginStylesMap = this.pluginStyles.get(pluginId)
+    if (pluginStylesMap) {
+      const styleIds = Array.from(pluginStylesMap.keys())
+      for (const styleId of styleIds) {
+        if (this.unregisterStyle(pluginId, styleId)) {
+          count++
+        }
       }
     }
+
+    // 兜底：直接从 DOM 中查找并移除该插件的所有样式
+    const allPluginStyles = document.querySelectorAll(`[data-plugin-id="${pluginId}"]`)
+    allPluginStyles.forEach(el => {
+      console.log(`[PluginThemeManager] 兜底移除DOM样式: ${el.id}`)
+      el.remove()
+      count++
+    })
 
     console.log(`[PluginThemeManager] 已清理插件所有样式: ${pluginId} (共 ${count} 个)`)
     return count

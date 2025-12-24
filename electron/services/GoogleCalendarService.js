@@ -22,31 +22,31 @@ class GoogleCalendarService {
     this.lastSyncTime = null;
     this.authServer = null; // 本地 HTTP 服务器
     this.authPort = null; // 动态选择的端口
-    
+
     // Google OAuth 2.0 配置
     // 从环境变量读取，打包时需要通过 electron-builder 的 extraMetadata 或构建脚本注入
     this.CLIENT_ID = process.env.GOOGLE_CLIENT_ID;
     this.CLIENT_SECRET = process.env.GOOGLE_CLIENT_SECRET;
-    
+
     // 如果环境变量未设置，记录警告
     if (!this.CLIENT_ID || !this.CLIENT_SECRET) {
       console.warn('[GoogleCalendar] 警告: OAuth 凭据未配置');
       console.warn('[GoogleCalendar] 请在 .env 文件中设置 GOOGLE_CLIENT_ID 和 GOOGLE_CLIENT_SECRET');
       console.warn('[GoogleCalendar] 或在打包前设置环境变量');
     }
-    
+
     // 注意：redirect_uri 需要在 Google Cloud Console 中配置多个端口
     this.REDIRECT_PORTS = [8888, 8889, 8890, 9999, 3000]; // 尝试多个端口
-    
+
     console.log('[GoogleCalendar] 初始化 OAuth 配置');
     console.log('[GoogleCalendar] CLIENT_ID:', this.CLIENT_ID ? this.CLIENT_ID.substring(0, 30) + '...' : '未设置');
     console.log('[GoogleCalendar] CLIENT_SECRET 已设置:', this.CLIENT_SECRET ? '是 (长度: ' + this.CLIENT_SECRET.length + ')' : '否');
     console.log('[GoogleCalendar] 环境:', isDev ? '开发模式' : '生产模式');
-    
+
     // 同步映射表
     this.syncMappings = new Map();
     this._loadSyncMappings(); // 加载持久化的映射表
-    
+
     this.setupIpcHandlers();
   }
 
@@ -223,7 +223,7 @@ class GoogleCalendarService {
 
         const port = this.REDIRECT_PORTS[portIndex];
         const redirectUri = `http://localhost:${port}/oauth2callback`;
-        
+
         console.log(`[GoogleCalendar] 尝试使用端口 ${port}...`);
         console.log(`[GoogleCalendar] Redirect URI 将设置为: ${redirectUri}`);
 
@@ -233,56 +233,56 @@ class GoogleCalendarService {
           this.CLIENT_SECRET,
           redirectUri
         );
-        
+
         console.log('[GoogleCalendar] OAuth2 客户端已创建');
 
-      // 生成授权 URL
-      const authUrl = this.oauth2Client.generateAuthUrl({
-        access_type: 'offline',
-        scope: [
-          'https://www.googleapis.com/auth/calendar',
-          'https://www.googleapis.com/auth/calendar.events',
-        ],
-        prompt: 'consent',
-      });
+        // 生成授权 URL
+        const authUrl = this.oauth2Client.generateAuthUrl({
+          access_type: 'offline',
+          scope: [
+            'https://www.googleapis.com/auth/calendar',
+            'https://www.googleapis.com/auth/calendar.events',
+          ],
+          prompt: 'consent',
+        });
 
-      // 标记是否已处理请求
-      let isHandled = false;
+        // 标记是否已处理请求
+        let isHandled = false;
 
-      // 创建本地 HTTP 服务器监听回调
-      this.authServer = http.createServer(async (req, res) => {
-        try {
-          // 忽略 favicon 等其他请求
-          if (req.url.includes('favicon.ico')) {
-            res.writeHead(204);
-            res.end();
-            return;
-          }
+        // 创建本地 HTTP 服务器监听回调
+        this.authServer = http.createServer(async (req, res) => {
+          try {
+            // 忽略 favicon 等其他请求
+            if (req.url.includes('favicon.ico')) {
+              res.writeHead(204);
+              res.end();
+              return;
+            }
 
-          const queryObject = url.parse(req.url, true).query;
+            const queryObject = url.parse(req.url, true).query;
 
-          // 检查是否有授权码或错误
-          const hasAuthData = queryObject.code || queryObject.error;
-          
-          // 如果已经处理过或没有授权数据，返回简单响应
-          if (isHandled || !hasAuthData) {
-            res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' });
-            res.end(`
+            // 检查是否有授权码或错误
+            const hasAuthData = queryObject.code || queryObject.error;
+
+            // 如果已经处理过或没有授权数据，返回简单响应
+            if (isHandled || !hasAuthData) {
+              res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' });
+              res.end(`
               <!DOCTYPE html>
               <html>
               <head><meta charset="utf-8"><title>FlashNote</title></head>
               <body><p>此窗口可以关闭</p></body>
               </html>
             `);
-            return;
-          }
+              return;
+            }
 
-          // 标记为已处理
-          isHandled = true;
+            // 标记为已处理
+            isHandled = true;
 
-          // 返回成功页面
-          res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' });
-          res.end(`
+            // 返回成功页面
+            res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' });
+            res.end(`
             <!DOCTYPE html>
             <html>
             <head>
@@ -303,113 +303,113 @@ class GoogleCalendarService {
             </html>
           `);
 
-          // 延迟关闭服务器，让响应发送完成
-          setTimeout(() => {
-            if (this.authServer) {
-              this.authServer.close();
-            }
-          }, 100);
+            // 延迟关闭服务器，让响应发送完成
+            setTimeout(() => {
+              if (this.authServer) {
+                this.authServer.close();
+              }
+            }, 100);
 
-          // 检查是否有错误
-          if (queryObject.error) {
-            const errorDesc = queryObject.error_description || queryObject.error;
-            console.error('[GoogleCalendar] 授权错误:', queryObject.error);
-            console.error('[GoogleCalendar] 错误描述:', errorDesc);
-            console.error('[GoogleCalendar] 完整URL:', req.url);
-            reject(new Error(`授权失败: ${errorDesc}\n\n可能原因：\n1. Redirect URI 未在 Google Cloud Console 中配置\n2. 请确保添加 http://localhost:8888/oauth2callback 到授权重定向 URI 列表`));
-            return;
+            // 检查是否有错误
+            if (queryObject.error) {
+              const errorDesc = queryObject.error_description || queryObject.error;
+              console.error('[GoogleCalendar] 授权错误:', queryObject.error);
+              console.error('[GoogleCalendar] 错误描述:', errorDesc);
+              console.error('[GoogleCalendar] 完整URL:', req.url);
+              reject(new Error(`授权失败: ${errorDesc}\n\n可能原因：\n1. Redirect URI 未在 Google Cloud Console 中配置\n2. 请确保添加 http://localhost:8888/oauth2callback 到授权重定向 URI 列表`));
+              return;
+            }
+
+            // 获取授权码
+            const authCode = queryObject.code;
+            if (!authCode) {
+              console.error('[GoogleCalendar] 未收到授权码');
+              console.error('[GoogleCalendar] 查询参数:', queryObject);
+              console.error('[GoogleCalendar] 完整URL:', req.url);
+              reject(new Error('未收到授权码'));
+              return;
+            }
+
+            console.log('[GoogleCalendar] 收到授权码,正在交换 tokens');
+            console.log('[GoogleCalendar] 授权码长度:', authCode.length);
+            console.log('[GoogleCalendar] 正在连接 oauth2.googleapis.com...');
+
+            try {
+              // 用授权码换取 tokens (添加超时保护)
+              const tokenPromise = this.oauth2Client.getToken(authCode);
+              const timeoutPromise = new Promise((_, timeoutReject) => {
+                setTimeout(() => {
+                  timeoutReject(new Error('TIMEOUT'));
+                }, 60000); // 60秒超时
+              });
+
+              console.log('[GoogleCalendar] 等待 Google 响应...');
+              const { tokens } = await Promise.race([tokenPromise, timeoutPromise]);
+
+              console.log('[GoogleCalendar] 成功获取 tokens');
+              this.oauth2Client.setCredentials(tokens);
+
+              // 保存 tokens
+              console.log('[GoogleCalendar] 正在保存 tokens 到数据库...');
+              await this.settingDAO.set('google_calendar_access_token', tokens.access_token);
+              if (tokens.refresh_token) {
+                await this.settingDAO.set('google_calendar_refresh_token', tokens.refresh_token);
+              }
+              await this.settingDAO.set('google_calendar_expiry_date', tokens.expiry_date?.toString() || '');
+
+              console.log('[GoogleCalendar] Tokens 已保存');
+
+              // 初始化 Calendar API
+              console.log('[GoogleCalendar] 初始化 Calendar API...');
+              this.calendar = google.calendar({ version: 'v3', auth: this.oauth2Client });
+
+              // 获取日历列表
+              console.log('[GoogleCalendar] 正在获取日历列表...');
+              const calendars = await this.listCalendars();
+              console.log(`[GoogleCalendar] 成功获取 ${calendars.length} 个日历`);
+
+              // 授权完成后，若此前已启用且配置完整，则恢复自动同步
+              await this._ensureAutoSyncFromConfig();
+
+              resolve({ calendars });
+            } catch (tokenError) {
+              console.error('[GoogleCalendar] Token 交换失败:', tokenError);
+              console.error('[GoogleCalendar] 错误类型:', tokenError.constructor.name);
+              console.error('[GoogleCalendar] 错误消息:', tokenError.message);
+              console.error('[GoogleCalendar] 错误代码:', tokenError.code);
+              if (tokenError.response) {
+                console.error('[GoogleCalendar] 响应状态:', tokenError.response.status);
+                console.error('[GoogleCalendar] 响应数据:', tokenError.response.data);
+              }
+
+              // 检查是否是超时错误
+              if (tokenError.message === 'TIMEOUT') {
+                reject(new Error('请求超时：连接 Google 服务超过 60 秒。\n\n' +
+                  '可能原因：\n' +
+                  '1. VPN 连接不稳定或速度过慢\n' +
+                  '2. Google 服务响应缓慢\n\n' +
+                  '解决方法：\n' +
+                  '1. 检查 VPN 连接状态\n' +
+                  '2. 尝试更换 VPN 节点\n' +
+                  '3. 稍后重试\n' +
+                  '4. 或使用 CalDAV 方式同步 iCloud 日历'));
+              } else if (tokenError.code === 'ETIMEDOUT' || tokenError.message.includes('ETIMEDOUT')) {
+                reject(new Error('网络连接超时：无法访问 Google 服务。\n\n' +
+                  '可能原因：\n' +
+                  '1. Google 服务在部分地区被限制访问\n' +
+                  '2. 需要使用 VPN 或代理\n\n' +
+                  '解决方法：\n' +
+                  '1. 开启 VPN 后重试\n' +
+                  '2. 或使用 CalDAV 方式同步 iCloud 日历'));
+              } else {
+                reject(tokenError);
+              }
+            }
+          } catch (error) {
+            console.error('[GoogleCalendar] OAuth 回调处理失败:', error);
+            reject(error);
           }
-
-          // 获取授权码
-          const authCode = queryObject.code;
-          if (!authCode) {
-            console.error('[GoogleCalendar] 未收到授权码');
-            console.error('[GoogleCalendar] 查询参数:', queryObject);
-            console.error('[GoogleCalendar] 完整URL:', req.url);
-            reject(new Error('未收到授权码'));
-            return;
-          }
-
-          console.log('[GoogleCalendar] 收到授权码,正在交换 tokens');
-          console.log('[GoogleCalendar] 授权码长度:', authCode.length);
-          console.log('[GoogleCalendar] 正在连接 oauth2.googleapis.com...');
-
-          try {
-            // 用授权码换取 tokens (添加超时保护)
-            const tokenPromise = this.oauth2Client.getToken(authCode);
-            const timeoutPromise = new Promise((_, timeoutReject) => {
-              setTimeout(() => {
-                timeoutReject(new Error('TIMEOUT'));
-              }, 60000); // 60秒超时
-            });
-
-            console.log('[GoogleCalendar] 等待 Google 响应...');
-            const { tokens } = await Promise.race([tokenPromise, timeoutPromise]);
-            
-            console.log('[GoogleCalendar] 成功获取 tokens');
-            this.oauth2Client.setCredentials(tokens);
-
-            // 保存 tokens
-            console.log('[GoogleCalendar] 正在保存 tokens 到数据库...');
-            await this.settingDAO.set('google_calendar_access_token', tokens.access_token);
-            if (tokens.refresh_token) {
-              await this.settingDAO.set('google_calendar_refresh_token', tokens.refresh_token);
-            }
-            await this.settingDAO.set('google_calendar_expiry_date', tokens.expiry_date?.toString() || '');
-
-            console.log('[GoogleCalendar] Tokens 已保存');
-
-            // 初始化 Calendar API
-            console.log('[GoogleCalendar] 初始化 Calendar API...');
-            this.calendar = google.calendar({ version: 'v3', auth: this.oauth2Client });
-
-            // 获取日历列表
-            console.log('[GoogleCalendar] 正在获取日历列表...');
-            const calendars = await this.listCalendars();
-            console.log(`[GoogleCalendar] 成功获取 ${calendars.length} 个日历`);
-
-            // 授权完成后，若此前已启用且配置完整，则恢复自动同步
-            await this._ensureAutoSyncFromConfig();
-
-            resolve({ calendars });
-          } catch (tokenError) {
-            console.error('[GoogleCalendar] Token 交换失败:', tokenError);
-            console.error('[GoogleCalendar] 错误类型:', tokenError.constructor.name);
-            console.error('[GoogleCalendar] 错误消息:', tokenError.message);
-            console.error('[GoogleCalendar] 错误代码:', tokenError.code);
-            if (tokenError.response) {
-              console.error('[GoogleCalendar] 响应状态:', tokenError.response.status);
-              console.error('[GoogleCalendar] 响应数据:', tokenError.response.data);
-            }
-            
-            // 检查是否是超时错误
-            if (tokenError.message === 'TIMEOUT') {
-              reject(new Error('请求超时：连接 Google 服务超过 60 秒。\n\n' +
-                '可能原因：\n' +
-                '1. VPN 连接不稳定或速度过慢\n' +
-                '2. Google 服务响应缓慢\n\n' +
-                '解决方法：\n' +
-                '1. 检查 VPN 连接状态\n' +
-                '2. 尝试更换 VPN 节点\n' +
-                '3. 稍后重试\n' +
-                '4. 或使用 CalDAV 方式同步 iCloud 日历'));
-            } else if (tokenError.code === 'ETIMEDOUT' || tokenError.message.includes('ETIMEDOUT')) {
-              reject(new Error('网络连接超时：无法访问 Google 服务。\n\n' +
-                '可能原因：\n' +
-                '1. Google 服务在部分地区被限制访问\n' +
-                '2. 需要使用 VPN 或代理\n\n' +
-                '解决方法：\n' +
-                '1. 开启 VPN 后重试\n' +
-                '2. 或使用 CalDAV 方式同步 iCloud 日历'));
-            } else {
-              reject(tokenError);
-            }
-          }
-        } catch (error) {
-          console.error('[GoogleCalendar] OAuth 回调处理失败:', error);
-          reject(error);
-        }
-      });
+        });
 
         // 启动服务器
         this.authServer.listen(port, 'localhost', () => {
@@ -417,7 +417,7 @@ class GoogleCalendarService {
           console.log(`[GoogleCalendar] OAuth 服务器已启动: http://localhost:${port}`);
           console.log(`[GoogleCalendar] Redirect URI: ${redirectUri}`);
           console.log(`[GoogleCalendar] 授权 URL: ${authUrl}`);
-          
+
           // 在系统浏览器中打开授权 URL
           shell.openExternal(authUrl).catch(err => {
             console.error('[GoogleCalendar] 无法打开浏览器:', err);
@@ -428,7 +428,7 @@ class GoogleCalendarService {
         // 服务器错误处理
         this.authServer.on('error', (error) => {
           console.error(`[GoogleCalendar] 端口 ${port} 启动失败:`, error.message);
-          
+
           // 如果是端口占用错误，尝试下一个端口
           if (error.code === 'EADDRINUSE') {
             console.log(`[GoogleCalendar] 端口 ${port} 已被占用，尝试下一个端口...`);
@@ -457,7 +457,7 @@ class GoogleCalendarService {
 
     // 使用第一个可用端口作为后备
     const redirectUri = `http://localhost:${this.REDIRECT_PORTS[0]}/oauth2callback`;
-    
+
     // 创建 OAuth2 客户端
     this.oauth2Client = new google.auth.OAuth2(
       this.CLIENT_ID,
@@ -534,7 +534,7 @@ class GoogleCalendarService {
     try {
       const setting = await this.settingDAO.get('google_calendar_access_token');
       const accessToken = setting?.value;
-      
+
       if (!accessToken) {
         console.log('[GoogleCalendar] 未找到已保存的 token');
         return false;
@@ -542,13 +542,13 @@ class GoogleCalendarService {
 
       const refreshTokenSetting = await this.settingDAO.get('google_calendar_refresh_token');
       const refreshToken = refreshTokenSetting?.value;
-      
+
       const expiryDateSetting = await this.settingDAO.get('google_calendar_expiry_date');
       const expiryDate = expiryDateSetting?.value ? parseInt(expiryDateSetting.value) : null;
 
       // 使用第一个可用端口作为后备
       const redirectUri = `http://localhost:${this.REDIRECT_PORTS[0]}/oauth2callback`;
-      
+
       // 创建 OAuth 客户端并设置 credentials
       this.oauth2Client = new google.auth.OAuth2(
         this.CLIENT_ID,
@@ -591,7 +591,7 @@ class GoogleCalendarService {
       // 添加超时保护 (30秒)
       const response = await Promise.race([
         this.calendar.calendarList.list(),
-        new Promise((_, reject) => 
+        new Promise((_, reject) =>
           setTimeout(() => reject(new Error('网络请求超时，请检查网络连接或代理设置')), 30000)
         )
       ]);
@@ -609,13 +609,13 @@ class GoogleCalendarService {
       }));
     } catch (error) {
       console.error('[GoogleCalendar] 获取日历列表失败:', error);
-      
+
       // 如果是认证错误,清除保存的 token
       if (error.code === 401 || error.code === 403) {
         await this.disconnect();
         throw new Error('授权已过期,请重新授权');
       }
-      
+
       throw error;
     }
   }
@@ -695,7 +695,7 @@ class GoogleCalendarService {
       if (config.syncDirection === 'bidirectional' || config.syncDirection === 'upload') {
         const uploaded = await this.syncLocalToRemote(config);
         result.localToRemote = uploaded;
-        
+
         // 同步删除操作 - 删除本地已删除待办对应的远程事件
         const deleted = await this.syncDeletedTodos(config);
         result.deleted = deleted;
@@ -763,8 +763,8 @@ class GoogleCalendarService {
       // 如果due_date包含T，提取日期部分；否则直接使用
       const dateOnly = todo.due_date.includes('T') ? todo.due_date.split('T')[0] : todo.due_date;
       const endDateOnly = todo.end_date ? (todo.end_date.includes('T') ? todo.end_date.split('T')[0] : todo.end_date) : dateOnly;
-      return { 
-        start: { date: dateOnly }, 
+      return {
+        start: { date: dateOnly },
         end: { date: endDateOnly }
       };
     }
@@ -774,7 +774,7 @@ class GoogleCalendarService {
       // 数据库中的 due_date 应该是 UTC ISO 格式: "2025-11-11T14:00:00.000Z"
       // 或旧格式的本地时间字符串: "2025-11-11 14:00:00"
       let startDate;
-      
+
       if (todo.due_date.includes('T')) {
         // ISO 格式，直接解析（已经是 UTC）
         startDate = new Date(todo.due_date);
@@ -784,18 +784,18 @@ class GoogleCalendarService {
         const parts = todo.due_date.match(/(\d{4})-(\d{2})-(\d{2})\s+(\d{2}):(\d{2}):(\d{2})/);
         if (parts) {
           startDate = new Date(
-            parseInt(parts[1]), 
-            parseInt(parts[2]) - 1, 
-            parseInt(parts[3]), 
-            parseInt(parts[4]), 
-            parseInt(parts[5]), 
+            parseInt(parts[1]),
+            parseInt(parts[2]) - 1,
+            parseInt(parts[3]),
+            parseInt(parts[4]),
+            parseInt(parts[5]),
             parseInt(parts[6])
           );
         } else {
           startDate = new Date(todo.due_date);
         }
       }
-      
+
       if (isNaN(startDate.getTime())) {
         // 无效日期，降级为全天
         const today = new Date().toISOString().split('T')[0];
@@ -805,7 +805,7 @@ class GoogleCalendarService {
       // 使用本地时区的 ISO 字符串
       // 格式: 2025-11-11T14:00:00+08:00
       const startDateTime = this._toLocalISOString(startDate);
-      
+
       // 计算结束时间
       let endDateTime;
       if (todo.end_date) {
@@ -816,11 +816,11 @@ class GoogleCalendarService {
           const parts = todo.end_date.match(/(\d{4})-(\d{2})-(\d{2})\s+(\d{2}):(\d{2}):(\d{2})/);
           if (parts) {
             endDate = new Date(
-              parseInt(parts[1]), 
-              parseInt(parts[2]) - 1, 
-              parseInt(parts[3]), 
-              parseInt(parts[4]), 
-              parseInt(parts[5]), 
+              parseInt(parts[1]),
+              parseInt(parts[2]) - 1,
+              parseInt(parts[3]),
+              parseInt(parts[4]),
+              parseInt(parts[5]),
               parseInt(parts[6])
             );
           } else {
@@ -835,11 +835,11 @@ class GoogleCalendarService {
       }
 
       return {
-        start: { 
+        start: {
           dateTime: startDateTime,
           timeZone: 'Asia/Shanghai' // 明确指定时区
         },
-        end: { 
+        end: {
           dateTime: endDateTime,
           timeZone: 'Asia/Shanghai'
         }
@@ -863,14 +863,14 @@ class GoogleCalendarService {
     const offsetHours = Math.floor(Math.abs(offset) / 60);
     const offsetMinutes = Math.abs(offset) % 60;
     const offsetSign = offset >= 0 ? '+' : '-';
-    
+
     const year = date.getFullYear();
     const month = String(date.getMonth() + 1).padStart(2, '0');
     const day = String(date.getDate()).padStart(2, '0');
     const hours = String(date.getHours()).padStart(2, '0');
     const minutes = String(date.getMinutes()).padStart(2, '0');
     const seconds = String(date.getSeconds()).padStart(2, '0');
-    
+
     return `${year}-${month}-${day}T${hours}:${minutes}:${seconds}${offsetSign}${String(offsetHours).padStart(2, '0')}:${String(offsetMinutes).padStart(2, '0')}`;
   }
 
@@ -935,7 +935,7 @@ class GoogleCalendarService {
     const hours = String(date.getHours()).padStart(2, '0');
     const minutes = String(date.getMinutes()).padStart(2, '0');
     const seconds = String(date.getSeconds()).padStart(2, '0');
-    
+
     return `${year}-${month}-${day} ${hours}:${minutes}:${seconds}`;
   }
 
@@ -956,7 +956,7 @@ class GoogleCalendarService {
         // 转换 "YYYY-MM-DD HH:MM:SS" 为 "YYYY-MM-DDTHH:MM:SSZ"
         localUpdatedStr = localUpdatedStr.replace(' ', 'T') + 'Z';
       }
-      
+
       const localUpdatedAt = new Date(localUpdatedStr);
       const remoteUpdatedAt = new Date(remoteEvent.updated);
 
@@ -978,14 +978,14 @@ class GoogleCalendarService {
         console.log(`[GoogleCalendar] 云端更新较新:`);
         console.log(`  云端: ${remoteEvent.updated} (${remoteTime})`);
         console.log(`  本地: ${localTodo.updated_at} (${localTime})`);
-        console.log(`  差值: ${timeDiff}ms (${(timeDiff/1000).toFixed(1)}秒)`);
+        console.log(`  差值: ${timeDiff}ms (${(timeDiff / 1000).toFixed(1)}秒)`);
         return true;
       } else if (timeDiff < -threshold) {
         // 本地更新时间较新
         console.log(`[GoogleCalendar] 本地更新较新:`);
         console.log(`  云端: ${remoteEvent.updated} (${remoteTime})`);
         console.log(`  本地: ${localTodo.updated_at} (${localTime})`);
-        console.log(`  差值: ${timeDiff}ms (${(timeDiff/1000).toFixed(1)}秒)`);
+        console.log(`  差值: ${timeDiff}ms (${(timeDiff / 1000).toFixed(1)}秒)`);
         return false;
       } else {
         // 时间相近，认为已同步，不更新
@@ -1019,7 +1019,7 @@ class GoogleCalendarService {
           start: event.start,
           end: event.end
         });
-        
+
         // 添加超时保护 (15秒)
         await Promise.race([
           this.calendar.events.update({
@@ -1027,7 +1027,7 @@ class GoogleCalendarService {
             eventId: existingEventId,
             requestBody: event,
           }),
-          new Promise((_, reject) => 
+          new Promise((_, reject) =>
             setTimeout(() => reject(new Error('更新事件超时')), 15000)
           )
         ]);
@@ -1041,7 +1041,7 @@ class GoogleCalendarService {
             calendarId,
             requestBody: event,
           }),
-          new Promise((_, reject) => 
+          new Promise((_, reject) =>
             setTimeout(() => reject(new Error('创建事件超时')), 15000)
           )
         ]);
@@ -1084,16 +1084,16 @@ class GoogleCalendarService {
 
     const todos = this.todoDAO.findAll({ includeCompleted: false });
     console.log(`[GoogleCalendar] 准备上传 ${todos.length} 个未完成待办`);
-    
+
     // 详细日志：列出所有待上传的待办
     todos.forEach((todo, index) => {
       console.log(`[GoogleCalendar]   待办 ${index + 1}: "${todo.content}" (${todo.item_type}) - ${todo.due_date} - 本地updated: ${todo.updated_at}`);
     });
-    
+
     const uploadResults = await Promise.all(
       todos.map(todo => this._uploadTodo(todo, config.calendarId))
     );
-    
+
     const uploadCount = uploadResults.filter(Boolean).length;
     console.log(`[GoogleCalendar] 上传完成: ${uploadCount}/${todos.length}`);
     return uploadCount;
@@ -1109,7 +1109,7 @@ class GoogleCalendarService {
 
     const allTodos = this.todoDAO.findAll({ includeCompleted: true });
     const todoIds = new Set(allTodos.map(todo => `todo_${todo.id}`));
-    
+
     let deleteCount = 0;
     const keysToDelete = [];
 
@@ -1118,18 +1118,18 @@ class GoogleCalendarService {
       if (key.startsWith('todo_') && !todoIds.has(key)) {
         try {
           console.log(`[GoogleCalendar] 删除远程事件: ${eventId} (本地待办已删除)`);
-          
+
           // 添加超时保护 (15秒)
           await Promise.race([
             this.calendar.events.delete({
               calendarId: config.calendarId,
               eventId: eventId,
             }),
-            new Promise((_, reject) => 
+            new Promise((_, reject) =>
               setTimeout(() => reject(new Error('删除事件超时')), 15000)
             )
           ]);
-          
+
           keysToDelete.push(key);
           deleteCount++;
         } catch (error) {
@@ -1147,12 +1147,12 @@ class GoogleCalendarService {
 
     // 清理映射表
     keysToDelete.forEach(key => this.syncMappings.delete(key));
-    
+
     // 立即保存映射表
     if (keysToDelete.length > 0) {
       this._saveSyncMappings();
     }
-    
+
     console.log(`[GoogleCalendar] 删除完成: ${deleteCount} 个远程事件`);
     return deleteCount;
   }
@@ -1166,31 +1166,31 @@ class GoogleCalendarService {
     console.log('[GoogleCalendar] 下载 Google Calendar 事件到本地...');
 
     try {
-      // 获取过去 7 天到未来 30 天的事件（覆盖更广的范围）
+      // 获取过去 90 天到未来 365 天的事件（覆盖更广的范围）
       const now = new Date();
-      const sevenDaysAgo = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000);
-      const thirtyDaysLater = new Date(now.getTime() + 30 * 24 * 60 * 60 * 1000);
-      
-      console.log(`[GoogleCalendar] 同步范围: ${sevenDaysAgo.toISOString()} 到 ${thirtyDaysLater.toISOString()}`);
+      const ninetyDaysAgo = new Date(now.getTime() - 90 * 24 * 60 * 60 * 1000);
+      const oneYearLater = new Date(now.getTime() + 365 * 24 * 60 * 60 * 1000);
+
+      console.log(`[GoogleCalendar] 同步范围: ${ninetyDaysAgo.toISOString()} 到 ${oneYearLater.toISOString()}`);
 
       // 添加超时保护 (30秒)
       const response = await Promise.race([
         this.calendar.events.list({
           calendarId: config.calendarId,
-          timeMin: sevenDaysAgo.toISOString(),
-          timeMax: thirtyDaysLater.toISOString(),
-          maxResults: 250, // 增加获取数量
+          timeMin: ninetyDaysAgo.toISOString(),
+          timeMax: oneYearLater.toISOString(),
+          maxResults: 500, // 增加获取数量以覆盖更大时间范围
           singleEvents: true,
           orderBy: 'startTime',
         }),
-        new Promise((_, reject) => 
+        new Promise((_, reject) =>
           setTimeout(() => reject(new Error('网络请求超时，请检查网络连接或代理设置')), 30000)
         )
       ]);
 
       const events = response.data.items || [];
       console.log(`[GoogleCalendar] 获取到 ${events.length} 个事件`);
-      
+
       // 详细日志：列出所有下载的事件
       events.forEach((event, index) => {
         const { dueDate, itemType } = this._parseEventTime(event);
@@ -1216,7 +1216,7 @@ class GoogleCalendarService {
             is_completed: event.status === 'cancelled' ? 1 : 0,
             // 不设置is_important和is_urgent，让它们保持本地值或默认值
           };
-          
+
           // 只有当云端有实际内容时才更新 description，避免空值覆盖本地
           if (event.description && event.description.trim()) {
             todoData.description = event.description;
@@ -1225,7 +1225,7 @@ class GoogleCalendarService {
           if (localTodo) {
             // 智能冲突处理：比较更新时间
             const shouldUpdate = this._shouldUpdateLocal(localTodo, event);
-            
+
             if (shouldUpdate) {
               console.log(`[GoogleCalendar] ✅ 云端更新较新，更新本地待办 ${localTodo.id} "${localTodo.content}" → "${event.summary}"`);
               console.log(`[GoogleCalendar]    本地时间: ${localTodo.due_date}, 云端时间: ${dueDate}`);

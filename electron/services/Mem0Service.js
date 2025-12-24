@@ -287,7 +287,8 @@ class Mem0Service extends EventEmitter {
     try {
       const topK = options.limit || 5;
       const category = options.category;
-      const minScore = options.minScore || 0.3; // 最低相似度阈值
+      // 支持 threshold 和 minScore 两种参数名（threshold 来自插件，minScore 是历史兼容）
+      const minScore = options.threshold || options.minScore || 0.3;
 
       console.log('[Mem0] Searching memories:', { userId, query, topK, category });
 

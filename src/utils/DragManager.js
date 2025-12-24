@@ -14,19 +14,19 @@ class DragManager {
       dragThreshold: 10, // 拖拽阈值，超过此距离才开始拖拽
       windowBoundaryThreshold: 50 // 窗口边界阈值，拖拽到边界附近时触发独立窗口
     };
-    
+
     this.callbacks = {
       onDragStart: null,
       onDragMove: null,
       onDragEnd: null,
       onCreateWindow: null
     };
-    
+
     this.boundHandlers = {
       handleMouseMove: this.handleMouseMove.bind(this),
       handleMouseUp: this.handleMouseUp.bind(this)
     };
-    
+
     // 添加防抖相关属性
     this.lastBoundaryState = {
       isNearBoundary: false,
@@ -50,11 +50,11 @@ class DragManager {
       ...this.callbacks,
       ...options
     };
-    
+
     if (options.dragThreshold !== undefined) {
       this.dragState.dragThreshold = options.dragThreshold;
     }
-    
+
     if (options.windowBoundaryThreshold !== undefined) {
       this.dragState.windowBoundaryThreshold = options.windowBoundaryThreshold;
     }
@@ -85,7 +85,7 @@ class DragManager {
     // 添加全局事件监听器
     document.addEventListener('mousemove', this.boundHandlers.handleMouseMove);
     document.addEventListener('mouseup', this.boundHandlers.handleMouseUp);
-    
+
     // 阻止默认行为
     event.preventDefault();
   }
@@ -111,7 +111,7 @@ class DragManager {
     // 检查是否超过拖拽阈值
     if (!this.dragState.isDragging && distance > this.dragState.dragThreshold) {
       this.dragState.isDragging = true;
-      
+
       // 触发拖拽开始回调
       if (this.callbacks.onDragStart) {
         this.callbacks.onDragStart({
@@ -169,7 +169,9 @@ class DragManager {
     if (shouldCreateWindow && this.callbacks.onCreateWindow) {
       this.callbacks.onCreateWindow({
         item: draggedItem,
-        itemType: draggedItemType
+        itemType: draggedItemType,
+        // 传递结束位置用于窗口定位
+        endPosition: { x: event.screenX, y: event.screenY }
       });
     }
   }
@@ -181,25 +183,25 @@ class DragManager {
   checkWindowBoundary(event) {
     const isNearBoundary = this.isNearWindowBoundary(event);
     const boundaryPosition = this.getBoundaryPosition(event);
-    
+
     // 更新光标样式
     if (isNearBoundary) {
       document.body.style.cursor = 'copy';
     } else {
       document.body.style.cursor = 'grabbing';
     }
-    
+
     // 只有当边界状态发生变化时才触发回调，避免频繁更新
-    const stateChanged = 
+    const stateChanged =
       this.lastBoundaryState.isNearBoundary !== isNearBoundary ||
       this.lastBoundaryState.boundaryPosition !== boundaryPosition;
-    
+
     if (stateChanged || !this.boundaryCheckThrottle) {
       // 清除之前的节流
       if (this.boundaryCheckThrottle) {
         clearTimeout(this.boundaryCheckThrottle);
       }
-      
+
       // 使用节流来减少频繁调用
       this.boundaryCheckThrottle = setTimeout(() => {
         if (this.callbacks.onBoundaryCheck) {
@@ -211,7 +213,7 @@ class DragManager {
         }
         this.boundaryCheckThrottle = null;
       }, 16); // 约60fps的更新频率
-      
+
       // 更新最后的边界状态
       this.lastBoundaryState = {
         isNearBoundary,
@@ -252,7 +254,7 @@ class DragManager {
     if (clientY > innerHeight - threshold) return 'bottom';
     if (clientX < threshold) return 'left';
     if (clientX > innerWidth - threshold) return 'right';
-    
+
     return null;
   }
 
@@ -263,24 +265,24 @@ class DragManager {
     // 移除事件监听器
     document.removeEventListener('mousemove', this.boundHandlers.handleMouseMove);
     document.removeEventListener('mouseup', this.boundHandlers.handleMouseUp);
-    
+
     // 清理节流定时器
     if (this.boundaryCheckThrottle) {
       clearTimeout(this.boundaryCheckThrottle);
       this.boundaryCheckThrottle = null;
     }
-    
+
     // 重置状态
     this.dragState.isDragging = false;
     this.dragState.draggedItem = null;
     this.dragState.draggedItemType = null;
-    
+
     // 重置边界状态
     this.lastBoundaryState = {
       isNearBoundary: false,
       boundaryPosition: null
     };
-    
+
     // 重置光标
     document.body.style.cursor = '';
   }
@@ -347,7 +349,7 @@ export function createDragHandler(itemType, createWindowCallback) {
           }
         }
       });
-      
+
       dragManager.startDrag(event, item, itemType);
     },
 

@@ -18,7 +18,7 @@ export const DragAnimationProvider = ({ children }) => {
     isNearBoundary: false,
     boundaryPosition: null
   });
-  
+
   // 使用 ref 来存储动画帧 ID
   const animationFrameRef = useRef(null);
   // 使用 ref 来存储预览元素，避免频繁查询 DOM
@@ -38,7 +38,7 @@ export const DragAnimationProvider = ({ children }) => {
           draggedItemType: dragData.itemType,
           currentPosition: dragData.startPosition
         }));
-        
+
         // 调用原始回调
         if (originalCallbacks.onDragStart) {
           originalCallbacks.onDragStart(dragData);
@@ -47,12 +47,12 @@ export const DragAnimationProvider = ({ children }) => {
       onDragMove: (dragData) => {
         // 使用 ref 直接更新位置，避免频繁的状态更新
         currentPositionRef.current = dragData.currentPosition;
-        
+
         // 使用 requestAnimationFrame 来优化 DOM 更新
         if (animationFrameRef.current) {
           cancelAnimationFrame(animationFrameRef.current);
         }
-        
+
         animationFrameRef.current = requestAnimationFrame(() => {
           // 直接更新 DOM 而不是 React 状态
           if (previewElementRef.current) {
@@ -60,7 +60,7 @@ export const DragAnimationProvider = ({ children }) => {
             previewElementRef.current.style.top = `${dragData.currentPosition.y}px`;
           }
         });
-        
+
         // 调用原始回调
         if (originalCallbacks.onDragMove) {
           originalCallbacks.onDragMove(dragData);
@@ -72,7 +72,7 @@ export const DragAnimationProvider = ({ children }) => {
           cancelAnimationFrame(animationFrameRef.current);
           animationFrameRef.current = null;
         }
-        
+
         // 延迟重置状态，让动画完成
         setTimeout(() => {
           setDragState(prev => ({
@@ -84,7 +84,7 @@ export const DragAnimationProvider = ({ children }) => {
             boundaryPosition: null
           }));
         }, 100);
-        
+
         // 调用原始回调
         if (originalCallbacks.onDragEnd) {
           originalCallbacks.onDragEnd(dragData);
@@ -92,10 +92,10 @@ export const DragAnimationProvider = ({ children }) => {
       },
       onBoundaryCheck: (boundaryData) => {
         // 使用 ref 来避免频繁的状态更新
-        const shouldUpdate = 
+        const shouldUpdate =
           dragState.isNearBoundary !== boundaryData.isNearBoundary ||
           dragState.boundaryPosition !== boundaryData.boundaryPosition;
-          
+
         if (shouldUpdate) {
           setDragState(prev => ({
             ...prev,
@@ -110,7 +110,7 @@ export const DragAnimationProvider = ({ children }) => {
             currentPosition: boundaryData.currentPosition
           }));
         }
-        
+
         // 调用原始回调
         if (originalCallbacks.onBoundaryCheck) {
           originalCallbacks.onBoundaryCheck(boundaryData);
@@ -142,7 +142,8 @@ export const DragAnimationProvider = ({ children }) => {
       },
       onCreateWindow: async (dragData) => {
         try {
-          await createWindowCallback(dragData.item);
+          // 传递结束位置用于窗口定位
+          await createWindowCallback(dragData.item, dragData.endPosition);
           console.log(`创建${itemType}独立窗口成功`);
           if (customCallbacks.onCreateWindow) {
             customCallbacks.onCreateWindow(dragData);

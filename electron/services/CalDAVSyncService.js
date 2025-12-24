@@ -15,11 +15,68 @@ class CalDAVSyncService {
     this.davClient = null;
     this.syncInProgress = false;
     this.lastSyncTime = null;
-    
+    this.syncTimer = null;
+
     // 同步映射表 (本地 todo_id <-> 远程 calendar event UID)
     this.syncMappings = new Map();
-    
+    this._loadSyncMappings(); // 从持久化存储加载
+
     this.setupIpcHandlers();
+  }
+
+  /**
+   * 初始化服务（应用启动时调用，恢复自动同步）
+   */
+  async initialize() {
+    try {
+      await this._ensureAutoSyncFromConfig();
+    } catch (error) {
+      console.error('[CalDAV] 初始化失败:', error);
+    }
+  }
+
+  /**
+   * 根据持久化配置恢复自动同步
+   * @private
+   */
+  async _ensureAutoSyncFromConfig() {
+    const config = await this.getConfig();
+    if (config.enabled && config.serverUrl && config.calendarUrl) {
+      const intervalMinutes = parseInt(config.syncInterval, 10);
+      const safeMinutes = Number.isFinite(intervalMinutes) && intervalMinutes > 0 ? intervalMinutes : 30;
+      this.startAutoSync(safeMinutes * 60 * 1000);
+    }
+  }
+
+  /**
+   * 加载同步映射表
+   * @private
+   */
+  _loadSyncMappings() {
+    try {
+      const mappings = this.settingDAO.get('caldav_sync_mappings');
+      if (mappings?.value) {
+        const data = JSON.parse(mappings.value);
+        this.syncMappings = new Map(Object.entries(data));
+        console.log(`[CalDAV] 加载同步映射表: ${this.syncMappings.size} 条记录`);
+      }
+    } catch (error) {
+      console.error('[CalDAV] 加载同步映射表失败:', error);
+    }
+  }
+
+  /**
+   * 保存同步映射表
+   * @private
+   */
+  _saveSyncMappings() {
+    try {
+      const data = Object.fromEntries(this.syncMappings.entries());
+      this.settingDAO.set('caldav_sync_mappings', JSON.stringify(data));
+      console.log(`[CalDAV] 保存同步映射表: ${this.syncMappings.size} 条记录`);
+    } catch (error) {
+      console.error('[CalDAV] 保存同步映射表失败:', error);
+    }
   }
 
   /**
@@ -103,7 +160,7 @@ class CalDAVSyncService {
 
       // 获取日历列表
       const calendars = await client.fetchCalendars();
-      
+
       console.log('[CalDAV] 连接成功,找到', calendars.length, '个日历');
 
       return {
@@ -118,10 +175,10 @@ class CalDAVSyncService {
       };
     } catch (error) {
       console.error('[CalDAV] 连接失败:', error.message);
-      
+
       // 提供更友好的错误信息
       let friendlyMessage = error.message;
-      
+
       if (error.message.includes('ETIMEDOUT') || error.message.includes('ECONNREFUSED')) {
         friendlyMessage = '连接超时。可能原因：\n' +
           '1. 服务器地址不正确\n' +
@@ -134,7 +191,7 @@ class CalDAVSyncService {
       } else if (error.message.includes('404')) {
         friendlyMessage = '服务器地址不正确或日历不存在';
       }
-      
+
       throw new Error(friendlyMessage);
     }
   }
@@ -194,7 +251,7 @@ class CalDAVSyncService {
     }
 
     const config = await this.getConfig();
-    
+
     if (!config.enabled || !config.serverUrl) {
       throw new Error('CalDAV 未配置或未启用');
     }
@@ -270,8 +327,8 @@ class CalDAVSyncService {
   async syncLocalToRemote(client, config) {
     console.log('[CalDAV] 上传本地待办到日历...');
 
-    // 获取所有未完成的待办 (或根据需求调整)
-    const todos = this.todoDAO.getAllNotCompleted();
+    // 获取所有待办（包括已完成的，以同步完成状态）
+    const todos = this.todoDAO.findAll({ includeCompleted: true });
     let uploadCount = 0;
 
     for (const todo of todos) {
@@ -293,6 +350,9 @@ class CalDAVSyncService {
         console.error(`[CalDAV] 上传待办 ${todo.id} 失败:`, error.message);
       }
     }
+
+    // 同步完成后保存映射表
+    this._saveSyncMappings();
 
     console.log(`[CalDAV] 上传完成: ${uploadCount}/${todos.length}`);
     return uploadCount;
@@ -346,12 +406,12 @@ class CalDAVSyncService {
             description: description || '',
             completed: status === 'COMPLETED' ? 1 : 0,
           };
-          
+
           // 只有当远程due日期与本地不同时才更新（保留时间部分）
           if (due) {
             const remoteDueDate = due.toJSDate().toISOString().split('T')[0];
             const localDueDate = localTodo.due_date ? localTodo.due_date.split('T')[0] : null;
-            
+
             if (remoteDueDate !== localDueDate) {
               // 保留原有时间部分，只更新日期
               if (localTodo.due_date && localTodo.due_date.includes('T')) {
@@ -366,7 +426,7 @@ class CalDAVSyncService {
             // 远程没有due日期，清空本地
             updateData.due_date = null;
           }
-          
+
           this.todoDAO.update(localTodo.id, updateData);
         } else {
           // 创建新待办
@@ -389,6 +449,9 @@ class CalDAVSyncService {
       }
     }
 
+    // 同步完成后保存映射表
+    this._saveSyncMappings();
+
     console.log(`[CalDAV] 下载完成: ${downloadCount}/${calendar.length}`);
     return downloadCount;
   }
@@ -402,7 +465,7 @@ class CalDAVSyncService {
    */
   async createCalendarEvent(client, config, todo) {
     const uid = `flashnote-todo-${todo.id}-${Date.now()}@flashnote.app`;
-    
+
     // 创建 iCalendar VTODO 组件
     const comp = new ICAL.Component(['vcalendar', [], []]);
     comp.updatePropertyWithValue('prodid', '-//FlashNote//CalDAV Sync//EN');
@@ -412,7 +475,7 @@ class CalDAVSyncService {
     vtodo.updatePropertyWithValue('uid', uid);
     vtodo.updatePropertyWithValue('summary', todo.content);
     vtodo.updatePropertyWithValue('description', todo.description || '');
-    
+
     if (todo.due_date) {
       // 将完整的UTC时间戳转换为ICAL日期时间
       const dueDateTime = new Date(todo.due_date);
@@ -421,14 +484,14 @@ class CalDAVSyncService {
     }
 
     vtodo.updatePropertyWithValue('status', todo.completed ? 'COMPLETED' : 'NEEDS-ACTION');
-    
+
     // 保存重要性到priority字段（1-9，1最高）
     if (todo.is_important) {
       vtodo.updatePropertyWithValue('priority', '1');
     } else {
       vtodo.updatePropertyWithValue('priority', '9');
     }
-    
+
     // 保存紧急性到categories字段
     if (todo.is_urgent) {
       vtodo.updatePropertyWithValue('categories', 'URGENT');
@@ -464,7 +527,7 @@ class CalDAVSyncService {
     vtodo.updatePropertyWithValue('uid', uid);
     vtodo.updatePropertyWithValue('summary', todo.content);
     vtodo.updatePropertyWithValue('description', todo.description || '');
-    
+
     if (todo.due_date) {
       // 将完整的UTC时间戳转换为ICAL日期时间
       const dueDateTime = new Date(todo.due_date);
@@ -473,14 +536,14 @@ class CalDAVSyncService {
     }
 
     vtodo.updatePropertyWithValue('status', todo.completed ? 'COMPLETED' : 'NEEDS-ACTION');
-    
+
     // 保存重要性到priority字段（1-9，1最高）
     if (todo.is_important) {
       vtodo.updatePropertyWithValue('priority', '1');
     } else {
       vtodo.updatePropertyWithValue('priority', '9');
     }
-    
+
     // 保存紧急性到categories字段
     if (todo.is_urgent) {
       vtodo.updatePropertyWithValue('categories', 'URGENT');

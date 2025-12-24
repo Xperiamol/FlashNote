@@ -228,7 +228,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
   },
 
   // 独立窗口创建API（顶层方法）
-  createNoteWindow: (noteId) => ipcRenderer.invoke('window:create-note-window', noteId),
+  createNoteWindow: (noteId, options) => ipcRenderer.invoke('window:create-note-window', noteId, options),
   isNoteOpenInWindow: (noteId) => ipcRenderer.invoke('window:is-note-open', noteId),
   createTodoWindow: (todoData) => ipcRenderer.invoke('window:create-todo-window', todoData),
 
@@ -241,7 +241,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
     hide: () => ipcRenderer.invoke('window:hide'),
     show: () => ipcRenderer.invoke('window:show'),
     focus: () => ipcRenderer.invoke('window:focus'),
-    
+
     // 开发者工具
     toggleDevTools: () => ipcRenderer.invoke('window:toggle-dev-tools'),
 

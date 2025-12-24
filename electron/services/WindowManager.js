@@ -255,8 +255,12 @@ class WindowManager extends EventEmitter {
 
   /**
    * 创建独立笔记窗口
+   * @param {string} noteId - 笔记ID
+   * @param {object} options - 可选配置
+   * @param {number} options.x - 窗口X坐标（鼠标位置）
+   * @param {number} options.y - 窗口Y坐标（鼠标位置）
    */
-  async createNoteWindow(noteId) {
+  async createNoteWindow(noteId, options = {}) {
     try {
       // 在开发模式下检查Vite服务器是否可用
       if (isDev) {
@@ -274,7 +278,20 @@ class WindowManager extends EventEmitter {
       const windowWidth = defaultMinibarMode ? 300 : 1000;
       const windowHeight = defaultMinibarMode ? 280 : 700;
 
-      const noteWindow = new BrowserWindow({
+      // 计算窗口位置（如果提供了鼠标位置，使用它；否则居中）
+      let windowX, windowY;
+      if (typeof options.x === 'number' && typeof options.y === 'number') {
+        // 窗口左上角对齐到鼠标位置，稍微偏移一点以免遮挡鼠标
+        windowX = Math.round(options.x - windowWidth / 2);
+        windowY = Math.round(options.y - 20);
+
+        // 确保窗口不会超出屏幕边界
+        const { workArea } = screen.getDisplayNearestPoint({ x: options.x, y: options.y });
+        windowX = Math.max(workArea.x, Math.min(windowX, workArea.x + workArea.width - windowWidth));
+        windowY = Math.max(workArea.y, Math.min(windowY, workArea.y + workArea.height - windowHeight));
+      }
+
+      const windowOptions = {
         width: windowWidth,
         height: windowHeight,
         show: false,
@@ -295,7 +312,15 @@ class WindowManager extends EventEmitter {
         maximizable: true,
         minimizable: true,
         closable: true
-      });
+      };
+
+      // 只有在有有效位置时才设置x/y
+      if (typeof windowX === 'number' && typeof windowY === 'number') {
+        windowOptions.x = windowX;
+        windowOptions.y = windowY;
+      }
+
+      const noteWindow = new BrowserWindow(windowOptions);
 
       // 处理新窗口打开请求（阻止外部链接在新窗口中打开）
       noteWindow.webContents.setWindowOpenHandler(({ url }) => {

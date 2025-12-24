@@ -17,14 +17,35 @@ import { useTheme } from '@mui/material/styles';
 import { useStore } from '../store/useStore';
 import { createTransitionString, ANIMATIONS } from '../utils/animationConfig';
 
+// 圣诞图标路径
+const CHRISTMAS_ICONS = {
+  notes: '/png/gift-box.png',
+  todo: '/png/christmas-wreath.png',
+  calendar: '/png/christmas-bell.png',
+  plugins: '/png/christmas-tree.png',
+  profile: '/png/hat.png',
+  settings: '/png/christmas-tree.png'
+};
+
+// 圣诞问候语
+const CHRISTMAS_GREETINGS = [
+  '🎄 圣诞快乐',
+  '🎅 Ho Ho Ho!',
+  '✨ Merry Christmas!',
+  '🎁 愿你的圣诞充满欢乐',
+  '❄️ 祝你幸福安康',
+  '🌟 愿圣诞之光照亮你的心'
+];
+
 const Sidebar = ({ open = true, onClose }) => {
   const { t } = useTranslation();
   const theme = useTheme();
-  const { currentView, setCurrentView, userAvatar, userName } = useStore();
+  const { currentView, setCurrentView, userAvatar, userName, christmasMode } = useStore();
   const [showWelcome, setShowWelcome] = useState(false);
   const [avatarHover, setAvatarHover] = useState(false);
   const [avatarClickCount, setAvatarClickCount] = useState(0);
   const [showDevMode, setShowDevMode] = useState(false);
+  const [christmasGreeting, setChristmasGreeting] = useState('');
 
   // 主侧边栏始终显示，不受open prop控制
 
@@ -78,7 +99,7 @@ const Sidebar = ({ open = true, onClose }) => {
       setTimeout(() => {
         setShowDevMode(false);
       }, 3000);
-      
+
       // 切换开发者工具
       if (window.electronAPI && window.electronAPI.window && window.electronAPI.window.toggleDevTools) {
         window.electronAPI.window.toggleDevTools().then(result => {
@@ -91,7 +112,7 @@ const Sidebar = ({ open = true, onClose }) => {
           console.error('调用开发者工具切换失败:', error);
         });
       }
-      
+
       // 重置计数
       setAvatarClickCount(0);
     } else {
@@ -105,6 +126,11 @@ const Sidebar = ({ open = true, onClose }) => {
 
   // 获取当前时间的问候语
   const getGreeting = () => {
+    // 圣诞模式下使用圣诞问候语
+    if (christmasMode) {
+      const randomGreeting = CHRISTMAS_GREETINGS[Math.floor(Math.random() * CHRISTMAS_GREETINGS.length)];
+      return randomGreeting;
+    }
     const hour = new Date().getHours();
     if (hour < 6) return t('profile.greetingNight');
     if (hour < 9) return t('profile.greetingMorning');
@@ -332,12 +358,26 @@ const Sidebar = ({ open = true, onClose }) => {
                 },
               }}
             >
-              {React.cloneElement(item.icon, {
-                sx: {
-                  fontSize: '20px',
-                  transition: createTransitionString(ANIMATIONS.button),
-                }
-              })}
+              {christmasMode && CHRISTMAS_ICONS[item.id] ? (
+                <Box
+                  component="img"
+                  src={CHRISTMAS_ICONS[item.id]}
+                  alt={item.label}
+                  sx={{
+                    width: '22px',
+                    height: '22px',
+                    objectFit: 'contain',
+                    transition: createTransitionString(ANIMATIONS.button),
+                  }}
+                />
+              ) : (
+                React.cloneElement(item.icon, {
+                  sx: {
+                    fontSize: '20px',
+                    transition: createTransitionString(ANIMATIONS.button),
+                  }
+                })
+              )}
             </IconButton>
           </Tooltip>
         ))}
@@ -396,7 +436,20 @@ const Sidebar = ({ open = true, onClose }) => {
               },
             }}
           >
-            <Settings sx={{ fontSize: '20px' }} />
+            {christmasMode ? (
+              <Box
+                component="img"
+                src={CHRISTMAS_ICONS.settings}
+                alt="Settings"
+                sx={{
+                  width: '22px',
+                  height: '22px',
+                  objectFit: 'contain',
+                }}
+              />
+            ) : (
+              <Settings sx={{ fontSize: '20px' }} />
+            )}
           </IconButton>
         </Tooltip>
       </Box>

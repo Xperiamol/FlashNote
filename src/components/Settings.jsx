@@ -85,7 +85,7 @@ function TabPanel({ children, value, index, ...other }) {
 }
 
 const Settings = () => {
-    const { theme, setTheme, setPrimaryColor, setUserAvatar, setUserName, titleBarStyle, setTitleBarStyle, editorMode, setEditorMode, language, setLanguage, defaultMinibarMode, setDefaultMinibarMode, maskOpacity, setMaskOpacity } = useStore();
+    const { theme, setTheme, setPrimaryColor, setUserAvatar, setUserName, titleBarStyle, setTitleBarStyle, editorMode, setEditorMode, language, setLanguage, defaultMinibarMode, setDefaultMinibarMode, maskOpacity, setMaskOpacity, christmasMode, setChristmasMode } = useStore();
     const settingsTabValue = useStore((state) => state.settingsTabValue);
     const [settings, setSettings] = useState({
         theme: 'system',
@@ -96,7 +96,8 @@ const Settings = () => {
         titleBarStyle: 'windows',
         language: 'zh-CN',
         defaultMinibarMode: false,
-        maskOpacity: 'medium'
+        maskOpacity: 'medium',
+        christmasMode: false
     });
     const [shortcuts, setShortcuts] = useState(DEFAULT_SHORTCUTS);
     const [shortcutConflicts, setShortcutConflicts] = useState({});
@@ -121,6 +122,9 @@ const Settings = () => {
                     if (normalizedData.autoLaunch !== undefined) {
                         normalizedData.autoLaunch = Boolean(normalizedData.autoLaunch);
                     }
+                    if (normalizedData.christmasMode !== undefined) {
+                        normalizedData.christmasMode = Boolean(normalizedData.christmasMode);
+                    }
                     setSettings(prev => ({ ...prev, ...normalizedData }));
                 }
             }
@@ -137,7 +141,7 @@ const Settings = () => {
                 setShortcuts(shortcutManager.shortcuts);
                 return;
             }
-            
+
             // 否则才初始化
             await shortcutManager.initialize();
             // 确保shortcuts不为空对象
@@ -174,6 +178,9 @@ const Settings = () => {
         },
         maskOpacity: {
             syncGlobalState: setMaskOpacity
+        },
+        christmasMode: {
+            syncGlobalState: setChristmasMode
         },
         theme: {
             syncGlobalState: setTheme
@@ -313,17 +320,17 @@ const Settings = () => {
             if (window.electronAPI?.shortcuts) {
                 // 调用 shortcut:update IPC handler，传递完整配置
                 const result = await window.electronAPI.shortcuts.update(
-                    shortcutId, 
-                    shortcut.currentKey, 
+                    shortcutId,
+                    shortcut.currentKey,
                     shortcut.action,
                     updatedShortcuts // 传递完整配置，让主进程保存
                 );
-                
+
                 if (!result.success) {
                     console.error(`更新快捷键 ${shortcutId} 失败:`, result.error);
                     throw new Error(result.error || '更新快捷键失败');
                 }
-                
+
                 console.log(`快捷键 ${shortcutId} 已成功更新并保存`);
             }
         } catch (error) {
@@ -360,7 +367,7 @@ const Settings = () => {
 
             // 4. 保存快捷键（先保存再更新UI，确保数据一致性）
             await saveShortcut(shortcutId, updatedShortcuts);
-            
+
             // 5. 保存成功后才更新UI状态
             setShortcuts(updatedShortcuts);
 
@@ -708,6 +715,21 @@ const Settings = () => {
                                     ))}
                                 </Box>
                             </Box>
+                        </ListItem>
+
+                        <Divider />
+
+                        <ListItem>
+                            <ListItemText
+                                primary="圣诞模式"
+                                secondary="来点惊喜如何？（不可与主题外观插件同时开启）"
+                            />
+                            <ListItemSecondaryAction>
+                                <Switch
+                                    checked={settings.christmasMode || false}
+                                    onChange={(e) => handleSettingChange('christmasMode', e.target.checked)}
+                                />
+                            </ListItemSecondaryAction>
                         </ListItem>
 
                         <Divider />

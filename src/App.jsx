@@ -43,6 +43,7 @@ import CreateTodoModal from './components/CreateTodoModal'
 import Profile from './components/Profile'
 import CommandPalette from './components/CommandPalette'
 import ConflictResolutionDialog from './components/ConflictResolutionDialog'
+import ChristmasDecorations from './components/ChristmasSnow'
 
 function rewriteCssUrls(cssText, sheetHref) {
   if (!cssText || !sheetHref) {
@@ -148,7 +149,7 @@ import { injectUIBridge } from './utils/pluginUIBridge'
 import themeManager from './utils/pluginThemeManager'
 
 function App() {
-  const { theme, setTheme, primaryColor, loadNotes, currentView, initializeSettings, setCurrentView, createNote, batchDeleteNotes, batchDeleteTodos, batchCompleteTodos, batchRestoreNotes, batchPermanentDeleteNotes, getAllTags, batchSetTags, selectedNoteId, setSelectedNoteId, updateNoteInList, maskOpacity } = useStore()
+  const { theme, setTheme, primaryColor, loadNotes, currentView, initializeSettings, setCurrentView, createNote, batchDeleteNotes, batchDeleteTodos, batchCompleteTodos, batchRestoreNotes, batchPermanentDeleteNotes, getAllTags, batchSetTags, selectedNoteId, setSelectedNoteId, updateNoteInList, maskOpacity, christmasMode } = useStore()
   const refreshPluginCommands = useStore((state) => state.refreshPluginCommands)
   const addPluginCommand = useStore((state) => state.addPluginCommand)
   const removePluginCommand = useStore((state) => state.removePluginCommand)
@@ -186,7 +187,7 @@ function App() {
   const [selectedDate, setSelectedDate] = useState(null)
   const [calendarShowCompleted, setCalendarShowCompleted] = useState(false)
   const [calendarViewMode, setCalendarViewMode] = useState('todos') // 'todos', 'notes', 'focus'
-  
+
   // 日历视图模式变化处理（带调试）
   const handleCalendarViewModeChange = (mode) => {
     console.log('Calendar view mode changing from', calendarViewMode, 'to', mode);
@@ -622,7 +623,7 @@ function App() {
         updateNoteInList(result.data);
       }
     };
-    
+
     window.addEventListener('plugin-note-updated', handlePluginNoteUpdate);
 
     // 清理事件监听器
@@ -1051,8 +1052,8 @@ function App() {
                 {/* 主内容区域 */}
                 <Box sx={(theme) => {
                   const opacity = getMaskOpacityValue(theme.palette.mode === 'dark')
-                  return { 
-                    flex: 1, 
+                  return {
+                    flex: 1,
                     overflow: 'hidden',
                     backgroundColor: theme.palette.mode === 'dark'
                       ? `rgba(15, 23, 42, ${opacity})`
@@ -1210,11 +1211,12 @@ function App() {
           </Dialog>
         )}
 
-        {/* 命令面板 */}
         <CommandPalette
           open={commandPaletteOpen}
           onClose={() => setCommandPaletteOpen(false)}
         />
+
+        {christmasMode && <ChristmasDecorations />}
       </DragAnimationProvider>
     </ThemeProvider>
   )

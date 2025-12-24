@@ -330,7 +330,7 @@ const TodoItem = ({
           },
           ...getItemStyles()
         }}
-        onClick={() => onClick && onClick(todo)}
+        onClick={(e) => onClick && onClick(e, todo)}
       >
         <Box sx={{ display: 'flex', alignItems: 'flex-start', gap: 1 }}>
           {renderTodoListIcon()}

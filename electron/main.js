@@ -1,8 +1,18 @@
-// 加载环境变量
-require('dotenv').config()
-
 const { app, BrowserWindow, ipcMain, dialog, clipboard, Notification, shell, Tray, Menu, nativeImage, protocol, nativeTheme } = require('electron')
 const path = require('path')
+
+// 加载环境变量
+// 在打包环境中，.env 文件位于 resources 目录
+// 在开发环境中，.env 文件位于项目根目录
+// 注意：process.resourcesPath 在打包后指向 resources 目录，开发模式下指向 node_modules/electron/dist/resources
+const isEnvPackaged = app.isPackaged
+
+if (isEnvPackaged) {
+  require('dotenv').config({ path: path.join(process.resourcesPath, '.env') })
+} else {
+  require('dotenv').config()
+}
+
 const fs = require('fs')
 const isDev = process.env.NODE_ENV === 'development' || !app.isPackaged
 
@@ -56,10 +66,36 @@ let tray = null
 let pluginManager
 
 function createWindow() {
+  // 加载保存的窗口状态
+  const windowStatePath = path.join(app.getPath('userData'), 'window-state.json')
+  let windowState = {
+    width: 1400,  // 默认更宽的窗口
+    height: 900,
+    x: undefined,
+    y: undefined,
+    isMaximized: false
+  }
+
+  // 尝试读取保存的窗口状态
+  try {
+    if (fs.existsSync(windowStatePath)) {
+      const savedState = JSON.parse(fs.readFileSync(windowStatePath, 'utf8'))
+      // 验证保存的状态是否有效
+      if (savedState.width && savedState.height) {
+        windowState = { ...windowState, ...savedState }
+        console.log('[Main] 已加载保存的窗口状态:', windowState)
+      }
+    }
+  } catch (error) {
+    console.error('[Main] 加载窗口状态失败:', error)
+  }
+
   // 创建浏览器窗口
   mainWindow = new BrowserWindow({
-    width: 1200,
-    height: 800,
+    width: windowState.width,
+    height: windowState.height,
+    x: windowState.x,
+    y: windowState.y,
     minWidth: 800,
     minHeight: 600,
     webPreferences: {
@@ -72,6 +108,65 @@ function createWindow() {
     titleBarStyle: 'hidden', // 隐藏默认标题栏，使用自定义标题栏
     frame: false, // 完全隐藏窗口边框
     show: false // 先不显示窗口，等加载完成后再显示
+  })
+
+  // 如果之前是最大化状态，恢复最大化
+  if (windowState.isMaximized) {
+    mainWindow.maximize()
+  }
+
+  // 保存窗口状态的函数
+  const saveWindowState = () => {
+    if (!mainWindow || mainWindow.isDestroyed()) return
+
+    try {
+      const isMaximized = mainWindow.isMaximized()
+      const bounds = mainWindow.getBounds()
+
+      // 只在非最大化时保存位置和大小
+      const stateToSave = {
+        isMaximized,
+        ...(isMaximized ? {} : bounds)
+      }
+
+      // 如果之前有保存的非最大化状态，保留它
+      if (isMaximized && fs.existsSync(windowStatePath)) {
+        const existingState = JSON.parse(fs.readFileSync(windowStatePath, 'utf8'))
+        stateToSave.width = existingState.width || bounds.width
+        stateToSave.height = existingState.height || bounds.height
+        stateToSave.x = existingState.x
+        stateToSave.y = existingState.y
+      } else if (!isMaximized) {
+        stateToSave.width = bounds.width
+        stateToSave.height = bounds.height
+        stateToSave.x = bounds.x
+        stateToSave.y = bounds.y
+      }
+
+      fs.writeFileSync(windowStatePath, JSON.stringify(stateToSave, null, 2))
+    } catch (error) {
+      console.error('[Main] 保存窗口状态失败:', error)
+    }
+  }
+
+  // 监听窗口状态变化
+  mainWindow.on('resize', saveWindowState)
+  mainWindow.on('move', saveWindowState)
+  mainWindow.on('maximize', saveWindowState)
+  mainWindow.on('unmaximize', saveWindowState)
+
+  // 监听窗口失去焦点（进入后台20秒后触发迁移）
+  mainWindow.on('blur', () => {
+    if (services.migrationService) {
+      services.migrationService.triggerMigrationOnBackground();
+    }
+  })
+
+  // 监听窗口获得焦点（取消后台迁移）
+  mainWindow.on('focus', () => {
+    if (services.migrationService) {
+      services.migrationService.cancelBackgroundMigration();
+    }
   })
 
   // 处理新窗口打开请求（阻止外部链接在新窗口中打开）
@@ -161,7 +256,7 @@ function createWindow() {
         const iconPath = isDev
           ? path.join(__dirname, '../logo.png')
           : path.join(process.resourcesPath, 'logo.png')
-        
+
         new Notification({
           title: 'FlashNote',
           body: '应用已最小化到系统托盘，双击托盘图标可重新打开窗口',
@@ -385,7 +480,7 @@ async function initializeServices() {
     // 初始化数据库
     const dbManager = DatabaseManager.getInstance()
     await dbManager.initialize()
-    
+
     // 将 dbManager 加入 services，供 PluginManager 等使用
     services.dbManager = dbManager
 
@@ -442,10 +537,12 @@ async function initializeServices() {
 
     // 初始化 CalDAV 日历同步服务
     services.calDAVSyncService = new CalDAVSyncService()
+    await services.calDAVSyncService.initialize() // 恢复自动同步
     console.log('[Main] CalDAV sync service initialized')
 
     // 初始化 Google Calendar OAuth 同步服务
     services.googleCalendarService = new GoogleCalendarService()
+    await services.googleCalendarService.initialize() // 恢复自动同步
     console.log('[Main] Google Calendar service initialized')
 
     // 初始化代理服务
@@ -842,6 +939,13 @@ app.on('window-all-closed', () => {
 // 应用即将退出时的清理工作
 app.on('before-quit', () => {
   app.isQuiting = true
+
+  // 触发记忆迁移（不等待，避免阻塞退出）
+  if (services.migrationService) {
+    services.migrationService.triggerMigrationOnQuit().catch(err => {
+      console.error('[App] 退出前迁移失败:', err);
+    });
+  }
 
   // 清理托盘
   if (tray) {
@@ -1690,8 +1794,8 @@ ipcMain.handle('window:create-floating-ball', async (event) => {
   return await windowManager.createFloatingBall()
 })
 
-ipcMain.handle('window:create-note-window', async (event, noteId) => {
-  return await windowManager.createNoteWindow(noteId)
+ipcMain.handle('window:create-note-window', async (event, noteId, options) => {
+  return await windowManager.createNoteWindow(noteId, options)
 })
 
 ipcMain.handle('window:is-note-open', async (event, noteId) => {
@@ -1787,12 +1891,12 @@ ipcMain.handle('system:show-notification', async (event, options) => {
     const iconPath = isDev
       ? path.join(__dirname, '../logo.png')
       : path.join(process.resourcesPath, 'logo.png')
-    
+
     if (fs.existsSync(iconPath)) {
       options.icon = nativeImage.createFromPath(iconPath)
     }
   }
-  
+
   const notification = new Notification(options)
   notification.show()
   return { success: true }

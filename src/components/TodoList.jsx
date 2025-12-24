@@ -80,8 +80,43 @@ import {
   deleteTodo as deleteTodoAPI
 } from '../api/todoAPI';
 import { ANIMATIONS, createAnimationString, createTransitionString, GREEN_SWEEP_KEYFRAMES } from '../utils/animationConfig';
+import { useStore } from '../store/useStore';
+
+// 简单的 Web Audio API 铃铛声
+const playChristmasBell = () => {
+  const AudioContext = window.AudioContext || window.webkitAudioContext;
+  if (!AudioContext) return;
+
+  const ctx = new AudioContext();
+  const now = ctx.currentTime;
+
+  const createOsc = (freq, delay) => {
+    const osc = ctx.createOscillator();
+    const gain = ctx.createGain();
+
+    osc.type = 'sine';
+    osc.frequency.setValueAtTime(freq, now + delay);
+
+    gain.gain.setValueAtTime(0, now + delay);
+    gain.gain.linearRampToValueAtTime(0.3, now + delay + 0.02);
+    gain.gain.exponentialRampToValueAtTime(0.001, now + delay + 1.5);
+
+    osc.connect(gain);
+    gain.connect(ctx.destination);
+
+    osc.start(now + delay);
+    osc.stop(now + delay + 1.5);
+  };
+
+  // G5, B5, D6, G6 (G大调和弦)
+  createOsc(783.99, 0);
+  createOsc(987.77, 0.05);
+  createOsc(1174.66, 0.1);
+  createOsc(1567.98, 0.15);
+};
 
 const TodoList = ({ onTodoSelect, onViewModeChange, onShowCompletedChange, viewMode, showCompleted, onMultiSelectChange, onMultiSelectRefChange, refreshTrigger, sortBy, onSortByChange, externalTodos, isExternalData = false, onTodoUpdated }) => {
+  const christmasMode = useStore((state) => state.christmasMode);
   const [todos, setTodos] = useState([]);
   const [isLoading, setIsLoading] = useState(false);
   const [anchorEl, setAnchorEl] = useState(null);
@@ -335,6 +370,10 @@ const TodoList = ({ onTodoSelect, onViewModeChange, onShowCompletedChange, viewM
       try {
         // 先显示庆祝动画
         setCelebratingTodos(prev => new Set([...prev, todo.id]));
+
+        if (christmasMode) {
+          playChristmasBell();
+        }
 
         // 延迟执行完成操作，让动画播放
         setTimeout(async () => {
@@ -788,32 +827,32 @@ const TodoList = ({ onTodoSelect, onViewModeChange, onShowCompletedChange, viewM
                               height: 20
                             }}
                           />
-                            {todo.due_date && (
-                              <Chip
-                                label={formatDate(todo.due_date)}
-                                size="small"
-                                sx={{
-                                  backgroundColor: isOverdue(todo.due_date) ? '#f4433620' : '#2196f320',
-                                  color: isOverdue(todo.due_date) ? '#f44336' : '#2196f3',
-                                  fontSize: '0.7rem',
-                                  height: 20
-                                }}
-                              />
-                            )}
-                            {todo.tags && todo.tags.split(',').filter(tag => tag.trim()).map((tag, index) => (
-                              <Chip
-                                key={index}
-                                label={tag.trim()}
-                                size="small"
-                                sx={{
-                                  backgroundColor: '#9c27b020',
-                                  color: '#9c27b0',
-                                  fontSize: '0.7rem',
-                                  height: 20
-                                }}
-                              />
-                            ))}
-                          </Box>
+                          {todo.due_date && (
+                            <Chip
+                              label={formatDate(todo.due_date)}
+                              size="small"
+                              sx={{
+                                backgroundColor: isOverdue(todo.due_date) ? '#f4433620' : '#2196f320',
+                                color: isOverdue(todo.due_date) ? '#f44336' : '#2196f3',
+                                fontSize: '0.7rem',
+                                height: 20
+                              }}
+                            />
+                          )}
+                          {todo.tags && todo.tags.split(',').filter(tag => tag.trim()).map((tag, index) => (
+                            <Chip
+                              key={index}
+                              label={tag.trim()}
+                              size="small"
+                              sx={{
+                                backgroundColor: '#9c27b020',
+                                color: '#9c27b0',
+                                fontSize: '0.7rem',
+                                height: 20
+                              }}
+                            />
+                          ))}
+                        </Box>
                       }
                       secondaryTypographyProps={{ component: 'div' }}
                     />

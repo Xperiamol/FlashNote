@@ -295,8 +295,10 @@ const TodoView = ({ viewMode, showCompleted, onViewModeChange, onShowCompletedCh
               setSelectedTodos([...selectedTodos, todo.id]);
             }
           } else {
-            // 正常模式下的点击处理
-            handleToggleTodo(todo);
+            // 正常模式下的点击处理：打开详情对话框
+            if (onTodoSelect) {
+              onTodoSelect(todo);
+            }
           }
         }}
         onContextMenu={(e, todo) => {

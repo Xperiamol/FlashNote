@@ -90,9 +90,10 @@ const NoteList = ({ showDeleted = false, onMultiSelectChange, onMultiSelectRefCh
 
   // 使用动画拖拽处理器
   const { createAnimatedDragHandler } = useDragAnimation()
-  const dragHandler = createAnimatedDragHandler('note', async (note) => {
+  const dragHandler = createAnimatedDragHandler('note', async (note, endPosition) => {
     try {
-      await window.electronAPI.createNoteWindow(note.id)
+      // 传递鼠标位置用于窗口定位
+      await window.electronAPI.createNoteWindow(note.id, endPosition ? { x: endPosition.x, y: endPosition.y } : {})
     } catch (error) {
       console.error('创建笔记独立窗口失败:', error)
     }

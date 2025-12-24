@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useMemo } from 'react';
+import { useTranslation } from '../utils/i18n';
 import {
   Box,
   Typography,
@@ -131,6 +132,7 @@ const WhiteboardPreview = ({ content, theme }) => {
 };
 
 const CalendarView = ({ currentDate, onDateChange, onTodoSelect, selectedDate, onSelectedDateChange, refreshToken = 0, showCompleted = false, onShowCompletedChange, onTodoUpdated, viewMode = 'todos' }) => {
+  const { t } = useTranslation();
   const theme = useTheme();
   const notes = useStore((state) => state.notes);
   const setSelectedNoteId = useStore((state) => state.setSelectedNoteId);
@@ -138,6 +140,25 @@ const CalendarView = ({ currentDate, onDateChange, onTodoSelect, selectedDate, o
   const [todos, setTodos] = useState([]);
   const [isLoading, setIsLoading] = useState(false);
   const [pendingComplete, setPendingComplete] = useState(new Set());
+
+  // 获取笔记显示标题：如果有标题则显示标题，否则显示内容前9个字
+  const getNoteDisplayTitle = (note) => {
+    if (note.title && note.title !== '无标题' && note.title !== 'Untitled') {
+      return note.title
+    }
+    // 没有标题时，显示内容前9个字
+    if (note.content) {
+      // 白板笔记特殊处理
+      if (note.note_type === 'whiteboard') {
+        return t('notes.whiteboardNote')
+      }
+      const cleanContent = note.content.replace(/[#*`\n]/g, '').trim()
+      if (cleanContent) {
+        return cleanContent.substring(0, 9) + (cleanContent.length > 9 ? '...' : '')
+      }
+    }
+    return t('notes.untitled')
+  }
 
   // 格式化专注时长（秒 -> 小时分钟）
   const formatFocusTime = (seconds) => {
@@ -161,7 +182,7 @@ const CalendarView = ({ currentDate, onDateChange, onTodoSelect, selectedDate, o
       const noteDate = new Date(note.created_at || note.updated_at);
       return noteDate.toDateString() === dateStr;
     });
-    
+
     const dayTodos = todos.filter(todo => {
       if (!todo.due_date) return false;
       const todoDate = new Date(todo.due_date);
@@ -182,7 +203,7 @@ const CalendarView = ({ currentDate, onDateChange, onTodoSelect, selectedDate, o
   const [previewNote, setPreviewNote] = useState(null); // 预览的笔记
   const [dayDetailsOpen, setDayDetailsOpen] = useState(false); // 控制日详情对话框
   const [selectedDayData, setSelectedDayData] = useState(null); // 选中日期的详细数据
-  
+
   // 使用拖放 hook
   const {
     handleDragStart,
@@ -250,14 +271,14 @@ const CalendarView = ({ currentDate, onDateChange, onTodoSelect, selectedDate, o
       }
       return;
     }
-    
+
     // 未完成的任务需要双击
     if (pendingComplete.has(todo.id)) {
       // 第二次点击，执行完成操作
       try {
         // 先显示庆祝动画
         setCelebratingTodos(prev => new Set([...prev, todo.id]));
-        
+
         // 延迟执行完成操作，让动画播放
         setTimeout(async () => {
           await toggleTodoComplete(todo.id);
@@ -266,7 +287,7 @@ const CalendarView = ({ currentDate, onDateChange, onTodoSelect, selectedDate, o
           if (onTodoUpdated) {
             onTodoUpdated();
           }
-          
+
           // 清除庆祝状态
           setTimeout(() => {
             setCelebratingTodos(prev => {
@@ -276,7 +297,7 @@ const CalendarView = ({ currentDate, onDateChange, onTodoSelect, selectedDate, o
             });
           }, 1000);
         }, 150);
-        
+
         // 清除待完成状态
         setPendingComplete(prev => {
           const newSet = new Set(prev);
@@ -289,7 +310,7 @@ const CalendarView = ({ currentDate, onDateChange, onTodoSelect, selectedDate, o
     } else {
       // 第一次点击，标记为待完成
       setPendingComplete(prev => new Set([...prev, todo.id]));
-      
+
       // 3秒后自动清除待完成状态
       setTimeout(() => {
         setPendingComplete(prev => {
@@ -309,20 +330,20 @@ const CalendarView = ({ currentDate, onDateChange, onTodoSelect, selectedDate, o
   const getCalendarDays = () => {
     const year = currentDate.getFullYear();
     const month = currentDate.getMonth();
-    
+
     // 获取当月第一天和最后一天
     const firstDay = new Date(year, month, 1);
     const lastDay = new Date(year, month + 1, 0);
-    
+
     // 获取第一天是星期几（0=周日，1=周一...）
     const firstDayOfWeek = firstDay.getDay();
-    
+
     // 计算需要显示的天数（包括上月末尾和下月开头）
     const daysInMonth = lastDay.getDate();
     const totalDays = Math.ceil((daysInMonth + firstDayOfWeek) / 7) * 7;
-    
+
     const days = [];
-    
+
     // 添加上月末尾的日期
     for (let i = firstDayOfWeek - 1; i >= 0; i--) {
       const date = new Date(year, month, -i);
@@ -332,20 +353,20 @@ const CalendarView = ({ currentDate, onDateChange, onTodoSelect, selectedDate, o
         isToday: false
       });
     }
-    
+
     // 添加当月的日期
     for (let day = 1; day <= daysInMonth; day++) {
       const date = new Date(year, month, day);
       const today = new Date();
       const isToday = date.toDateString() === today.toDateString();
-      
+
       days.push({
         date,
         isCurrentMonth: true,
         isToday
       });
     }
-    
+
     // 添加下月开头的日期
     const remainingDays = totalDays - days.length;
     for (let day = 1; day <= remainingDays; day++) {
@@ -356,17 +377,17 @@ const CalendarView = ({ currentDate, onDateChange, onTodoSelect, selectedDate, o
         isToday: false
       });
     }
-    
+
     return days;
   };
 
   // 获取指定日期的Todo
   const getTodosForDate = (date) => {
     if (!todos.length) return [];
-    
+
     return todos.filter(todo => {
       if (!todo.due_date) return false;
-      
+
       const todoDate = new Date(todo.due_date);
       return todoDate.toDateString() === date.toDateString();
     });
@@ -375,16 +396,16 @@ const CalendarView = ({ currentDate, onDateChange, onTodoSelect, selectedDate, o
   // 获取指定日期的笔记（根据 updated_at 或 created_at）
   const getNotesForDate = (date) => {
     if (!notes || !notes.length) return [];
-    
+
     const filtered = notes.filter(note => {
       if (!note.updated_at && !note.created_at) return false;
-      
+
       const noteDate = new Date(note.updated_at || note.created_at);
       return noteDate.getFullYear() === date.getFullYear() &&
-             noteDate.getMonth() === date.getMonth() &&
-             noteDate.getDate() === date.getDate();
+        noteDate.getMonth() === date.getMonth() &&
+        noteDate.getDate() === date.getDate();
     });
-    
+
     return filtered;
   };
 
@@ -400,13 +421,13 @@ const CalendarView = ({ currentDate, onDateChange, onTodoSelect, selectedDate, o
       const dayTodos = getTodosForDate(date);
       const completedTodos = dayTodos.filter(t => t.completed).length;
       const totalTodos = dayTodos.length;
-      
+
       // 计算当日所有待办的专注时长总和（包括已完成的）
       const totalFocusSeconds = dayTodos.reduce((sum, todo) => {
         const focusTime = Number(todo.focus_time_seconds) || 0;
         return sum + focusTime;
       }, 0);
-      
+
       return {
         type: 'focus',
         notesCount: dayNotes.length,
@@ -498,8 +519,8 @@ const CalendarView = ({ currentDate, onDateChange, onTodoSelect, selectedDate, o
         </Box>
 
         {/* 日历网格 */}
-        <Box 
-          sx={{ 
+        <Box
+          sx={{
             border: `1px solid ${theme.palette.divider}`,
             borderRadius: '8px',
             overflow: 'hidden',
@@ -519,17 +540,17 @@ const CalendarView = ({ currentDate, onDateChange, onTodoSelect, selectedDate, o
               height: '100%'
             }}
           >
-          {calendarDays.map((dayInfo, index) => {
-            // 根据 viewMode 获取不同的数据
-            const items = getItemsForDate(dayInfo.date);
-            const dayTodos = (viewMode === 'todos' || viewMode === 'focus') ? (viewMode === 'todos' ? items : getTodosForDate(dayInfo.date)) : getTodosForDate(dayInfo.date);
-            const incompleteTodos = Array.isArray(dayTodos) ? dayTodos.filter(todo => !todo.completed) : [];
-            const itemsToDisplay = viewMode === 'todos' 
-              ? (showCompleted ? dayTodos : incompleteTodos)
-              : items;
+            {calendarDays.map((dayInfo, index) => {
+              // 根据 viewMode 获取不同的数据
+              const items = getItemsForDate(dayInfo.date);
+              const dayTodos = (viewMode === 'todos' || viewMode === 'focus') ? (viewMode === 'todos' ? items : getTodosForDate(dayInfo.date)) : getTodosForDate(dayInfo.date);
+              const incompleteTodos = Array.isArray(dayTodos) ? dayTodos.filter(todo => !todo.completed) : [];
+              const itemsToDisplay = viewMode === 'todos'
+                ? (showCompleted ? dayTodos : incompleteTodos)
+                : items;
 
-            return (
-              <Box
+              return (
+                <Box
                   key={index}
                   onDragOver={(e) => handleDragOver(e, dayInfo.date)}
                   onDragLeave={handleDragLeave}
@@ -547,549 +568,530 @@ const CalendarView = ({ currentDate, onDateChange, onTodoSelect, selectedDate, o
                     })
                   }}
                 >
-                <Box
-                  onClick={() => {
-                    onSelectedDateChange(dayInfo.date);
-                    if (onDateChange) {
-                      onDateChange(dayInfo.date);
-                    }
-                  }}
-                  sx={{
-                    height: '100%',
-                    minHeight: '100px',
-                    p: 1.5,
-                    backgroundColor: dayInfo.isCurrentMonth 
-                      ? (dayInfo.isToday 
+                  <Box
+                    onClick={() => {
+                      onSelectedDateChange(dayInfo.date);
+                      if (onDateChange) {
+                        onDateChange(dayInfo.date);
+                      }
+                    }}
+                    sx={{
+                      height: '100%',
+                      minHeight: '100px',
+                      p: 1.5,
+                      backgroundColor: dayInfo.isCurrentMonth
+                        ? (dayInfo.isToday
                           ? theme.palette.primary.light + '15' // 今天的浅色底色
-                          : (selectedDate && dayInfo.date.toDateString() === selectedDate.toDateString() 
-                              ? theme.palette.primary.light + '20' 
-                              : 'transparent'))
-                      : theme.palette.action.hover,
-                    border: dayInfo.isToday 
-                      ? `2px solid ${theme.palette.primary.main}` 
-                      : (selectedDate && dayInfo.date.toDateString() === selectedDate.toDateString()
+                          : (selectedDate && dayInfo.date.toDateString() === selectedDate.toDateString()
+                            ? theme.palette.primary.light + '20'
+                            : 'transparent'))
+                        : theme.palette.action.hover,
+                      border: dayInfo.isToday
+                        ? `2px solid ${theme.palette.primary.main}`
+                        : (selectedDate && dayInfo.date.toDateString() === selectedDate.toDateString()
                           ? `2px solid ${theme.palette.primary.main}`
                           : 'none'),
-                    borderRadius: (dayInfo.isToday || (selectedDate && dayInfo.date.toDateString() === selectedDate.toDateString())) ? 1 : 0,
-                    display: 'flex',
-                    flexDirection: 'column',
-                    cursor: 'pointer',
-                    transition: createTransitionString(ANIMATIONS.button),
-                    '&:hover': {
-                      backgroundColor: theme.palette.action.hover
-                    },
-                    overflow: 'hidden', // 防止内容溢出
-                    minWidth: 0 // 确保可以收缩
-                  }}
-                >
-                  {/* 日期数字 */}
-                  <Box
-                    sx={{
-                      display: 'flex',
-                      justifyContent: 'space-between',
-                      alignItems: 'center',
-                      mb: 1
-                    }}
-                  >
-                    <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5, position: 'relative' }}>
-                      <Typography
-                        variant="body2"
-                        sx={{
-                          color: dayInfo.isCurrentMonth 
-                            ? (dayInfo.isToday ? theme.palette.primary.main : theme.palette.text.primary)
-                            : theme.palette.text.disabled,
-                          fontWeight: dayInfo.isToday ? 700 : dayInfo.isCurrentMonth ? 500 : 400,
-                          fontSize: '0.9rem'
-                        }}
-                      >
-                        {dayInfo.date.getDate()}
-                      </Typography>
-                      {/* 今天的强调角标 */}
-                      {dayInfo.isToday && (
-                        <Box
-                          sx={{
-                            width: 6,
-                            height: 6,
-                            borderRadius: '50%',
-                            backgroundColor: theme.palette.primary.main,
-                            animation: 'pulse 2s ease-in-out infinite',
-                            '@keyframes pulse': {
-                              '0%, 100%': {
-                                opacity: 1,
-                                transform: 'scale(1)'
-                              },
-                              '50%': {
-                                opacity: 0.6,
-                                transform: 'scale(1.2)'
-                              }
-                            }
-                          }}
-                        />
-                      )}
-                    </Box>
-                    
-                    {/* 显示数量指示器 */}
-                    {((viewMode === 'todos' && incompleteTodos.length > 0) || 
-                      (viewMode === 'notes' && itemsToDisplay.length > 0) ||
-                      (viewMode === 'focus' && itemsToDisplay?.type === 'focus' && 
-                       (itemsToDisplay.notesCount > 0 || itemsToDisplay.todosTotal > 0))) && (
-                      <Box
-                        sx={{
-                          width: 20,
-                          height: 20,
-                          borderRadius: '50%',
-                          backgroundColor: viewMode === 'notes'
-                            ? (() => {
-                                // 根据笔记类型决定颜色，如果有白板笔记就显示混合颜色
-                                const hasWhiteboard = itemsToDisplay.some(n => n.note_type === 'whiteboard');
-                                const hasMarkdown = itemsToDisplay.some(n => n.note_type !== 'whiteboard');
-                                if (hasWhiteboard && hasMarkdown) {
-                                  return 'linear-gradient(135deg, rgb(99, 102, 241) 50%, rgb(236, 72, 153) 50%)';
-                                } else if (hasWhiteboard) {
-                                  return 'rgb(236, 72, 153)';
-                                } else {
-                                  return 'rgb(99, 102, 241)';
-                                }
-                              })()
-                            : viewMode === 'focus'
-                            ? 'rgb(168, 85, 247)'
-                            : theme.palette.primary.main,
-                          color: theme.palette.primary.contrastText,
-                          display: 'flex',
-                          alignItems: 'center',
-                          justifyContent: 'center',
-                          fontSize: '0.7rem',
-                          fontWeight: 600
-                        }}
-                      >
-                        {viewMode === 'todos' 
-                          ? incompleteTodos.length 
-                          : viewMode === 'notes'
-                          ? itemsToDisplay.length
-                          : (itemsToDisplay.notesCount + itemsToDisplay.todosTotal)}
-                      </Box>
-                    )}
-                  </Box>
-
-                  {/* 内容列表（Todo/笔记/专注时长） */}
-                  <Box 
-                    sx={{ 
-                      flex: 1,
-                      overflowY: 'auto',
-                      overflowX: 'hidden',
-                      minWidth: 0,
+                      borderRadius: (dayInfo.isToday || (selectedDate && dayInfo.date.toDateString() === selectedDate.toDateString())) ? 1 : 0,
                       display: 'flex',
                       flexDirection: 'column',
-                      gap: 0.5,
-                      maxHeight: '72px', // 3行 * 24px高度
-                      pr: 0.5,
-                      '&::-webkit-scrollbar': {
-                        width: '4px',
+                      cursor: 'pointer',
+                      transition: createTransitionString(ANIMATIONS.button),
+                      '&:hover': {
+                        backgroundColor: theme.palette.action.hover
                       },
-                      '&::-webkit-scrollbar-track': {
-                        background: 'transparent',
-                      },
-                      '&::-webkit-scrollbar-thumb': {
-                        background: theme.palette.divider,
-                        borderRadius: '2px',
-                      },
+                      overflow: 'hidden', // 防止内容溢出
+                      minWidth: 0 // 确保可以收缩
                     }}
                   >
-                    {/* 待办视图 */}
-                    {viewMode === 'todos' && itemsToDisplay.map((todo) => (
-                      <Fade key={todo.id} in timeout={200}>
-                        <Tooltip title={todo.content} placement="top">
+                    {/* 日期数字 */}
+                    <Box
+                      sx={{
+                        display: 'flex',
+                        justifyContent: 'space-between',
+                        alignItems: 'center',
+                        mb: 1
+                      }}
+                    >
+                      <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5, position: 'relative' }}>
+                        <Typography
+                          variant="body2"
+                          sx={{
+                            color: dayInfo.isCurrentMonth
+                              ? (dayInfo.isToday ? theme.palette.primary.main : theme.palette.text.primary)
+                              : theme.palette.text.disabled,
+                            fontWeight: dayInfo.isToday ? 700 : dayInfo.isCurrentMonth ? 500 : 400,
+                            fontSize: '0.9rem'
+                          }}
+                        >
+                          {dayInfo.date.getDate()}
+                        </Typography>
+                        {/* 今天的强调角标 */}
+                        {dayInfo.isToday && (
                           <Box
-                            draggable
-                            onDragStart={(e) => handleDragStart(e, todo)}
-                            onDragEnd={handleDragEnd}
                             sx={{
+                              width: 6,
+                              height: 6,
+                              borderRadius: '50%',
+                              backgroundColor: theme.palette.primary.main,
+                              animation: 'pulse 2s ease-in-out infinite',
+                              '@keyframes pulse': {
+                                '0%, 100%': {
+                                  opacity: 1,
+                                  transform: 'scale(1)'
+                                },
+                                '50%': {
+                                  opacity: 0.6,
+                                  transform: 'scale(1.2)'
+                                }
+                              }
+                            }}
+                          />
+                        )}
+                      </Box>
+
+                      {/* 显示数量指示器 */}
+                      {((viewMode === 'todos' && incompleteTodos.length > 0) ||
+                        (viewMode === 'notes' && itemsToDisplay.length > 0) ||
+                        (viewMode === 'focus' && itemsToDisplay?.type === 'focus' &&
+                          (itemsToDisplay.notesCount > 0 || itemsToDisplay.todosTotal > 0))) && (
+                          <Box
+                            sx={{
+                              width: 20,
+                              height: 20,
+                              borderRadius: '50%',
+                              backgroundColor: theme.palette.primary.main,
+                              color: theme.palette.primary.contrastText,
                               display: 'flex',
                               alignItems: 'center',
-                              p: 0.5,
-                              borderRadius: 1,
-                              backgroundColor: `${getTodoPriorityColor(todo)}15`,
-                              border: `1px solid ${getTodoPriorityColor(todo)}30`,
-                              cursor: 'pointer',
-                              position: 'relative',
-                              overflow: 'hidden',
-                              transition: createTransitionString(ANIMATIONS.listItem),
-                              minHeight: '22px', // 固定最小高度
-                              '&:hover': {
-                                backgroundColor: `${getTodoPriorityColor(todo)}40`, // 颜色变暗
-                              },
-                              '&:active': {
-                                backgroundColor: `${getTodoPriorityColor(todo)}50`, // 点击时更暗
-                              },
-                              ...(celebratingTodos.has(todo.id) && {
-                                '&::before': {
-                                  content: '""',
-                                  position: 'absolute',
-                                  top: 0,
-                                  left: 0,
-                                  right: 0,
-                                  bottom: 0,
-                                  background: 'rgba(76, 175, 80, 0.4)',
-                                  transform: 'translateX(-100%)',
-                                  animation: createAnimationString(ANIMATIONS.completion),
-                                  zIndex: 1,
-                                  pointerEvents: 'none'
-                                },
-                                ...GREEN_SWEEP_KEYFRAMES
-                              })
+                              justifyContent: 'center',
+                              fontSize: '0.7rem',
+                              fontWeight: 600
                             }}
                           >
-                            {/* 完成状态按钮 */}
-                            <IconButton
-                              size="small"
-                              onClick={(e) => {
-                                e.stopPropagation();
-                                handleToggleComplete(todo);
-                              }}
-                              sx={{
-                                minWidth: 20,
-                                width: 20,
-                                height: 20,
-                                mr: 0.5,
-                                p: 0,
-                                position: 'relative',
-                                transition: createTransitionString(ANIMATIONS.stateChange),
-                                zIndex: 2,
-                                ...(pendingComplete.has(todo.id) && {
-                                  backgroundColor: 'warning.light',
-                                  '&:hover': {
-                                    backgroundColor: 'warning.main'
-                                  }
-                                })
-                              }}
-                            >
-                              {todo.completed ? (
-                                <CheckCircleIcon sx={{ color: 'success.main', fontSize: 16 }} />
-                              ) : pendingComplete.has(todo.id) ? (
-                                <RadioButtonUncheckedIcon 
-                                  sx={{ 
-                                    color: 'warning.main',
-                                    fontSize: 16,
-                                    animation: createAnimationString(ANIMATIONS.pulse)
-                                  }} 
-                                />
-                              ) : celebratingTodos.has(todo.id) ? (
-                                <CheckCircleIcon 
-                                  sx={{ 
-                                    color: 'success.main',
-                                    fontSize: 16,
-                                    filter: 'drop-shadow(0 0 8px rgba(76, 175, 80, 0.6))'
-                                  }} 
-                                />
-                              ) : (
-                                <RadioButtonUncheckedIcon sx={{ color: 'text.secondary', fontSize: 16 }} />
-                              )}
-                            </IconButton>
-
-                            {/* Todo内容 */}
-                            <Box
-                              onClick={() => {
-                                if (onTodoSelect) {
-                                  onTodoSelect(todo);
-                                }
-                              }}
-                              sx={{
-                                flex: 1,
-                                minWidth: 0,
-                                zIndex: 2
-                              }}
-                            >
-                              <Typography
-                                variant="caption"
-                                sx={{
-                                  display: 'block',
-                                  whiteSpace: 'nowrap',
-                                  overflow: 'hidden',
-                                  textOverflow: 'ellipsis',
-                                  fontSize: '0.65rem', // 更小的字体
-                                  lineHeight: 1.1,
-                                  textDecoration: todo.completed ? 'line-through' : 'none',
-                                  opacity: todo.completed ? 0.6 : 1,
-                                  color: theme.palette.text.primary
-                                }}
-                              >
-                                {todo.content}
-                              </Typography>
-                            </Box>
+                            {viewMode === 'todos'
+                              ? incompleteTodos.length
+                              : viewMode === 'notes'
+                                ? itemsToDisplay.length
+                                : (itemsToDisplay.notesCount + itemsToDisplay.todosTotal)}
                           </Box>
-                        </Tooltip>
-                      </Fade>
-                    ))}
+                        )}
+                    </Box>
 
-                    {/* 笔记视图 */}
-                    {viewMode === 'notes' && Array.isArray(itemsToDisplay) && itemsToDisplay.map((note) => {
-                      const isWhiteboard = note.note_type === 'whiteboard';
-                      const bgColor = isWhiteboard
-                        ? (theme.palette.mode === 'dark' ? 'rgba(236, 72, 153, 0.15)' : 'rgba(236, 72, 153, 0.08)')
-                        : (theme.palette.mode === 'dark' ? 'rgba(99, 102, 241, 0.15)' : 'rgba(99, 102, 241, 0.08)');
-                      const borderColor = isWhiteboard
-                        ? (theme.palette.mode === 'dark' ? 'rgba(236, 72, 153, 0.3)' : 'rgba(236, 72, 153, 0.2)')
-                        : (theme.palette.mode === 'dark' ? 'rgba(99, 102, 241, 0.3)' : 'rgba(99, 102, 241, 0.2)');
-                      const hoverBgColor = isWhiteboard
-                        ? (theme.palette.mode === 'dark' ? 'rgba(236, 72, 153, 0.25)' : 'rgba(236, 72, 153, 0.15)')
-                        : (theme.palette.mode === 'dark' ? 'rgba(99, 102, 241, 0.25)' : 'rgba(99, 102, 241, 0.15)');
-                      
-                      return (
-                        <Fade key={note.id} in timeout={200}>
-                          <Tooltip title={`${isWhiteboard ? '白板' : 'Markdown'}: ${note.title || '无标题'}`} placement="top">
+                    {/* 内容列表（Todo/笔记/专注时长） */}
+                    <Box
+                      sx={{
+                        flex: 1,
+                        overflowY: 'auto',
+                        overflowX: 'hidden',
+                        minWidth: 0,
+                        display: 'flex',
+                        flexDirection: 'column',
+                        gap: 0.5,
+                        maxHeight: '72px', // 3行 * 24px高度
+                        pr: 0.5,
+                        '&::-webkit-scrollbar': {
+                          width: '4px',
+                        },
+                        '&::-webkit-scrollbar-track': {
+                          background: 'transparent',
+                        },
+                        '&::-webkit-scrollbar-thumb': {
+                          background: theme.palette.divider,
+                          borderRadius: '2px',
+                        },
+                      }}
+                    >
+                      {/* 待办视图 */}
+                      {viewMode === 'todos' && itemsToDisplay.map((todo) => (
+                        <Fade key={todo.id} in timeout={200}>
+                          <Tooltip title={todo.content} placement="top">
                             <Box
-                              onClick={() => {
-                                setPreviewNote(note);
-                              }}
+                              draggable
+                              onDragStart={(e) => handleDragStart(e, todo)}
+                              onDragEnd={handleDragEnd}
                               sx={{
                                 display: 'flex',
                                 alignItems: 'center',
                                 p: 0.5,
                                 borderRadius: 1,
-                                backgroundColor: bgColor,
-                                border: `1px solid ${borderColor}`,
+                                backgroundColor: `${getTodoPriorityColor(todo)}15`,
+                                border: `1px solid ${getTodoPriorityColor(todo)}30`,
                                 cursor: 'pointer',
+                                position: 'relative',
+                                overflow: 'hidden',
                                 transition: createTransitionString(ANIMATIONS.listItem),
-                                minHeight: '22px',
+                                minHeight: '22px', // 固定最小高度
                                 '&:hover': {
-                                  backgroundColor: hoverBgColor,
+                                  backgroundColor: `${getTodoPriorityColor(todo)}40`, // 颜色变暗
                                 },
+                                '&:active': {
+                                  backgroundColor: `${getTodoPriorityColor(todo)}50`, // 点击时更暗
+                                },
+                                ...(celebratingTodos.has(todo.id) && {
+                                  '&::before': {
+                                    content: '""',
+                                    position: 'absolute',
+                                    top: 0,
+                                    left: 0,
+                                    right: 0,
+                                    bottom: 0,
+                                    background: 'rgba(76, 175, 80, 0.4)',
+                                    transform: 'translateX(-100%)',
+                                    animation: createAnimationString(ANIMATIONS.completion),
+                                    zIndex: 1,
+                                    pointerEvents: 'none'
+                                  },
+                                  ...GREEN_SWEEP_KEYFRAMES
+                                })
                               }}
                             >
-                              <Typography
-                                variant="caption"
+                              {/* 完成状态按钮 */}
+                              <IconButton
+                                size="small"
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  handleToggleComplete(todo);
+                                }}
                                 sx={{
-                                  display: 'block',
-                                  whiteSpace: 'nowrap',
-                                  overflow: 'hidden',
-                                  textOverflow: 'ellipsis',
-                                  fontSize: '0.65rem',
-                                  lineHeight: 1.1,
-                                  color: theme.palette.text.primary,
-                                  flex: 1
+                                  minWidth: 20,
+                                  width: 20,
+                                  height: 20,
+                                  mr: 0.5,
+                                  p: 0,
+                                  position: 'relative',
+                                  transition: createTransitionString(ANIMATIONS.stateChange),
+                                  zIndex: 2,
+                                  ...(pendingComplete.has(todo.id) && {
+                                    backgroundColor: 'warning.light',
+                                    '&:hover': {
+                                      backgroundColor: 'warning.main'
+                                    }
+                                  })
                                 }}
                               >
-                                {note.title || '无标题'}
-                              </Typography>
+                                {todo.completed ? (
+                                  <CheckCircleIcon sx={{ color: 'success.main', fontSize: 16 }} />
+                                ) : pendingComplete.has(todo.id) ? (
+                                  <RadioButtonUncheckedIcon
+                                    sx={{
+                                      color: 'warning.main',
+                                      fontSize: 16,
+                                      animation: createAnimationString(ANIMATIONS.pulse)
+                                    }}
+                                  />
+                                ) : celebratingTodos.has(todo.id) ? (
+                                  <CheckCircleIcon
+                                    sx={{
+                                      color: 'success.main',
+                                      fontSize: 16,
+                                      filter: 'drop-shadow(0 0 8px rgba(76, 175, 80, 0.6))'
+                                    }}
+                                  />
+                                ) : (
+                                  <RadioButtonUncheckedIcon sx={{ color: 'text.secondary', fontSize: 16 }} />
+                                )}
+                              </IconButton>
+
+                              {/* Todo内容 */}
+                              <Box
+                                onClick={() => {
+                                  if (onTodoSelect) {
+                                    onTodoSelect(todo);
+                                  }
+                                }}
+                                sx={{
+                                  flex: 1,
+                                  minWidth: 0,
+                                  zIndex: 2
+                                }}
+                              >
+                                <Typography
+                                  variant="caption"
+                                  sx={{
+                                    display: 'block',
+                                    whiteSpace: 'nowrap',
+                                    overflow: 'hidden',
+                                    textOverflow: 'ellipsis',
+                                    fontSize: '0.65rem', // 更小的字体
+                                    lineHeight: 1.1,
+                                    textDecoration: todo.completed ? 'line-through' : 'none',
+                                    opacity: todo.completed ? 0.6 : 1,
+                                    color: theme.palette.text.primary
+                                  }}
+                                >
+                                  {todo.content}
+                                </Typography>
+                              </Box>
                             </Box>
                           </Tooltip>
                         </Fade>
-                      );
-                    })}
+                      ))}
 
-                    {/* 专注视图 - 显示当日统计 */}
-                    {viewMode === 'focus' && itemsToDisplay?.type === 'focus' && (
-                      <Box
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          handleFocusBoxClick(dayInfo.date, itemsToDisplay);
-                        }}
-                        sx={{
-                          display: 'flex',
-                          flexDirection: 'column',
-                          gap: 0.5,
-                          p: 0.75,
-                          borderRadius: 1,
-                          cursor: 'pointer',
-                          background: itemsToDisplay.focusTimeSeconds > 0
-                            ? `linear-gradient(135deg, ${
-                                theme.palette.mode === 'dark'
-                                  ? 'rgba(168, 85, 247, 0.15), rgba(139, 92, 246, 0.08)'
-                                  : 'rgba(168, 85, 247, 0.15), rgba(139, 92, 246, 0.08)'
+                      {/* 笔记视图 */}
+                      {viewMode === 'notes' && Array.isArray(itemsToDisplay) && itemsToDisplay.map((note) => {
+                        const isWhiteboard = note.note_type === 'whiteboard';
+                        const bgColor = isWhiteboard
+                          ? (theme.palette.mode === 'dark' ? 'rgba(236, 72, 153, 0.15)' : 'rgba(236, 72, 153, 0.08)')
+                          : (theme.palette.mode === 'dark' ? 'rgba(99, 102, 241, 0.15)' : 'rgba(99, 102, 241, 0.08)');
+                        const borderColor = isWhiteboard
+                          ? (theme.palette.mode === 'dark' ? 'rgba(236, 72, 153, 0.3)' : 'rgba(236, 72, 153, 0.2)')
+                          : (theme.palette.mode === 'dark' ? 'rgba(99, 102, 241, 0.3)' : 'rgba(99, 102, 241, 0.2)');
+                        const hoverBgColor = isWhiteboard
+                          ? (theme.palette.mode === 'dark' ? 'rgba(236, 72, 153, 0.25)' : 'rgba(236, 72, 153, 0.15)')
+                          : (theme.palette.mode === 'dark' ? 'rgba(99, 102, 241, 0.25)' : 'rgba(99, 102, 241, 0.15)');
+
+                        return (
+                          <Fade key={note.id} in timeout={200}>
+                            <Tooltip title={`${isWhiteboard ? '白板' : 'Markdown'}: ${getNoteDisplayTitle(note)}`} placement="top">
+                              <Box
+                                onClick={() => {
+                                  setPreviewNote(note);
+                                }}
+                                sx={{
+                                  display: 'flex',
+                                  alignItems: 'center',
+                                  p: 0.5,
+                                  borderRadius: 1,
+                                  backgroundColor: bgColor,
+                                  border: `1px solid ${borderColor}`,
+                                  cursor: 'pointer',
+                                  transition: createTransitionString(ANIMATIONS.listItem),
+                                  minHeight: '22px',
+                                  '&:hover': {
+                                    backgroundColor: hoverBgColor,
+                                  },
+                                }}
+                              >
+                                <Typography
+                                  variant="caption"
+                                  sx={{
+                                    display: 'block',
+                                    whiteSpace: 'nowrap',
+                                    overflow: 'hidden',
+                                    textOverflow: 'ellipsis',
+                                    fontSize: '0.65rem',
+                                    lineHeight: 1.1,
+                                    color: theme.palette.text.primary,
+                                    flex: 1
+                                  }}
+                                >
+                                  {getNoteDisplayTitle(note)}
+                                </Typography>
+                              </Box>
+                            </Tooltip>
+                          </Fade>
+                        );
+                      })}
+
+                      {/* 专注视图 - 显示当日统计 */}
+                      {viewMode === 'focus' && itemsToDisplay?.type === 'focus' && (
+                        <Box
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            handleFocusBoxClick(dayInfo.date, itemsToDisplay);
+                          }}
+                          sx={{
+                            display: 'flex',
+                            flexDirection: 'column',
+                            gap: 0.5,
+                            p: 0.75,
+                            borderRadius: 1,
+                            cursor: 'pointer',
+                            background: itemsToDisplay.focusTimeSeconds > 0
+                              ? `linear-gradient(135deg, ${theme.palette.mode === 'dark'
+                                ? 'rgba(168, 85, 247, 0.15), rgba(139, 92, 246, 0.08)'
+                                : 'rgba(168, 85, 247, 0.15), rgba(139, 92, 246, 0.08)'
                               })`
-                            : theme.palette.mode === 'dark'
-                              ? 'rgba(100, 116, 139, 0.15)'
-                              : 'rgba(100, 116, 139, 0.08)',
-                          border: `1px solid ${
-                            itemsToDisplay.focusTimeSeconds > 0
+                              : theme.palette.mode === 'dark'
+                                ? 'rgba(100, 116, 139, 0.15)'
+                                : 'rgba(100, 116, 139, 0.08)',
+                            border: `1px solid ${itemsToDisplay.focusTimeSeconds > 0
                               ? theme.palette.mode === 'dark'
                                 ? 'rgba(168, 85, 247, 0.3)'
                                 : 'rgba(168, 85, 247, 0.2)'
                               : theme.palette.mode === 'dark'
                                 ? 'rgba(100, 116, 139, 0.3)'
                                 : 'rgba(100, 116, 139, 0.2)'
-                          }`,
-                          backdropFilter: 'blur(8px)',
-                          WebkitBackdropFilter: 'blur(8px)',
-                          transition: createTransitionString(ANIMATIONS.listItem),
-                          '&:hover': {
-                            background: itemsToDisplay.focusTimeSeconds > 0
-                              ? `linear-gradient(135deg, ${
-                                  theme.palette.mode === 'dark'
-                                    ? 'rgba(168, 85, 247, 0.25), rgba(139, 92, 246, 0.15)'
-                                    : 'rgba(168, 85, 247, 0.25), rgba(139, 92, 246, 0.15)'
+                              }`,
+                            backdropFilter: 'blur(8px)',
+                            WebkitBackdropFilter: 'blur(8px)',
+                            transition: createTransitionString(ANIMATIONS.listItem),
+                            '&:hover': {
+                              background: itemsToDisplay.focusTimeSeconds > 0
+                                ? `linear-gradient(135deg, ${theme.palette.mode === 'dark'
+                                  ? 'rgba(168, 85, 247, 0.25), rgba(139, 92, 246, 0.15)'
+                                  : 'rgba(168, 85, 247, 0.25), rgba(139, 92, 246, 0.15)'
                                 })`
-                              : theme.palette.mode === 'dark'
-                                ? 'rgba(100, 116, 139, 0.25)'
-                                : 'rgba(100, 116, 139, 0.15)'
-                          },
-                          '&:active': {
-                            background: itemsToDisplay.focusTimeSeconds > 0
-                              ? `linear-gradient(135deg, ${
-                                  theme.palette.mode === 'dark'
-                                    ? 'rgba(168, 85, 247, 0.35), rgba(139, 92, 246, 0.25)'
-                                    : 'rgba(168, 85, 247, 0.35), rgba(139, 92, 246, 0.25)'
+                                : theme.palette.mode === 'dark'
+                                  ? 'rgba(100, 116, 139, 0.25)'
+                                  : 'rgba(100, 116, 139, 0.15)'
+                            },
+                            '&:active': {
+                              background: itemsToDisplay.focusTimeSeconds > 0
+                                ? `linear-gradient(135deg, ${theme.palette.mode === 'dark'
+                                  ? 'rgba(168, 85, 247, 0.35), rgba(139, 92, 246, 0.25)'
+                                  : 'rgba(168, 85, 247, 0.35), rgba(139, 92, 246, 0.25)'
                                 })`
-                              : theme.palette.mode === 'dark'
-                                ? 'rgba(100, 116, 139, 0.35)'
-                                : 'rgba(100, 116, 139, 0.25)'
-                          }
-                        }}
-                      >
-                        {/* 专注时长 - 主要信息，大号显示 */}
-                        {itemsToDisplay.focusTimeSeconds > 0 ? (
-                          <Box sx={{ 
-                            display: 'flex', 
-                            flexDirection: 'column',
-                            alignItems: 'center',
-                            gap: 0.25
-                          }}>
+                                : theme.palette.mode === 'dark'
+                                  ? 'rgba(100, 116, 139, 0.35)'
+                                  : 'rgba(100, 116, 139, 0.25)'
+                            }
+                          }}
+                        >
+                          {/* 专注时长 - 主要信息，大号显示 */}
+                          {itemsToDisplay.focusTimeSeconds > 0 ? (
+                            <Box sx={{
+                              display: 'flex',
+                              flexDirection: 'column',
+                              alignItems: 'center',
+                              gap: 0.25
+                            }}>
+                              <Typography
+                                sx={{
+                                  fontSize: '0.95rem',
+                                  fontWeight: 700,
+                                  background: 'linear-gradient(135deg, rgb(168, 85, 247), rgb(139, 92, 246))',
+                                  WebkitBackgroundClip: 'text',
+                                  WebkitTextFillColor: 'transparent',
+                                  backgroundClip: 'text',
+                                  lineHeight: 1.2,
+                                  textAlign: 'center'
+                                }}
+                              >
+                                {formatFocusTime(itemsToDisplay.focusTimeSeconds)}
+                              </Typography>
+                              <Typography
+                                sx={{
+                                  fontSize: '0.5rem',
+                                  color: theme.palette.text.secondary,
+                                  textTransform: 'uppercase',
+                                  letterSpacing: '0.5px',
+                                  opacity: 0.8
+                                }}
+                              >
+                                专注时长
+                              </Typography>
+                            </Box>
+                          ) : (
                             <Typography
                               sx={{
-                                fontSize: '0.95rem',
-                                fontWeight: 700,
-                                background: 'linear-gradient(135deg, rgb(168, 85, 247), rgb(139, 92, 246))',
-                                WebkitBackgroundClip: 'text',
-                                WebkitTextFillColor: 'transparent',
-                                backgroundClip: 'text',
-                                lineHeight: 1.2,
+                                fontSize: '0.55rem',
+                                color: theme.palette.text.disabled,
+                                textAlign: 'center',
+                                py: 0.5
+                              }}
+                            >
+                              暂无专注
+                            </Typography>
+                          )}
+
+                          {/* 次要信息：待办和笔记 */}
+                          {(itemsToDisplay.todosTotal > 0 || itemsToDisplay.notesCount > 0) && (
+                            <Box
+                              sx={{
+                                display: 'flex',
+                                justifyContent: 'center',
+                                gap: 0.75,
+                                pt: 0.25,
+                                borderTop: itemsToDisplay.focusTimeSeconds > 0
+                                  ? `1px solid ${theme.palette.mode === 'dark' ? 'rgba(168, 85, 247, 0.2)' : 'rgba(168, 85, 247, 0.15)'}`
+                                  : 'none'
+                              }}
+                            >
+                              {itemsToDisplay.todosTotal > 0 && (
+                                <Box
+                                  sx={{
+                                    display: 'flex',
+                                    alignItems: 'center',
+                                    gap: 0.25,
+                                    px: 0.5,
+                                    py: 0.15,
+                                    borderRadius: 0.5,
+                                    backgroundColor: itemsToDisplay.todosCompleted === itemsToDisplay.todosTotal
+                                      ? theme.palette.mode === 'dark'
+                                        ? 'rgba(34, 197, 94, 0.2)'
+                                        : 'rgba(34, 197, 94, 0.15)'
+                                      : 'transparent'
+                                  }}
+                                >
+                                  <Box
+                                    sx={{
+                                      width: 4,
+                                      height: 4,
+                                      borderRadius: '50%',
+                                      backgroundColor: itemsToDisplay.todosCompleted === itemsToDisplay.todosTotal
+                                        ? 'rgb(34, 197, 94)'
+                                        : theme.palette.text.secondary
+                                    }}
+                                  />
+                                  <Typography
+                                    sx={{
+                                      fontSize: '0.55rem',
+                                      fontWeight: 500,
+                                      color: itemsToDisplay.todosCompleted === itemsToDisplay.todosTotal
+                                        ? 'rgb(34, 197, 94)'
+                                        : theme.palette.text.secondary
+                                    }}
+                                  >
+                                    {itemsToDisplay.todosCompleted}/{itemsToDisplay.todosTotal}
+                                  </Typography>
+                                </Box>
+                              )}
+                              {itemsToDisplay.notesCount > 0 && (
+                                <Box
+                                  sx={{
+                                    display: 'flex',
+                                    alignItems: 'center',
+                                    gap: 0.25,
+                                    px: 0.5,
+                                    py: 0.15,
+                                    borderRadius: 0.5
+                                  }}
+                                >
+                                  <Box
+                                    sx={{
+                                      width: 4,
+                                      height: 4,
+                                      borderRadius: '50%',
+                                      backgroundColor: 'rgb(99, 102, 241)'
+                                    }}
+                                  />
+                                  <Typography
+                                    sx={{
+                                      fontSize: '0.55rem',
+                                      fontWeight: 500,
+                                      color: theme.palette.text.secondary
+                                    }}
+                                  >
+                                    {itemsToDisplay.notesCount}
+                                  </Typography>
+                                </Box>
+                              )}
+                            </Box>
+                          )}
+
+                          {/* 完全无活动 */}
+                          {itemsToDisplay.focusTimeSeconds === 0 && itemsToDisplay.notesCount === 0 && itemsToDisplay.todosTotal === 0 && (
+                            <Typography
+                              sx={{
+                                fontSize: '0.55rem',
+                                color: theme.palette.text.disabled,
+                                fontStyle: 'italic',
                                 textAlign: 'center'
                               }}
                             >
-                              {formatFocusTime(itemsToDisplay.focusTimeSeconds)}
+                              无活动
                             </Typography>
-                            <Typography
-                              sx={{
-                                fontSize: '0.5rem',
-                                color: theme.palette.text.secondary,
-                                textTransform: 'uppercase',
-                                letterSpacing: '0.5px',
-                                opacity: 0.8
-                              }}
-                            >
-                              专注时长
-                            </Typography>
-                          </Box>
-                        ) : (
-                          <Typography
-                            sx={{
-                              fontSize: '0.55rem',
-                              color: theme.palette.text.disabled,
-                              textAlign: 'center',
-                              py: 0.5
-                            }}
-                          >
-                            暂无专注
-                          </Typography>
-                        )}
-                        
-                        {/* 次要信息：待办和笔记 */}
-                        {(itemsToDisplay.todosTotal > 0 || itemsToDisplay.notesCount > 0) && (
-                          <Box
-                            sx={{
-                              display: 'flex',
-                              justifyContent: 'center',
-                              gap: 0.75,
-                              pt: 0.25,
-                              borderTop: itemsToDisplay.focusTimeSeconds > 0
-                                ? `1px solid ${theme.palette.mode === 'dark' ? 'rgba(168, 85, 247, 0.2)' : 'rgba(168, 85, 247, 0.15)'}`
-                                : 'none'
-                            }}
-                          >
-                            {itemsToDisplay.todosTotal > 0 && (
-                              <Box
-                                sx={{
-                                  display: 'flex',
-                                  alignItems: 'center',
-                                  gap: 0.25,
-                                  px: 0.5,
-                                  py: 0.15,
-                                  borderRadius: 0.5,
-                                  backgroundColor: itemsToDisplay.todosCompleted === itemsToDisplay.todosTotal
-                                    ? theme.palette.mode === 'dark'
-                                      ? 'rgba(34, 197, 94, 0.2)'
-                                      : 'rgba(34, 197, 94, 0.15)'
-                                    : 'transparent'
-                                }}
-                              >
-                                <Box
-                                  sx={{
-                                    width: 4,
-                                    height: 4,
-                                    borderRadius: '50%',
-                                    backgroundColor: itemsToDisplay.todosCompleted === itemsToDisplay.todosTotal
-                                      ? 'rgb(34, 197, 94)'
-                                      : theme.palette.text.secondary
-                                  }}
-                                />
-                                <Typography
-                                  sx={{
-                                    fontSize: '0.55rem',
-                                    fontWeight: 500,
-                                    color: itemsToDisplay.todosCompleted === itemsToDisplay.todosTotal
-                                      ? 'rgb(34, 197, 94)'
-                                      : theme.palette.text.secondary
-                                  }}
-                                >
-                                  {itemsToDisplay.todosCompleted}/{itemsToDisplay.todosTotal}
-                                </Typography>
-                              </Box>
-                            )}
-                            {itemsToDisplay.notesCount > 0 && (
-                              <Box
-                                sx={{
-                                  display: 'flex',
-                                  alignItems: 'center',
-                                  gap: 0.25,
-                                  px: 0.5,
-                                  py: 0.15,
-                                  borderRadius: 0.5
-                                }}
-                              >
-                                <Box
-                                  sx={{
-                                    width: 4,
-                                    height: 4,
-                                    borderRadius: '50%',
-                                    backgroundColor: 'rgb(99, 102, 241)'
-                                  }}
-                                />
-                                <Typography
-                                  sx={{
-                                    fontSize: '0.55rem',
-                                    fontWeight: 500,
-                                    color: theme.palette.text.secondary
-                                  }}
-                                >
-                                  {itemsToDisplay.notesCount}
-                                </Typography>
-                              </Box>
-                            )}
-                          </Box>
-                        )}
-                        
-                        {/* 完全无活动 */}
-                        {itemsToDisplay.focusTimeSeconds === 0 && itemsToDisplay.notesCount === 0 && itemsToDisplay.todosTotal === 0 && (
-                          <Typography
-                            sx={{
-                              fontSize: '0.55rem',
-                              color: theme.palette.text.disabled,
-                              fontStyle: 'italic',
-                              textAlign: 'center'
-                            }}
-                          >
-                            无活动
-                          </Typography>
-                        )}
-                      </Box>
-                    )}
-                    
-                    {/* 显示剩余Todo数量 */}
+                          )}
+                        </Box>
+                      )}
+
+                      {/* 显示剩余Todo数量 */}
+                    </Box>
                   </Box>
                 </Box>
-              </Box>
-            );
-          })}
+              );
+            })}
           </Box>
         </Box>
       </Box>
@@ -1103,9 +1105,9 @@ const CalendarView = ({ currentDate, onDateChange, onTodoSelect, selectedDate, o
       >
         <DialogTitle sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
           <Typography variant="h6">
-            {selectedDayData?.date?.toLocaleDateString('zh-CN', { 
-              year: 'numeric', 
-              month: 'long', 
+            {selectedDayData?.date?.toLocaleDateString('zh-CN', {
+              year: 'numeric',
+              month: 'long',
               day: 'numeric',
               weekday: 'long'
             })}
@@ -1123,7 +1125,7 @@ const CalendarView = ({ currentDate, onDateChange, onTodoSelect, selectedDate, o
                   专注时长
                 </Typography>
                 <Paper sx={{ p: 2, backgroundColor: theme.palette.mode === 'dark' ? 'rgba(168, 85, 247, 0.1)' : 'rgba(168, 85, 247, 0.05)' }}>
-                  <Typography variant="h4" sx={{ 
+                  <Typography variant="h4" sx={{
                     background: 'linear-gradient(135deg, rgb(168, 85, 247), rgb(139, 92, 246))',
                     WebkitBackgroundClip: 'text',
                     WebkitTextFillColor: 'transparent',
@@ -1142,15 +1144,15 @@ const CalendarView = ({ currentDate, onDateChange, onTodoSelect, selectedDate, o
                   </Typography>
                   <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1 }}>
                     {selectedDayData.todos.map(todo => (
-                      <Paper 
-                        key={todo.id} 
-                        sx={{ 
-                          p: 1.5, 
-                          display: 'flex', 
-                          alignItems: 'center', 
+                      <Paper
+                        key={todo.id}
+                        sx={{
+                          p: 1.5,
+                          display: 'flex',
+                          alignItems: 'center',
                           gap: 1,
                           opacity: todo.completed ? 0.6 : 1,
-                          backgroundColor: todo.completed 
+                          backgroundColor: todo.completed
                             ? (theme.palette.mode === 'dark' ? 'rgba(34, 197, 94, 0.1)' : 'rgba(34, 197, 94, 0.05)')
                             : 'inherit'
                         }}
@@ -1161,8 +1163,8 @@ const CalendarView = ({ currentDate, onDateChange, onTodoSelect, selectedDate, o
                           <RadioButtonUncheckedIcon sx={{ color: theme.palette.text.secondary, fontSize: 20 }} />
                         )}
                         <Box sx={{ flex: 1 }}>
-                          <Typography 
-                            sx={{ 
+                          <Typography
+                            sx={{
                               textDecoration: todo.completed ? 'line-through' : 'none',
                               color: todo.completed ? theme.palette.text.secondary : theme.palette.text.primary
                             }}
@@ -1189,9 +1191,9 @@ const CalendarView = ({ currentDate, onDateChange, onTodoSelect, selectedDate, o
                   </Typography>
                   <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1 }}>
                     {selectedDayData.notes.map(note => (
-                      <Paper 
-                        key={note.id} 
-                        sx={{ 
+                      <Paper
+                        key={note.id}
+                        sx={{
                           p: 1.5,
                           cursor: 'pointer',
                           '&:hover': {
@@ -1204,7 +1206,7 @@ const CalendarView = ({ currentDate, onDateChange, onTodoSelect, selectedDate, o
                         }}
                       >
                         <Typography variant="body2" sx={{ fontWeight: 500, mb: 0.5 }}>
-                          {note.title || '无标题'}
+                          {getNoteDisplayTitle(note)}
                         </Typography>
                         <Box sx={{ display: 'flex', gap: 1, flexWrap: 'wrap' }}>
                           {note.tags && note.tags.map(tag => (
@@ -1212,9 +1214,9 @@ const CalendarView = ({ currentDate, onDateChange, onTodoSelect, selectedDate, o
                           ))}
                         </Box>
                         <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mt: 0.5 }}>
-                          {note.type === 'markdown' ? 'Markdown' : 
-                           note.type === 'wysiwyg' ? '富文本' : 
-                           note.type === 'whiteboard' ? '白板' : '笔记'}
+                          {note.type === 'markdown' ? 'Markdown' :
+                            note.type === 'wysiwyg' ? '富文本' :
+                              note.type === 'whiteboard' ? '白板' : '笔记'}
                           {' · '}
                           {new Date(note.created_at).toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' })}
                           {note.updated_at && note.updated_at !== note.created_at && (
@@ -1229,14 +1231,14 @@ const CalendarView = ({ currentDate, onDateChange, onTodoSelect, selectedDate, o
 
               {/* 无活动 */}
               {(!selectedDayData.notes || selectedDayData.notes.length === 0) &&
-               (!selectedDayData.todos || selectedDayData.todos.length === 0) &&
-               selectedDayData.focusTimeSeconds === 0 && (
-                <Box sx={{ textAlign: 'center', py: 4 }}>
-                  <Typography color="text.secondary">
-                    这一天暂无记录
-                  </Typography>
-                </Box>
-              )}
+                (!selectedDayData.todos || selectedDayData.todos.length === 0) &&
+                selectedDayData.focusTimeSeconds === 0 && (
+                  <Box sx={{ textAlign: 'center', py: 4 }}>
+                    <Typography color="text.secondary">
+                      这一天暂无记录
+                    </Typography>
+                  </Box>
+                )}
             </Box>
           )}
         </DialogContent>
@@ -1282,7 +1284,7 @@ const CalendarView = ({ currentDate, onDateChange, onTodoSelect, selectedDate, o
         >
           <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, flex: 1 }}>
             <Typography variant="h6" sx={{ fontWeight: 600 }}>
-              {previewNote?.title || '无标题'}
+              {previewNote ? getNoteDisplayTitle(previewNote) : ''}
             </Typography>
             <Chip
               label={previewNote?.note_type === 'whiteboard' ? '白板笔记' : 'Markdown'}
@@ -1382,7 +1384,7 @@ const CalendarView = ({ currentDate, onDateChange, onTodoSelect, selectedDate, o
                 }
               }}
             >
-              <MarkdownPreview 
+              <MarkdownPreview
                 content={previewNote?.content || '(空笔记)'}
                 sx={{
                   backgroundColor: 'transparent',
@@ -1398,7 +1400,7 @@ const CalendarView = ({ currentDate, onDateChange, onTodoSelect, selectedDate, o
           </Button>
         </DialogActions>
       </Dialog>
-    </Box>
+    </Box >
   );
 };
 

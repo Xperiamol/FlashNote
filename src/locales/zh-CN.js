@@ -411,7 +411,7 @@ const zhCN = {
     totalMemories: '总记忆数',
     categoryStats: '分类统计',
     refresh: '刷新',
-    importHistoricalNotes: '导入历史笔记',
+    importHistoricalNotes: '立即记忆',
     semanticSearch: '语义搜索',
     searchPlaceholder: '输入查询内容，例如：紧急任务的处理偏好',
     search: '搜索',
@@ -431,10 +431,10 @@ const zhCN = {
     confirmClearDesc: '此操作将删除所有学习的偏好记忆，无法恢复。下次使用 AI 任务规划时将重新学习。',
     cancel: '取消',
     confirmClear: '确认清空',
-    importNotesTitle: '导入历史笔记',
-    importNotesDesc: '这将把你过去90天的所有笔记内容存储为记忆，同时分析待办事项模式。',
-    importNotesDetail: '每条笔记会创建一个独立记忆，用于语义搜索。此过程可能需要几分钟，确定继续吗？',
-    confirmImport: '确认导入'
+    importNotesTitle: '立即记忆',
+    importNotesDesc: '这将把你过去90天的所有笔记和待办事项（不在回收站的）存储为记忆，用于 AI 任务规划时的知识参考。',
+    importNotesDetail: '已存在的记忆不会重复导入。确定继续吗？',
+    confirmImport: '立即记忆'
   },
   cloudSync: {
     title: '云同步设置',
@@ -624,7 +624,7 @@ const zhCN = {
   about: {
     appName: 'FlashNote',
     description: '一个简洁高效的笔记应用',
-    version: '版本 2.3.0',
+    version: '版本 2.3.0 Xmas Update',
     githubRepo: 'GitHub 仓库',
     copyright: '© 2025 FlashNote. All rights reserved.'
   },

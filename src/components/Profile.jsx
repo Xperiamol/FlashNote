@@ -36,7 +36,7 @@ import TimeZoneUtils from '../utils/timeZoneUtils';
 
 const Profile = () => {
   const { t } = useTranslation();
-  const { notes, userAvatar, theme, primaryColor, setCurrentView, userName } = useStore();
+  const { notes, userAvatar, theme, primaryColor, setCurrentView, userName, christmasMode } = useStore();
   const [todoStats, setTodoStats] = useState(null);
   const [installedPlugins, setInstalledPlugins] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -53,7 +53,7 @@ const Profile = () => {
         // 获取待办事项统计
         const todoStatsResult = await fetchTodoStats();
         console.log('[Profile] 待办统计结果:', todoStatsResult);
-        
+
         // invoke函数会自动解包数据，直接返回stats对象
         if (todoStatsResult && typeof todoStatsResult === 'object') {
           console.log('[Profile] 待办总数:', todoStatsResult.total);
@@ -132,6 +132,18 @@ const Profile = () => {
 
   // 获取当前时间的问候语
   const getGreeting = () => {
+    // 圣诞模式下使用圣诞问候语
+    if (christmasMode) {
+      const greetings = [
+        '🎄 圣诞快乐',
+        '🎅 Ho Ho Ho!',
+        '✨ Merry Christmas!',
+        '🎁 愿你的圣诞充满欢乐',
+        '❄️ 祝你幸福安康',
+        '🌟 愿圣诞之光照亮你的心'
+      ];
+      return greetings[Math.floor(Math.random() * greetings.length)];
+    }
     const hour = new Date().getHours();
     if (hour < 6) return t('profile.greetingNight');
     if (hour < 9) return t('profile.greetingMorning');
@@ -150,30 +162,30 @@ const Profile = () => {
     const days = 90;
     const today = new Date();
     const heatmapData = [];
-    
+
     // 创建日期到笔记数量的映射（区分创建和更新）
     const dateCountMap = {};
-    
+
     notes.forEach(note => {
       if (!note.is_deleted) {
         // 统计创建时间
         if (note.created_at) {
           const createdDate = new Date(note.created_at);
-          const createdDateKey = createdDate.getFullYear() + '-' + 
-                         String(createdDate.getMonth() + 1).padStart(2, '0') + '-' + 
-                         String(createdDate.getDate()).padStart(2, '0');
+          const createdDateKey = createdDate.getFullYear() + '-' +
+            String(createdDate.getMonth() + 1).padStart(2, '0') + '-' +
+            String(createdDate.getDate()).padStart(2, '0');
           if (!dateCountMap[createdDateKey]) {
             dateCountMap[createdDateKey] = { created: 0, updated: 0 };
           }
           dateCountMap[createdDateKey].created += 1;
         }
-        
+
         // 统计更新时间（如果更新时间与创建时间不同）
         if (note.updated_at && note.updated_at !== note.created_at) {
           const updatedDate = new Date(note.updated_at);
-          const updatedDateKey = updatedDate.getFullYear() + '-' + 
-                         String(updatedDate.getMonth() + 1).padStart(2, '0') + '-' + 
-                         String(updatedDate.getDate()).padStart(2, '0');
+          const updatedDateKey = updatedDate.getFullYear() + '-' +
+            String(updatedDate.getMonth() + 1).padStart(2, '0') + '-' +
+            String(updatedDate.getDate()).padStart(2, '0');
           if (!dateCountMap[updatedDateKey]) {
             dateCountMap[updatedDateKey] = { created: 0, updated: 0 };
           }
@@ -186,9 +198,9 @@ const Profile = () => {
     for (let i = days - 1; i >= 0; i--) {
       const date = new Date(today);
       date.setDate(date.getDate() - i);
-      const dateKey = date.getFullYear() + '-' + 
-                     String(date.getMonth() + 1).padStart(2, '0') + '-' + 
-                     String(date.getDate()).padStart(2, '0');
+      const dateKey = date.getFullYear() + '-' +
+        String(date.getMonth() + 1).padStart(2, '0') + '-' +
+        String(date.getDate()).padStart(2, '0');
       const counts = dateCountMap[dateKey] || { created: 0, updated: 0 };
       const totalCount = counts.created + counts.updated;
       heatmapData.push({
@@ -199,7 +211,7 @@ const Profile = () => {
         level: totalCount === 0 ? 0 : totalCount <= 2 ? 1 : totalCount <= 5 ? 2 : totalCount <= 8 ? 3 : 4
       });
     }
-    
+
     return heatmapData;
   };
 
@@ -207,7 +219,7 @@ const Profile = () => {
   const getTopWords = () => {
     const wordMap = {};
     const stopWords = new Set(['的', '了', '是', '在', '我', '有', '和', '就', '不', '人', '都', '一', '一个', '上', '也', '很', '到', '说', '要', '去', '你', '会', '着', '没有', '看', '好', '自己', '这']);
-    
+
     notes.forEach(note => {
       if (!note.is_deleted && note.content) {
         // 简单的中文分词（匹配2-4个连续的中文字符）
@@ -231,7 +243,7 @@ const Profile = () => {
 
   const heatmapData = getHeatmapData();
   const topWords = getTopWords();
-  
+
   // 计算热力图网格布局（13周 x 7天）
   const weeks = [];
   for (let i = 0; i < heatmapData.length; i += 7) {
@@ -261,7 +273,7 @@ const Profile = () => {
           : 'linear-gradient(135deg, #f5f5f5 0%, #ffffff 100%)',
         border: `1px solid ${theme === 'dark' ? '#333' : '#e0e0e0'}`
       }}>
-        <Box 
+        <Box
           sx={{ position: 'relative', mr: 3 }}
           onClick={handleAvatarClick}
         >
@@ -285,7 +297,7 @@ const Profile = () => {
           >
             <PersonIcon fontSize="large" />
           </Avatar>
-          
+
           {/* 欢迎消息气泡 */}
           <Zoom in={showWelcome}>
             <Box
@@ -325,7 +337,7 @@ const Profile = () => {
             </Box>
           </Zoom>
         </Box>
-        
+
         <Box sx={{ flex: 1 }}>
           <Typography variant="h4" sx={{ mb: 1, fontWeight: 600 }}>
             {displayName}
@@ -847,14 +859,14 @@ const Profile = () => {
             <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
               过去90天的笔记创建活动
             </Typography>
-            
+
             {/* 热力图网格和图例 */}
             <Box sx={{ display: 'flex', alignItems: 'flex-start', gap: 2 }}>
               {/* 热力图网格 */}
-              <Box sx={{ 
-                display: 'flex', 
+              <Box sx={{
+                display: 'flex',
                 flexDirection: 'column',
-                gap: 0.5, 
+                gap: 0.5,
                 overflowX: 'auto',
                 pb: 1,
                 '&::-webkit-scrollbar': {
@@ -876,8 +888,8 @@ const Profile = () => {
                         theme === 'dark' ? '#39d353' : '#216e39'
                       ];
                       return (
-                        <Tooltip 
-                          key={dayIndex} 
+                        <Tooltip
+                          key={dayIndex}
                           title={
                             <Box>
                               <Typography variant="caption" display="block">{day.date}</Typography>
@@ -910,7 +922,7 @@ const Profile = () => {
                   </Box>
                 ))}
               </Box>
-              
+
               {/* 图例 */}
               <Box sx={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 0.5 }}>
                 <Typography variant="caption" color="text.secondary">少</Typography>
@@ -963,7 +975,7 @@ const Profile = () => {
             <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
               笔记中最常出现的词汇
             </Typography>
-            
+
             {topWords.length > 0 ? (
               <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 1 }}>
                 {topWords.map((item, index) => {
@@ -971,7 +983,7 @@ const Profile = () => {
                   const intensity = (item.count / maxCount);
                   const fontSize = 0.75 + (intensity * 0.5); // 0.75rem - 1.25rem
                   const opacity = 0.6 + (intensity * 0.4); // 0.6 - 1.0
-                  
+
                   return (
                     <Tooltip key={item.word} title={`出现 ${item.count} 次`} placement="top">
                       <Chip
@@ -999,7 +1011,7 @@ const Profile = () => {
                 暂无数据
               </Typography>
             )}
-            
+
             {/* 词频排行榜 */}
             {topWords.length > 0 && (
               <Box sx={{ mt: 2 }}>
@@ -1008,18 +1020,18 @@ const Profile = () => {
                 </Typography>
                 <Stack spacing={0.5}>
                   {topWords.slice(0, 5).map((item, index) => (
-                    <Box 
-                      key={item.word} 
-                      sx={{ 
-                        display: 'flex', 
+                    <Box
+                      key={item.word}
+                      sx={{
+                        display: 'flex',
                         alignItems: 'center',
                         justifyContent: 'space-between'
                       }}
                     >
                       <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, flex: 1 }}>
-                        <Typography 
-                          variant="caption" 
-                          sx={{ 
+                        <Typography
+                          variant="caption"
+                          sx={{
                             fontWeight: 600,
                             color: index < 3 ? 'info.main' : 'text.secondary',
                             minWidth: 16

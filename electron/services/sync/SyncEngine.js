@@ -390,7 +390,7 @@ class SyncEngine extends EventEmitter {
 
     // 添加 todos（作为单个文件）
     const todosArray = Object.values(todos);
-    
+
     // 计算 todos 的最新更新时间
     let todosUpdatedAt = 0;
     if (todosArray.length > 0) {
@@ -425,7 +425,7 @@ class SyncEngine extends EventEmitter {
     // Settings 的时间戳策略：使用缓存的时间戳（从 cachedManifest），除非 hash 变化
     const settingsHash = this.storage.calculateSettingsHash(settings);
     let settingsUpdatedAt = Date.now();
-    
+
     // 如果有缓存的 manifest，且 hash 未变，保持原时间戳
     const cachedManifest = this.loadLocalManifest();
     if (cachedManifest && cachedManifest.files && cachedManifest.files['global_settings']) {
@@ -601,14 +601,14 @@ class SyncEngine extends EventEmitter {
 
     // 检测笔记类型是否转换（.md ↔ .wb）
     const isNote = fileId !== 'global_todos' && fileId !== 'global_settings';
-    
+
     // 检查远程和本地之间的扩展名变化
     const remoteLocalExtChanged = isNote && remoteEntry.ext && localEntry.ext && remoteEntry.ext !== localEntry.ext;
-    
+
     if (remoteLocalExtChanged) {
       // 笔记类型在两端不一致，使用时间戳决定哪个版本更新
       this.log(`[Decide] ${fileId}: 检测到类型不一致 remote=${remoteEntry.ext} local=${localEntry.ext}`);
-      
+
       if (localEntry.t > remoteEntry.t) {
         // 本地更新时间更晚，上传本地类型并删除远程旧文件
         this.log(`[Decide] ${fileId}: 本地更新 (${new Date(localEntry.t).toISOString()})`);
@@ -631,10 +631,10 @@ class SyncEngine extends EventEmitter {
         };
       }
     }
-    
+
     // 检查本地和缓存之间的扩展名变化（本地进行了类型转换）
     const localCachedExtChanged = isNote && cachedEntry && cachedEntry.ext && localEntry.ext && cachedEntry.ext !== localEntry.ext;
-    
+
     if (localCachedExtChanged) {
       // 本地类型发生了转换，需要上传新类型并删除远程旧文件
       this.log(`[Decide] ${fileId}: 本地类型转换 ${cachedEntry.ext} -> ${localEntry.ext}`);
@@ -647,7 +647,7 @@ class SyncEngine extends EventEmitter {
         oldRemotePath: this.getRemotePath(fileId, cachedEntry.ext), // 缓存的旧扩展名
       };
     }
-    
+
     // 两边都未删除，比较 hash
     if (remoteEntry.h === localEntry.h) {
       // Hash 相同，跳过
@@ -656,7 +656,7 @@ class SyncEngine extends EventEmitter {
 
     // 对于全局数据（todos/settings），使用简单的时间戳策略，不启用冲突检测
     const isGlobalData = fileId === 'global_todos' || fileId === 'global_settings';
-    
+
     // Hash 不同，检测是否为真正的冲突
     // 真正的冲突：两端都相对于缓存版本发生了变化
     const localChanged = !cachedEntry || (cachedEntry.h !== localEntry.h);
@@ -845,7 +845,7 @@ class SyncEngine extends EventEmitter {
             }
           }
         }
-        
+
         await this.client.uploadText(task.remotePath, note.content);
 
         // 上传笔记中引用的图片
@@ -855,7 +855,7 @@ class SyncEngine extends EventEmitter {
   }
 
   /**
-   * 上传笔记中引用的图片
+   * 上传笔记中引用的图片（带重试）
    * @private
    */
   async uploadNoteImages(content, noteType) {
@@ -865,37 +865,59 @@ class SyncEngine extends EventEmitter {
     if (imageRefs.length === 0) return;
 
     this.log(`[Upload Images] 发现 ${imageRefs.length} 个图片引用`);
+    const failedImages = [];
 
     for (const relativePath of imageRefs) {
+      const localPath = path.join(app.getPath('userData'), relativePath);
+      if (!fs.existsSync(localPath)) {
+        this.log(`[Upload Images] 本地图片不存在，跳过: ${relativePath}`);
+        continue;
+      }
+
+      const remotePath = this.config.rootPath + relativePath;
+
+      // 检查云端是否已存在（避免重复上传）
       try {
-        const localPath = path.join(app.getPath('userData'), relativePath);
-        if (!fs.existsSync(localPath)) {
-          this.log(`[Upload Images] 本地图片不存在，跳过: ${relativePath}`);
-          continue;
-        }
-
-        const remotePath = this.config.rootPath + relativePath;
-
-        // 检查云端是否已存在（避免重复上传）
         const remoteExists = await this.client.exists(remotePath);
         if (remoteExists) {
           this.log(`[Upload Images] 图片已存在，跳过: ${relativePath}`);
           continue;
         }
-
-        // 确保云端目录存在
-        const remoteDir = path.dirname(remotePath).replace(/\\/g, '/');
-        if (!await this.client.exists(remoteDir)) {
-          await this.client.createDirectory(remoteDir);
-        }
-
-        const imageData = fs.readFileSync(localPath);
-        await this.client.uploadBinary(remotePath, imageData);
-        this.log(`[Upload Images] 图片上传成功: ${relativePath}`);
-      } catch (error) {
-        // 图片上传失败不应阻断同步流程
-        this.log(`[Upload Images] 图片上传失败: ${relativePath}, ${error.message}`);
+      } catch (e) {
+        // 忽略检查失败，继续尝试上传
       }
+
+      // 重试逻辑（最多3次）
+      let success = false;
+      for (let attempt = 1; attempt <= 3 && !success; attempt++) {
+        try {
+          // 确保云端目录存在
+          const remoteDir = path.dirname(remotePath).replace(/\\/g, '/');
+          if (!await this.client.exists(remoteDir)) {
+            await this.client.createDirectory(remoteDir);
+          }
+
+          const imageData = fs.readFileSync(localPath);
+          await this.client.uploadBinary(remotePath, imageData);
+          this.log(`[Upload Images] 图片上传成功: ${relativePath}`);
+          success = true;
+        } catch (error) {
+          this.log(`[Upload Images] 图片上传失败 (尝试 ${attempt}/3): ${relativePath}, ${error.message}`);
+          if (attempt < 3) {
+            await new Promise(r => setTimeout(r, 1000 * attempt)); // 递增延迟重试
+          }
+        }
+      }
+
+      if (!success) {
+        failedImages.push(relativePath);
+      }
+    }
+
+    // 如果有失败的图片，发出事件通知
+    if (failedImages.length > 0) {
+      this.emit('imageUploadFailed', { failed: failedImages, total: imageRefs.length });
+      this.log(`[Upload Images] ${failedImages.length} 个图片上传失败`);
     }
   }
 
@@ -910,7 +932,7 @@ class SyncEngine extends EventEmitter {
       // 下载 todos
       const remoteTodos = await this.client.downloadJson(task.remotePath);
       this.log(`[Download] 下载了 ${remoteTodos.length} 个 todos`);
-      
+
       for (const todo of remoteTodos) {
         // 确保每个 todo 都有有效的时间戳
         if (!todo.created_at) {
@@ -929,7 +951,7 @@ class SyncEngine extends EventEmitter {
       // 下载笔记/白板
       let content;
       let actualExt = task.remoteEntry.ext;
-      
+
       try {
         content = await this.client.downloadText(task.remotePath);
       } catch (error) {
@@ -937,9 +959,9 @@ class SyncEngine extends EventEmitter {
         if (error.message && error.message.includes('不存在')) {
           const alternativeExt = task.remoteEntry.ext === '.md' ? '.wb' : '.md';
           const alternativePath = this.getRemotePath(task.fileId, alternativeExt);
-          
+
           this.log(`[Download] 原路径不存在，尝试另一扩展名: ${alternativePath}`);
-          
+
           try {
             content = await this.client.downloadText(alternativePath);
             actualExt = alternativeExt;
@@ -980,7 +1002,7 @@ class SyncEngine extends EventEmitter {
   }
 
   /**
-   * 下载笔记中引用的图片
+   * 下载笔记中引用的图片（带重试）
    * @private
    */
   async downloadNoteImages(content, noteType) {
@@ -990,36 +1012,52 @@ class SyncEngine extends EventEmitter {
     if (imageRefs.length === 0) return;
 
     this.log(`[Download Images] 发现 ${imageRefs.length} 个图片引用`);
+    const failedImages = [];
 
     for (const relativePath of imageRefs) {
-      try {
-        // 检查本地是否已存在
-        const localPath = path.join(app.getPath('userData'), relativePath);
-        if (fs.existsSync(localPath)) {
-          this.log(`[Download Images] 图片已存在，跳过: ${relativePath}`);
-          continue;
-        }
-
-        // 从云端下载
-        const remotePath = this.config.rootPath + relativePath;
-        this.log(`[Download Images] 下载图片: ${relativePath}`);
-
-        const imageData = await this.client.downloadBinary(remotePath);
-        if (imageData) {
-          // 确保目录存在
-          const localDir = path.dirname(localPath);
-          if (!fs.existsSync(localDir)) {
-            fs.mkdirSync(localDir, { recursive: true });
-          }
-
-          // 保存到本地
-          fs.writeFileSync(localPath, imageData);
-          this.log(`[Download Images] 图片下载成功: ${relativePath}`);
-        }
-      } catch (error) {
-        // 图片下载失败不应阻断同步流程
-        this.log(`[Download Images] 图片下载失败: ${relativePath}, ${error.message}`);
+      // 检查本地是否已存在
+      const localPath = path.join(app.getPath('userData'), relativePath);
+      if (fs.existsSync(localPath)) {
+        this.log(`[Download Images] 图片已存在，跳过: ${relativePath}`);
+        continue;
       }
+
+      // 重试逻辑（最多3次）
+      let success = false;
+      for (let attempt = 1; attempt <= 3 && !success; attempt++) {
+        try {
+          const remotePath = this.config.rootPath + relativePath;
+          this.log(`[Download Images] 下载图片 (尝试 ${attempt}/3): ${relativePath}`);
+
+          const imageData = await this.client.downloadBinary(remotePath);
+          if (imageData) {
+            // 确保目录存在
+            const localDir = path.dirname(localPath);
+            if (!fs.existsSync(localDir)) {
+              fs.mkdirSync(localDir, { recursive: true });
+            }
+
+            fs.writeFileSync(localPath, imageData);
+            this.log(`[Download Images] 图片下载成功: ${relativePath}`);
+            success = true;
+          }
+        } catch (error) {
+          this.log(`[Download Images] 图片下载失败 (尝试 ${attempt}/3): ${relativePath}, ${error.message}`);
+          if (attempt < 3) {
+            await new Promise(r => setTimeout(r, 1000 * attempt)); // 递增延迟重试
+          }
+        }
+      }
+
+      if (!success) {
+        failedImages.push(relativePath);
+      }
+    }
+
+    // 如果有失败的图片，发出事件通知
+    if (failedImages.length > 0) {
+      this.emit('imageDownloadFailed', { failed: failedImages, total: imageRefs.length });
+      this.log(`[Download Images] ${failedImages.length} 个图片下载失败`);
     }
   }
 
@@ -1185,7 +1223,7 @@ class SyncEngine extends EventEmitter {
         }
         // 对于下载操作，本地状态已更新为服务器状态
         // newFiles 中已包含 remoteManifest 的条目，无需更改
-        
+
         // 对于删除操作 (delete)，通常是清理操作，如果需要从 manifest 移除
         if (task.operation === 'delete') {
           delete newFiles[task.fileId];

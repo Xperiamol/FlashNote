@@ -43,6 +43,7 @@ const useStore = create(
                 editorMode: 'markdown', // 编辑器模式：'markdown' | 'wysiwyg'
                 defaultMinibarMode: false, // 独立窗口默认minibar模式
                 maskOpacity: 'medium', // 遮罩透明度：'none' | 'light' | 'medium' | 'heavy'
+                christmasMode: false, // 圣诞模式：true | false
 
                 // 插件商店相关 UI 状态
                 pluginStoreFilters: {
@@ -76,6 +77,8 @@ const useStore = create(
                 setDefaultMinibarMode: (enabled) => set({ defaultMinibarMode: enabled }),
 
                 setMaskOpacity: (opacity) => set({ maskOpacity: opacity }),
+
+                setChristmasMode: (enabled) => set({ christmasMode: enabled }),
 
                 setLanguage: (language) => set({ language }),
 
@@ -297,7 +300,7 @@ const useStore = create(
                                     }
                                 })
                             }))
-                            
+
                             return { success: true, data: updatedNote }
                         }
                         return { success: false, error: 'Failed to update note' }
@@ -362,7 +365,7 @@ const useStore = create(
                 // 局部更新笔记列表中的单个笔记（不重新排序）
                 updateNoteInList: (updatedNote) => {
                     set((state) => ({
-                        notes: state.notes.map(note => 
+                        notes: state.notes.map(note =>
                             note.id === updatedNote.id ? { ...note, ...updatedNote } : note
                         )
                     }))
@@ -545,6 +548,9 @@ const useStore = create(
                                 if (settings.defaultMinibarMode !== undefined) {
                                     set({ defaultMinibarMode: Boolean(settings.defaultMinibarMode) })
                                 }
+                                if (settings.christmasMode !== undefined) {
+                                    set({ christmasMode: Boolean(settings.christmasMode) })
+                                }
                             }
                         }
                     } catch (error) {
@@ -603,7 +609,8 @@ const useStore = create(
             partialize: (state) => ({
                 theme: state.theme,
                 primaryColor: state.primaryColor,
-                titleBarStyle: state.titleBarStyle
+                titleBarStyle: state.titleBarStyle,
+                christmasMode: state.christmasMode
             })
         }
     )

@@ -398,7 +398,7 @@ const enUS = {
     totalMemories: 'Total Memories',
     categoryStats: 'Category Statistics',
     refresh: 'Refresh',
-    importHistoricalNotes: 'Import Historical Notes',
+    importHistoricalNotes: 'Memorize Now',
     semanticSearch: 'Semantic Search',
     searchPlaceholder: 'Enter query content, e.g., preferences for handling urgent tasks',
     search: 'Search',
@@ -418,10 +418,10 @@ const enUS = {
     confirmClearDesc: 'This operation will delete all learned preference memories and cannot be recovered. Preferences will be relearned next time AI task planning is used.',
     cancel: 'Cancel',
     confirmClear: 'Confirm Clear',
-    importNotesTitle: 'Import Historical Notes',
-    importNotesDesc: 'This will store all your notes from the past 90 days as memories and analyze todo patterns.',
-    importNotesDetail: 'Each note will create a separate memory for semantic search. This process may take several minutes, continue?',
-    confirmImport: 'Confirm Import'
+    importNotesTitle: 'Memorize Now',
+    importNotesDesc: 'This will store all your notes and todos from the past 90 days (not in trash) as memories for AI task planning knowledge reference.',
+    importNotesDetail: 'Existing memories will not be duplicated. Continue?',
+    confirmImport: 'Memorize Now'
   },
   cloudSync: {
     title: 'Cloud Sync Settings',
@@ -611,7 +611,7 @@ const enUS = {
   about: {
     appName: 'FlashNote',
     description: 'A simple and efficient note-taking app',
-    version: 'Version 2.3.0',
+    version: 'Version 2.3.0 Xmas Update',
     githubRepo: 'GitHub Repository',
     copyright: '© 2025 FlashNote. All rights reserved.'
   },

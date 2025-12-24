@@ -674,7 +674,13 @@ runtime.onActivate(async () => {
 })
 
 runtime.onDeactivate(async () => {
-  // 清理所有样式
-  await runtime.theme.unregisterGlobalStyle('main-pattern')
-  runtime.logger.info('主题外观插件已停用')
+  try {
+    // 清理所有样式
+    if (runtime.theme && typeof runtime.theme.unregisterGlobalStyle === 'function') {
+      await runtime.theme.unregisterGlobalStyle('main-pattern')
+    }
+    runtime.logger.info('主题外观插件已停用')
+  } catch (error) {
+    runtime.logger.error('插件停用时清理样式失败', error)
+  }
 })
