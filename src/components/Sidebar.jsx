@@ -19,12 +19,12 @@ import { createTransitionString, ANIMATIONS } from '../utils/animationConfig';
 
 // 圣诞图标路径
 const CHRISTMAS_ICONS = {
-  notes: '/png/gift-box.png',
-  todo: '/png/christmas-wreath.png',
-  calendar: '/png/christmas-bell.png',
-  plugins: '/png/christmas-tree.png',
-  profile: '/png/hat.png',
-  settings: '/png/christmas-tree.png'
+  notes: './png/gift-box.png',
+  todo: './png/christmas-wreath.png',
+  calendar: './png/christmas-bell.png',
+  plugins: './png/christmas-tree.png',
+  profile: './png/hat.png',
+  settings: './png/christmas-tree.png'
 };
 
 // 圣诞问候语
