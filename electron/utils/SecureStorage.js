@@ -70,7 +70,10 @@ class SecureStorage {
     // 检查是否为明文（开发模式）
     if (encryptedText.startsWith('PLAIN:')) {
       const plainText = encryptedText.substring(6);
-      console.warn('[SecureStorage] 检测到明文存储的数据');
+      // 安全提示: 避免记录具体的数据类型，防止信息泄露
+      if (process.env.NODE_ENV === 'development') {
+        console.warn('[SecureStorage] 检测到未加密数据');
+      }
       return plainText;
     }
 

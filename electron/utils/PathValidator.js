@@ -42,7 +42,9 @@ class PathValidator {
     }
 
     // 检查以点开头（隐藏文件）
-    if (fileName.startsWith('.')) {
+    // 允许某些已知的安全文件
+    const allowedDotFiles = ['.gitignore', '.env', '.editorconfig'];
+    if (fileName.startsWith('.') && !allowedDotFiles.includes(fileName)) {
       return false;
     }
 
@@ -109,7 +111,7 @@ class PathValidator {
   static safejoin(baseDir, fileName) {
     // 验证文件名
     if (!this.isValidFileName(fileName)) {
-      throw new Error('非法文件名: ' + fileName);
+      throw new Error('非法文件名');  // 不泄露具体文件名
     }
 
     // 清理文件名

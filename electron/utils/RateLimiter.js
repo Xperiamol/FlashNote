@@ -63,7 +63,9 @@ class RateLimiter {
         const blockUntil = now + this.blockDurationMs;
         this.blockedClients.set(key, blockUntil);
         
-        console.warn(`[RateLimiter] 封禁客户端: ${key}, 直到 ${new Date(blockUntil)}`);
+        // 安全日志: 使用哈希避免泄露客户端标识
+        const hashedKey = this.hashKey(key);
+        console.warn(`[RateLimiter] 封禁客户端: ${hashedKey}, 直到 ${new Date(blockUntil)}`);
         
         return {
           allowed: false,
@@ -121,6 +123,15 @@ class RateLimiter {
       blocked: blockUntil && now < blockUntil,
       blockUntil: blockUntil || null
     };
+  }
+
+  /**
+   * 哈希客户端标识（用于日志）
+   * @private
+   */
+  hashKey(key) {
+    const crypto = require('crypto');
+    return crypto.createHash('sha256').update(key).digest('hex').substring(0, 8);
   }
 
   /**
@@ -186,6 +197,14 @@ class ResourceQuotaManager {
   }
 
   /**
+   * 格式化字节为MB（工具方法）
+   * @private
+   */
+  static formatBytes(bytes) {
+    return (bytes / 1024 / 1024).toFixed(2);
+  }
+
+  /**
    * 检查资源配额
    * @param {string} resourceType - 资源类型
    * @param {number} requestedAmount - 请求的资源量
@@ -207,9 +226,9 @@ class ResourceQuotaManager {
     const newUsed = quota.used + requestedAmount;
 
     if (newUsed > limit) {
-      const usedMB = (quota.used / 1024 / 1024).toFixed(2);
-      const limitMB = (limit / 1024 / 1024).toFixed(2);
-      const requestedMB = (requestedAmount / 1024 / 1024).toFixed(2);
+      const usedMB = ResourceQuotaManager.formatBytes(quota.used);
+      const limitMB = ResourceQuotaManager.formatBytes(limit);
+      const requestedMB = ResourceQuotaManager.formatBytes(requestedAmount);
 
       return {
         allowed: false,

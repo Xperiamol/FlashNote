@@ -20,10 +20,12 @@ class InputValidator {
     }
 
     // 移除 FTS5 特殊字符，只保留安全字符
-    // 允许：字母、数字、空格、中文、基本标点
+    // 默认字符集: 字母、数字、空格、中文（U+4E00-U+9FA5）、
+    // 日文假名（U+3040-U+309F, U+30A0-U+30FF）、
+    // 韩文（U+AC00-U+D7AF）、标点（U+3000-U+303F, U+FF00-U+FFEF）
     let sanitized = query
       .substring(0, maxLength)
-      .replace(/[^\w\s\u4e00-\u9fa5\u3000-\u303f\uff00-\uffef]/g, ' ')
+      .replace(/[^\w\s\u3040-\u309F\u30A0-\u30FF\u4E00-\u9FA5\uAC00-\uD7AF\u3000-\u303F\uFF00-\uFFEF]/g, ' ')
       .replace(/\s+/g, ' ')
       .trim();
 
@@ -112,14 +114,20 @@ class InputValidator {
         };
       }
 
-      // 检查主机名黑名单
+      // 检查主机名黑名单（精确匹配和IP范围）
       const blockedHosts = ['localhost', '127.0.0.1', '0.0.0.0', '[::]'];
-      if (blockedHosts.some(host => parsed.hostname.includes(host))) {
-        return {
-          valid: false,
-          parsed,
-          error: '禁止访问本地地址'
-        };
+      const hostname = parsed.hostname.toLowerCase();
+      
+      // 精确匹配
+      if (blockedHosts.includes(hostname)) {
+        return { valid: false, parsed, error: '禁止访问本地地址' };
+      }
+      
+      // 检查localhost变体
+      if (hostname.endsWith('.localhost') || hostname === '127.0.0.1' || 
+          hostname.startsWith('127.') || hostname.startsWith('10.') ||
+          hostname.startsWith('192.168.') || hostname.startsWith('172.')) {
+        return { valid: false, parsed, error: '禁止访问本地或内网地址' };
       }
 
       return { valid: true, parsed, error: null };
@@ -183,6 +191,7 @@ class InputValidator {
 
   /**
    * 清理 HTML 标签（基础清理）
+   * 注意: 这是基础清理方法，对于复杂场景请使用 DOMPurify
    * @param {string} text - 文本
    * @returns {string} 清理后的文本
    */
@@ -191,10 +200,14 @@ class InputValidator {
       return '';
     }
 
+    // 警告: 基础清理不能完全防止XSS，应使用DOMPurify进行完整清理
+    // 此方法仅用于简单的标签移除
     return text
       .replace(/<script\b[^<]*(?:(?!<\/script>)<[^<]*)*<\/script>/gi, '')
+      .replace(/<style\b[^<]*(?:(?!<\/style>)<[^<]*)*<\/style>/gi, '')
       .replace(/<[^>]+>/g, '')
-      .replace(/&[a-z]+;/gi, '')
+      .replace(/&[a-z]+;/gi, ' ')
+      .replace(/\s+/g, ' ')
       .trim();
   }
 
