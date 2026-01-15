@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { useTranslation } from '../utils/i18n';
+import { useError } from './ErrorProvider';
 import {
   Box,
   Typography,
@@ -16,9 +17,11 @@ import {
   Chip,
 } from '@mui/material';
 import { CheckCircle, Error as ErrorIcon, Wifi, WifiOff } from '@mui/icons-material';
+import { spacing, flex, combo } from '../styles/commonStyles';
 
 const ProxySettings = ({ showSnackbar }) => {
   const { t } = useTranslation();
+  const { showError, showSuccess } = useError();
   const [config, setConfig] = useState({
     enabled: false,
     host: '127.0.0.1',
@@ -50,6 +53,7 @@ const ProxySettings = ({ showSnackbar }) => {
       }
     } catch (error) {
       console.error('加载代理配置失败:', error);
+      showError(error, '加载代理配置失败');
     }
   };
 
@@ -122,7 +126,7 @@ const ProxySettings = ({ showSnackbar }) => {
             secondary={config.enabled ? t('proxy.enabledWithUrl', { url: getProxyUrl() }) : t('proxy.disabled')}
           />
           <ListItemSecondaryAction>
-            <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+            <Box sx={{ ...flex.rowGap1 }}>
               {config.enabled ? (
                 <CheckCircle color="success" />
               ) : (
@@ -153,14 +157,14 @@ const ProxySettings = ({ showSnackbar }) => {
         {/* 配置 */}
         <ListItem>
           <Box sx={{ width: '100%' }}>
-            <Typography variant="subtitle2" sx={{ mb: 1, fontWeight: 700 }}>
+            <Typography variant="subtitle2" sx={{ ...spacing.mb1, fontWeight: 700 }}>
               {t('proxy.hostAddress')}
             </Typography>
             <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mb: 1.5 }}>
               {t('proxy.hostAddressDesc')}
             </Typography>
 
-            <Box sx={{ display: 'flex', gap: 2, flexWrap: 'wrap' }}>
+            <Box sx={{ ...flex.rowGap2, flexWrap: 'wrap' }}>
               <TextField
                 value={config.host}
                 onChange={(e) => setConfig({ ...config, host: e.target.value })}
@@ -188,10 +192,10 @@ const ProxySettings = ({ showSnackbar }) => {
         {/* 常用配置 */}
         <ListItem>
           <Box sx={{ width: '100%' }}>
-            <Typography variant="subtitle2" sx={{ mb: 1, fontWeight: 700 }}>
+            <Typography variant="subtitle2" sx={{ ...spacing.mb1, fontWeight: 700 }}>
               {t('proxy.commonConfigs')}
             </Typography>
-            <Box sx={{ display: 'flex', gap: 1, flexWrap: 'wrap' }}>
+            <Box sx={{ ...flex.rowGap1, flexWrap: 'wrap' }}>
               <Chip
                 label={t('proxy.clashPort')}
                 size="small"
@@ -218,7 +222,7 @@ const ProxySettings = ({ showSnackbar }) => {
 
         {/* 操作按钮 */}
         <ListItem>
-          <Box sx={{ display: 'flex', alignItems: 'center', gap: 2, width: '100%' }}>
+          <Box sx={{ ...flex.rowGap2, width: '100%' }}>
             <Button
               variant="contained"
               size="small"

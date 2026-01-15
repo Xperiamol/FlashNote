@@ -56,6 +56,8 @@ import AISettings from './AISettings';
 import STTSettings from './STTSettings';
 import Mem0Settings from './Mem0Settings';
 import ProxySettings from './ProxySettings';
+import MCPSettings from './MCPSettings';
+import ObsidianImportExport from './ObsidianImportExport/ObsidianImportExport';
 import { SUPPORTED_LANGUAGES, t, initI18n } from '../utils/i18n';
 import {
     DEFAULT_SHORTCUTS,
@@ -65,6 +67,7 @@ import {
     resetShortcutsToDefault
 } from '../utils/shortcutUtils';
 import shortcutManager from '../utils/ShortcutManager';
+import { useError } from './ErrorProvider';
 
 function TabPanel({ children, value, index, ...other }) {
     return (
@@ -84,7 +87,29 @@ function TabPanel({ children, value, index, ...other }) {
     );
 }
 
+function SettingRow({ primary, secondary, action }) {
+    return (
+        <ListItem>
+            <ListItemText primary={primary} secondary={secondary} />
+            <ListItemSecondaryAction>
+                {action}
+            </ListItemSecondaryAction>
+        </ListItem>
+    );
+}
+
+function SettingFullRow({ children }) {
+    return (
+        <ListItem>
+            <Box sx={{ width: '100%' }}>
+                {children}
+            </Box>
+        </ListItem>
+    );
+}
+
 const Settings = () => {
+    const { showError, showSuccess } = useError();
     const { theme, setTheme, setPrimaryColor, setUserAvatar, setUserName, titleBarStyle, setTitleBarStyle, editorMode, setEditorMode, language, setLanguage, defaultMinibarMode, setDefaultMinibarMode, maskOpacity, setMaskOpacity, christmasMode, setChristmasMode } = useStore();
     const settingsTabValue = useStore((state) => state.settingsTabValue);
     const [settings, setSettings] = useState({
@@ -97,7 +122,8 @@ const Settings = () => {
         language: 'zh-CN',
         defaultMinibarMode: false,
         maskOpacity: 'medium',
-        christmasMode: false
+        christmasMode: false,
+        mcpEnabled: false
     });
     const [shortcuts, setShortcuts] = useState(DEFAULT_SHORTCUTS);
     const [shortcutConflicts, setShortcutConflicts] = useState({});
@@ -125,11 +151,15 @@ const Settings = () => {
                     if (normalizedData.christmasMode !== undefined) {
                         normalizedData.christmasMode = Boolean(normalizedData.christmasMode);
                     }
+                    if (normalizedData.mcpEnabled !== undefined) {
+                        normalizedData.mcpEnabled = Boolean(normalizedData.mcpEnabled);
+                    }
                     setSettings(prev => ({ ...prev, ...normalizedData }));
                 }
             }
         } catch (error) {
             console.error('Failed to load settings:', error);
+            showError(error, '加载设置失败');
         }
     };
 
@@ -153,6 +183,7 @@ const Settings = () => {
             }
         } catch (error) {
             console.error('Failed to load shortcuts:', error);
+            showError(error, '加载快捷键失败');
             setShortcuts(DEFAULT_SHORTCUTS);
         }
     };
@@ -228,6 +259,7 @@ const Settings = () => {
             showSnackbar(t('settings.settingsSaved'), 'success');
         } catch (error) {
             console.error('Failed to save setting:', error);
+            showError(error, '保存设置失败');
             // 恢复原状态
             setSettings(prev => ({ ...prev, [key]: !value }));
             showSnackbar(error.message || t('settings.saveSettingsFailed'), 'error');
@@ -262,6 +294,7 @@ const Settings = () => {
             }
         } catch (error) {
             console.error('Import failed:', error);
+            showError(error, '导入失败');
             setImportStatus('导入失败：' + error.message);
             setImportProgress(0);
             showSnackbar(t('settings.importFailed'), 'error');
@@ -272,6 +305,10 @@ const Settings = () => {
 
     const showSnackbar = (message, severity = 'info') => {
         setSnackbar({ open: true, message, severity });
+    };
+
+    const closeSnackbar = () => {
+        setSnackbar(prev => ({ ...prev, open: false }));
     };
 
     // 头像管理 - 遵循单一职责原则
@@ -335,6 +372,7 @@ const Settings = () => {
             }
         } catch (error) {
             console.error(`保存快捷键 ${shortcutId} 失败:`, error);
+            showError(error, `保存快捷键失败`);
             throw error;
         }
     };
@@ -402,6 +440,51 @@ const Settings = () => {
         }
     };
 
+    const chipRowSx = { display: 'flex', gap: 1 };
+    const themeOptions = [
+        { value: 'light', icon: <Brightness7 />, label: t('settings.themeLight') },
+        { value: 'dark', icon: <Brightness4 />, label: t('settings.themeDark') },
+        { value: 'system', icon: <Computer />, label: t('settings.themeSystem') },
+    ];
+    const editorModeOptions = [
+        { value: 'markdown', icon: <CodeIcon />, label: t('settings.editorMarkdown') },
+        { value: 'wysiwyg', icon: <VisibilityIcon />, label: t('settings.editorWysiwyg') },
+    ];
+
+    const themeColorPresets = [
+        { name: '经典蓝', color: '#0F4C81' },
+        { name: '珊瑚橙', color: '#FF6F61' },
+        { name: '紫外光', color: '#5F4B8B' },
+        { name: '草木绿', color: '#88B04B' },
+        { name: '水晶粉', color: '#F7CAC9' },
+        { name: '宁静蓝', color: '#91A8D0' },
+        { name: '活力橙', color: '#DD4124' },
+        { name: '辐射兰', color: '#9B1B30' },
+    ];
+    const maskOpacityOptions = [
+        { value: 'none', label: '无遮罩' },
+        { value: 'light', label: '轻度' },
+        { value: 'medium', label: '中度' },
+        { value: 'heavy', label: '重度' },
+    ];
+    const titleBarOptions = [
+        { value: 'mac', label: t('settings.titleBarMac') },
+        { value: 'windows', label: t('settings.titleBarWindows') },
+    ];
+
+    const getColorPresetSx = (presetColor) => {
+        const selected = settings.customThemeColor === presetColor;
+        return {
+            width: 36,
+            height: 36,
+            borderRadius: 1,
+            backgroundColor: presetColor,
+            cursor: 'pointer',
+            border: selected ? '3px solid' : '2px solid',
+            borderColor: selected ? 'primary.main' : 'divider',
+        };
+    };
+
     return (
         <Box sx={{ height: '100%', display: 'flex', flexDirection: 'row' }}>
             {/* 内容区域 */}
@@ -409,84 +492,60 @@ const Settings = () => {
                 {/* 通用设置 */}
                 <TabPanel value={settingsTabValue} index={0}>
                     <List>
-                        <ListItem>
-                            <ListItemText
-                                primary={t('settings.autoLaunch')}
-                                secondary={t('settings.autoLaunchDesc')}
-                            />
-                            <ListItemSecondaryAction>
+                        <SettingRow
+                            primary={t('settings.autoLaunch')}
+                            secondary={t('settings.autoLaunchDesc')}
+                            action={(
                                 <Switch
                                     checked={settings.autoLaunch}
                                     onChange={(e) => handleSettingChange('autoLaunch', e.target.checked)}
                                 />
-                            </ListItemSecondaryAction>
-                        </ListItem>
+                            )}
+                        />
 
                         <Divider />
 
-                        <ListItem>
-                            <ListItemText
-                                primary={t('settings.theme')}
-                                secondary={t('settings.themeDesc')}
-                            />
-                            <ListItemSecondaryAction>
-                                <Box sx={{ display: 'flex', gap: 1 }}>
-                                    <Chip
-                                        icon={<Brightness7 />}
-                                        label={t('settings.themeLight')}
-                                        variant={settings.theme === 'light' ? 'filled' : 'outlined'}
-                                        onClick={() => handleSettingChange('theme', 'light')}
-                                        size="small"
-                                        color={settings.theme === 'light' ? 'primary' : 'default'}
-                                    />
-                                    <Chip
-                                        icon={<Brightness4 />}
-                                        label={t('settings.themeDark')}
-                                        variant={settings.theme === 'dark' ? 'filled' : 'outlined'}
-                                        onClick={() => handleSettingChange('theme', 'dark')}
-                                        size="small"
-                                        color={settings.theme === 'dark' ? 'primary' : 'default'}
-                                    />
-                                    <Chip
-                                        icon={<Computer />}
-                                        label={t('settings.themeSystem')}
-                                        variant={settings.theme === 'system' ? 'filled' : 'outlined'}
-                                        onClick={() => handleSettingChange('theme', 'system')}
-                                        size="small"
-                                        color={settings.theme === 'system' ? 'primary' : 'default'}
-                                    />
+                        <SettingRow
+                            primary={t('settings.theme')}
+                            secondary={t('settings.themeDesc')}
+                            action={(
+                                <Box sx={chipRowSx}>
+                                    {themeOptions.map((opt) => (
+                                        <Chip
+                                            key={opt.value}
+                                            icon={opt.icon}
+                                            label={opt.label}
+                                            variant={settings.theme === opt.value ? 'filled' : 'outlined'}
+                                            onClick={() => handleSettingChange('theme', opt.value)}
+                                            size="small"
+                                            color={settings.theme === opt.value ? 'primary' : 'default'}
+                                        />
+                                    ))}
                                 </Box>
-                            </ListItemSecondaryAction>
-                        </ListItem>
+                            )}
+                        />
 
                         <Divider />
 
-                        <ListItem>
-                            <ListItemText
-                                primary={t('settings.editorMode')}
-                                secondary={t('settings.editorModeDesc')}
-                            />
-                            <ListItemSecondaryAction>
-                                <Box sx={{ display: 'flex', gap: 1 }}>
-                                    <Chip
-                                        icon={<CodeIcon />}
-                                        label={t('settings.editorMarkdown')}
-                                        variant={editorMode === 'markdown' ? 'filled' : 'outlined'}
-                                        onClick={() => setEditorMode('markdown')}
-                                        size="small"
-                                        color={editorMode === 'markdown' ? 'primary' : 'default'}
-                                    />
-                                    <Chip
-                                        icon={<VisibilityIcon />}
-                                        label={t('settings.editorWysiwyg')}
-                                        variant={editorMode === 'wysiwyg' ? 'filled' : 'outlined'}
-                                        onClick={() => setEditorMode('wysiwyg')}
-                                        size="small"
-                                        color={editorMode === 'wysiwyg' ? 'primary' : 'default'}
-                                    />
+                        <SettingRow
+                            primary={t('settings.editorMode')}
+                            secondary={t('settings.editorModeDesc')}
+                            action={(
+                                <Box sx={chipRowSx}>
+                                    {editorModeOptions.map((opt) => (
+                                        <Chip
+                                            key={opt.value}
+                                            icon={opt.icon}
+                                            label={opt.label}
+                                            variant={editorMode === opt.value ? 'filled' : 'outlined'}
+                                            onClick={() => setEditorMode(opt.value)}
+                                            size="small"
+                                            color={editorMode === opt.value ? 'primary' : 'default'}
+                                        />
+                                    ))}
                                 </Box>
-                            </ListItemSecondaryAction>
-                        </ListItem>
+                            )}
+                        />
 
                         <Alert severity="warning" sx={{ mt: 1, mb: 2 }}>
                             <Typography variant="caption">
@@ -496,13 +555,11 @@ const Settings = () => {
 
                         <Divider />
 
-                        <ListItem>
-                            <ListItemText
-                                primary={t('settings.language')}
-                                secondary={t('settings.languageDesc')}
-                            />
-                            <ListItemSecondaryAction>
-                                <Box sx={{ display: 'flex', gap: 1 }}>
+                        <SettingRow
+                            primary={t('settings.language')}
+                            secondary={t('settings.languageDesc')}
+                            action={(
+                                <Box sx={chipRowSx}>
                                     {SUPPORTED_LANGUAGES.map(lang => (
                                         <Chip
                                             key={lang.code}
@@ -515,23 +572,21 @@ const Settings = () => {
                                         />
                                     ))}
                                 </Box>
-                            </ListItemSecondaryAction>
-                        </ListItem>
+                            )}
+                        />
 
                         <Divider />
 
-                        <ListItem>
-                            <ListItemText
-                                primary={t('settings.defaultMinibarMode')}
-                                secondary={t('settings.defaultMinibarModeDesc')}
-                            />
-                            <ListItemSecondaryAction>
+                        <SettingRow
+                            primary={t('settings.defaultMinibarMode')}
+                            secondary={t('settings.defaultMinibarModeDesc')}
+                            action={(
                                 <Switch
                                     checked={settings.defaultMinibarMode}
                                     onChange={(e) => handleSettingChange('defaultMinibarMode', e.target.checked)}
                                 />
-                            </ListItemSecondaryAction>
-                        </ListItem>
+                            )}
+                        />
 
                     </List>
                 </TabPanel>
@@ -599,169 +654,119 @@ const Settings = () => {
                         <Divider />
 
                         {/* 用户名设置 */}
-                        <ListItem>
-                            <Box sx={{ width: '100%', pt: 1, pb: 1 }}>
-                                <TextField
-                                    fullWidth
-                                    size="small"
-                                    label={t('settings.userName')}
-                                    value={settings.userName}
-                                    onChange={(e) => {
-                                        const newName = e.target.value;
-                                        setSettings(prev => ({ ...prev, userName: newName }));
-                                    }}
-                                    onBlur={(e) => {
-                                        const newName = e.target.value;
-                                        handleSettingChange('userName', newName);
-                                        setUserName(newName);
-                                    }}
-                                    placeholder={t('settings.userNamePlaceholder')}
-                                    helperText={t('settings.userNameHelper')}
-                                />
-                            </Box>
-                        </ListItem>
+                        <SettingFullRow>
+                            <TextField
+                                fullWidth
+                                size="small"
+                                label={t('settings.userName')}
+                                value={settings.userName}
+                                onChange={(e) => {
+                                    const newName = e.target.value;
+                                    setSettings(prev => ({ ...prev, userName: newName }));
+                                }}
+                                onBlur={(e) => {
+                                    const newName = e.target.value;
+                                    handleSettingChange('userName', newName);
+                                    setUserName(newName);
+                                }}
+                                placeholder={t('settings.userNamePlaceholder')}
+                                helperText={t('settings.userNameHelper')}
+                            />
+                        </SettingFullRow>
 
                         <Divider />
 
-                        <ListItem>
-                            <Box sx={{ width: '100%' }}>
-                                <ListItemText
-                                    primary={t('settings.themeColor')}
-                                    secondary={t('settings.themeColorDesc')}
-                                    sx={{ mb: 2 }}
-                                />
-                                <Box sx={{ display: 'flex', alignItems: 'center', gap: 2, flexWrap: 'wrap' }}>
-                                    {/* 快捷颜色选择按钮 - 潘通色系 */}
-                                    <Box sx={{ display: 'flex', gap: 1, flexWrap: 'wrap' }}>
-                                        {[
-                                            { name: '经典蓝', color: '#0F4C81' },
-                                            { name: '珊瑚橙', color: '#FF6F61' },
-                                            { name: '紫外光', color: '#5F4B8B' },
-                                            { name: '草木绿', color: '#88B04B' },
-                                            { name: '水晶粉', color: '#F7CAC9' },
-                                            { name: '宁静蓝', color: '#91A8D0' },
-                                            { name: '活力橙', color: '#DD4124' },
-                                            { name: '辐射兰', color: '#9B1B30' }
-                                        ].map((preset) => (
-                                            <Tooltip key={preset.color} title={preset.name}>
-                                                <Box
-                                                    onClick={() => handleSettingChange('customThemeColor', preset.color)}
-                                                    sx={{
-                                                        width: 36,
-                                                        height: 36,
-                                                        borderRadius: 1,
-                                                        backgroundColor: preset.color,
-                                                        cursor: 'pointer',
-                                                        border: settings.customThemeColor === preset.color ? '3px solid' : '2px solid',
-                                                        borderColor: settings.customThemeColor === preset.color ? 'primary.main' : 'divider',
-                                                        transition: 'all 0.2s',
-                                                        '&:hover': {
-                                                            transform: 'scale(1.1)',
-                                                            boxShadow: 2
-                                                        }
-                                                    }}
-                                                />
-                                            </Tooltip>
-                                        ))}
-                                    </Box>
+                        <SettingFullRow>
+                            <ListItemText
+                                primary={t('settings.themeColor')}
+                                secondary={t('settings.themeColorDesc')}
+                                sx={{ mb: 2 }}
+                            />
+                            <Box sx={{ display: 'flex', alignItems: 'center', gap: 2, flexWrap: 'wrap' }}>
+                                <Box sx={{ display: 'flex', gap: 1, flexWrap: 'wrap' }}>
+                                    {themeColorPresets.map((preset) => (
+                                        <Tooltip key={preset.color} title={preset.name}>
+                                            <Box
+                                                onClick={() => handleSettingChange('customThemeColor', preset.color)}
+                                                sx={getColorPresetSx(preset.color)}
+                                            />
+                                        </Tooltip>
+                                    ))}
+                                </Box>
 
-                                    {/* 自定义颜色选择器 */}
-                                    <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-                                        <Typography variant="body2" color="text.secondary">
-                                            {t('settings.customColor')}
-                                        </Typography>
-                                        <TextField
-                                            type="color"
-                                            value={settings.customThemeColor}
-                                            onChange={(e) => handleSettingChange('customThemeColor', e.target.value)}
-                                            size="small"
-                                            sx={{ width: 60 }}
-                                        />
-                                    </Box>
+                                <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+                                    <Typography variant="body2" color="text.secondary">
+                                        {t('settings.customColor')}
+                                    </Typography>
+                                    <TextField
+                                        type="color"
+                                        value={settings.customThemeColor}
+                                        onChange={(e) => handleSettingChange('customThemeColor', e.target.value)}
+                                        size="small"
+                                        sx={{ width: 60 }}
+                                    />
                                 </Box>
                             </Box>
-                        </ListItem>
+                        </SettingFullRow>
 
                         <Divider />
 
                         {/* 背景遮罩透明度 */}
-                        <ListItem>
-                            <Box sx={{ width: '100%' }}>
-                                <ListItemText
-                                    primary="背景遮罩"
-                                    secondary="调节内容区域的背景遮罩强度，适配壁纸/主题外观的显示效果"
-                                    sx={{ mb: 2 }}
-                                />
-                                <Box sx={{ display: 'flex', gap: 1, flexWrap: 'wrap' }}>
-                                    {[
-                                        { value: 'none', label: '无遮罩', desc: '完全透明' },
-                                        { value: 'light', label: '轻度', desc: '微弱遮罩' },
-                                        { value: 'medium', label: '中度', desc: '平衡效果' },
-                                        { value: 'heavy', label: '重度', desc: '强遮罩' }
-                                    ].map((option) => (
-                                        <Chip
-                                            key={option.value}
-                                            label={option.label}
-                                            variant={settings.maskOpacity === option.value ? 'filled' : 'outlined'}
-                                            color={settings.maskOpacity === option.value ? 'primary' : 'default'}
-                                            onClick={() => handleSettingChange('maskOpacity', option.value)}
-                                            sx={{
-                                                minWidth: 80,
-                                                '&:hover': {
-                                                    transform: 'scale(1.02)'
-                                                }
-                                            }}
-                                        />
-                                    ))}
-                                </Box>
+                        <SettingFullRow>
+                            <ListItemText
+                                primary="背景遮罩"
+                                secondary="调节内容区域的背景遮罩强度"
+                                sx={{ mb: 2 }}
+                            />
+                            <Box sx={{ display: 'flex', gap: 1, flexWrap: 'wrap' }}>
+                                {maskOpacityOptions.map((option) => (
+                                    <Chip
+                                        key={option.value}
+                                        label={option.label}
+                                        variant={settings.maskOpacity === option.value ? 'filled' : 'outlined'}
+                                        color={settings.maskOpacity === option.value ? 'primary' : 'default'}
+                                        onClick={() => handleSettingChange('maskOpacity', option.value)}
+                                        sx={{ minWidth: 80 }}
+                                    />
+                                ))}
                             </Box>
-                        </ListItem>
+                        </SettingFullRow>
 
                         <Divider />
 
-                        <ListItem>
-                            <ListItemText
-                                primary="圣诞模式"
-                                secondary="来点惊喜如何？（不可与主题外观插件同时开启）"
-                            />
-                            <ListItemSecondaryAction>
+                        <SettingRow
+                            primary="圣诞模式"
+                            secondary="来点惊喜如何？（不可与主题外观插件同时开启）"
+                            action={(
                                 <Switch
                                     checked={settings.christmasMode || false}
                                     onChange={(e) => handleSettingChange('christmasMode', e.target.checked)}
                                 />
-                            </ListItemSecondaryAction>
-                        </ListItem>
+                            )}
+                        />
 
                         <Divider />
 
-                        <ListItem>
-                            <ListItemText
-                                primary={t('settings.titleBarStyle')}
-                                secondary={t('settings.titleBarStyleDesc')}
-                            />
-                            <ListItemSecondaryAction>
-                                <Box sx={{ display: 'flex', gap: 1 }}>
-                                    <Chip
-                                        label={t('settings.titleBarMac')}
-                                        variant={titleBarStyle === 'mac' ? 'filled' : 'outlined'}
-                                        onClick={() => {
-                                            setTitleBarStyle('mac');
-                                            handleSettingChange('titleBarStyle', 'mac');
-                                        }}
-                                        size="small"
-                                    />
-                                    <Chip
-                                        label={t('settings.titleBarWindows')}
-                                        variant={titleBarStyle === 'windows' ? 'filled' : 'outlined'}
-                                        onClick={() => {
-                                            setTitleBarStyle('windows');
-                                            handleSettingChange('titleBarStyle', 'windows');
-                                        }}
-                                        size="small"
-                                    />
+                        <SettingRow
+                            primary={t('settings.titleBarStyle')}
+                            secondary={t('settings.titleBarStyleDesc')}
+                            action={(
+                                <Box sx={chipRowSx}>
+                                    {titleBarOptions.map((opt) => (
+                                        <Chip
+                                            key={opt.value}
+                                            label={opt.label}
+                                            variant={titleBarStyle === opt.value ? 'filled' : 'outlined'}
+                                            onClick={() => {
+                                                setTitleBarStyle(opt.value);
+                                                handleSettingChange('titleBarStyle', opt.value);
+                                            }}
+                                            size="small"
+                                        />
+                                    ))}
                                 </Box>
-                            </ListItemSecondaryAction>
-                        </ListItem>
+                            )}
+                        />
 
                     </List>
                 </TabPanel>
@@ -780,40 +785,31 @@ const Settings = () => {
                         </Button>
                     </Box>
 
-                    {Object.entries(SHORTCUT_CATEGORIES).map(([categoryKey, category]) => {
-                        // 确保shortcuts不为空，如果为空则使用默认配置
+                    {(() => {
                         const currentShortcuts = shortcuts && Object.keys(shortcuts).length > 0 ? shortcuts : DEFAULT_SHORTCUTS;
-                        const categoryShortcuts = Object.entries(currentShortcuts).filter(
-                            ([id, config]) => config.category === categoryKey
-                        );
+                        const grouped = getShortcutsByCategory(currentShortcuts);
 
-                        if (categoryShortcuts.length === 0) return null;
+                        return Object.entries(SHORTCUT_CATEGORIES).map(([categoryKey, category]) => {
+                            const categoryShortcuts = grouped[categoryKey] || [];
+                            if (categoryShortcuts.length === 0) return null;
 
-                        return (
-                            <Box key={categoryKey} sx={{ mb: 3 }}>
-                                <Typography variant="subtitle2" sx={{ mb: 1.5, fontWeight: 700 }}>
-                                    {category.name}
-                                </Typography>
-                                <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mb: 2 }}>
-                                    {category.description}
-                                </Typography>
+                            return (
+                                <Box key={categoryKey} sx={{ mb: 3 }}>
+                                    <Typography variant="subtitle2" sx={{ mb: 1.5, fontWeight: 700 }}>
+                                        {category.name}
+                                    </Typography>
+                                    <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mb: 2 }}>
+                                        {category.description}
+                                    </Typography>
 
-                                <List>
-                                    {categoryShortcuts.map(([shortcutId, config], index) => (
-                                        <React.Fragment key={shortcutId}>
-                                            <ListItem sx={{ px: 0 }}>
+                                    <List>
+                                        {categoryShortcuts.map((config, index) => (
+                                            <ListItem key={config.id} sx={{ px: 0 }} divider={index < categoryShortcuts.length - 1}>
                                                 <Box sx={{ flex: 1 }}>
-                                                    <ListItemText
-                                                        primary={config.name}
-                                                        secondary={config.description}
-                                                    />
-                                                    {shortcutConflicts[shortcutId] && (
-                                                        <Alert
-                                                            severity="warning"
-                                                            sx={{ mt: 1, py: 0.5 }}
-                                                            icon={<WarningIcon />}
-                                                        >
-                                                            {t('settings.shortcutConflict', { name: shortcutConflicts[shortcutId][0].name })}
+                                                    <ListItemText primary={config.name} secondary={config.description} />
+                                                    {shortcutConflicts[config.id] && (
+                                                        <Alert severity="warning" sx={{ mt: 1, py: 0.5 }} icon={<WarningIcon />}>
+                                                            {t('settings.shortcutConflict', { name: shortcutConflicts[config.id][0].name })}
                                                         </Alert>
                                                     )}
                                                 </Box>
@@ -821,23 +817,20 @@ const Settings = () => {
                                                     <ShortcutInput
                                                         value={config.currentKey}
                                                         defaultValue={config.defaultKey}
-                                                        onChange={(newKey) => handleShortcutChange(shortcutId, newKey)}
-                                                        onValidationChange={(isValid) => {
-                                                            // 可以在这里处理验证状态
-                                                        }}
+                                                        onChange={(newKey) => handleShortcutChange(config.id, newKey)}
+                                                        onValidationChange={() => {}}
                                                         disabled={false}
                                                         label=""
                                                         placeholder={t('settings.clickToSetShortcut')}
                                                     />
                                                 </Box>
                                             </ListItem>
-                                            {index < categoryShortcuts.length - 1 && <Divider />}
-                                        </React.Fragment>
-                                    ))}
-                                </List>
-                            </Box>
-                        );
-                    })}
+                                        ))}
+                                    </List>
+                                </Box>
+                            );
+                        });
+                    })()}
                 </TabPanel>
 
                 {/* AI 功能设置 */}
@@ -867,13 +860,24 @@ const Settings = () => {
 
                 {/* 数据管理 */}
                 <TabPanel value={settingsTabValue} index={8}>
+                    <Box sx={{ mb: 4 }}>
+                        <Typography variant="h6" gutterBottom sx={{ mb: 2 }}>
+                            Obsidian 导入导出
+                        </Typography>
+                        <Typography variant="body2" color="text.secondary" sx={{ mb: 3 }}>
+                            从 Obsidian 导入笔记或导出笔记到 Obsidian 格式(.md)
+
+                        </Typography>
+                        <ObsidianImportExport />
+                    </Box>
+
+                    <Divider sx={{ my: 4 }} />
+
                     <List>
-                        <ListItem>
-                            <ListItemText
-                                primary={t('settings.importLegacyData')}
-                                secondary={t('settings.importLegacyDataDesc')}
-                            />
-                            <ListItemSecondaryAction>
+                        <SettingRow
+                            primary={t('settings.importLegacyData')}
+                            secondary={t('settings.importLegacyDataDesc')}
+                            action={(
                                 <Button
                                     variant="contained"
                                     size="small"
@@ -882,36 +886,38 @@ const Settings = () => {
                                 >
                                     {t('settings.importData')}
                                 </Button>
-                            </ListItemSecondaryAction>
-                        </ListItem>
+                            )}
+                        />
 
                         <Divider />
 
-                        <ListItem>
-                            <ListItemText
-                                primary={t('settings.databaseLocation')}
-                                secondary="notes.db"
-                            />
-                            <ListItemSecondaryAction>
+                        <SettingRow
+                            primary={t('settings.databaseLocation')}
+                            secondary="notes.db"
+                            action={(
                                 <Button
                                     variant="outlined"
                                     size="small"
                                     startIcon={<Launch />}
-                                    onClick={() => {
-                                        if (window.electronAPI?.system) {
-                                            window.electronAPI.system.openDataFolder();
-                                        }
-                                    }}
+                                    onClick={() => window.electronAPI?.system?.openDataFolder?.()}
                                 >
                                     {t('settings.openFolder')}
                                 </Button>
-                            </ListItemSecondaryAction>
-                        </ListItem>
+                            )}
+                        />
                     </List>
                 </TabPanel>
 
-                {/* 关于 */}
+                {/* MCP 服务 */}
                 <TabPanel value={settingsTabValue} index={9}>
+                    <MCPSettings
+                        enabled={settings.mcpEnabled}
+                        onEnabledChange={(value) => handleSettingChange('mcpEnabled', value)}
+                    />
+                </TabPanel>
+
+                {/* 关于 */}
+                <TabPanel value={settingsTabValue} index={10}>
                     <Box sx={{ textAlign: 'center', py: 4 }}>
                         <Typography variant="h4" gutterBottom>
                             {t('about.appName')}
@@ -967,9 +973,9 @@ const Settings = () => {
             <Snackbar
                 open={snackbar.open}
                 autoHideDuration={3000}
-                onClose={() => setSnackbar(prev => ({ ...prev, open: false }))}
+                onClose={closeSnackbar}
             >
-                <Alert severity={snackbar.severity} onClose={() => setSnackbar(prev => ({ ...prev, open: false }))}>
+                <Alert severity={snackbar.severity} onClose={closeSnackbar}>
                     {snackbar.message}
                 </Alert>
             </Snackbar>

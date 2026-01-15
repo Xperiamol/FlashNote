@@ -1,10 +1,34 @@
 const Database = require('better-sqlite3');
 const path = require('path');
 const fs = require('fs');
-const { app } = require('electron');
+
+// 尝试加载 Electron，如果失败则使用 null（独立运行模式）
+let app = null;
+try {
+  const electron = require('electron');
+  app = electron.app;
+} catch (e) {
+  // 独立运行模式（如 MCP Server），不依赖 Electron
+}
 
 // ========== 数据库日志工具 ==========
-const dbLogFile = path.join(app.getPath('userData'), 'startup-debug.log');
+const getUserDataPath = () => {
+  if (app) {
+    return app.getPath('userData');
+  }
+  // 独立运行模式：使用标准路径
+  const platform = process.platform;
+  const homeDir = process.env.HOME || process.env.USERPROFILE;
+  if (platform === 'win32') {
+    return path.join(process.env.APPDATA || homeDir, 'flashnote');
+  } else if (platform === 'darwin') {
+    return path.join(homeDir, 'Library', 'Application Support', 'flashnote');
+  } else {
+    return path.join(homeDir, '.config', 'flashnote');
+  }
+};
+
+const dbLogFile = path.join(getUserDataPath(), 'startup-debug.log');
 function dbLog(...args) {
   const timestamp = new Date().toISOString();
   const message = `[${timestamp}] [DB] ${args.map(a => typeof a === 'object' ? JSON.stringify(a) : a).join(' ')}\n`;
@@ -20,11 +44,12 @@ class DatabaseManager {
 
   /**
    * 初始化数据库连接
+   * @param {string} customDbPath - 自定义数据库路径（可选，用于独立运行）
    */
-  async initialize() {
+  async initialize(customDbPath = null) {
     try {
       // 获取用户数据目录
-      const userDataPath = app.getPath('userData');
+      const userDataPath = app ? app.getPath('userData') : getUserDataPath();
       const dbDir = path.join(userDataPath, 'database');
       
       dbLog('用户数据目录:', userDataPath);
@@ -35,7 +60,7 @@ class DatabaseManager {
         dbLog('创建数据库目录:', dbDir);
       }
       
-      this.dbPath = path.join(dbDir, 'flashnote.db');
+      this.dbPath = customDbPath || path.join(dbDir, 'flashnote.db');
       const dbExists = fs.existsSync(this.dbPath);
       dbLog('数据库路径:', this.dbPath, '是否存在:', dbExists);
       
@@ -248,7 +273,8 @@ class DatabaseManager {
       { key: 'show_line_numbers', value: 'true', type: 'boolean', description: '显示行号' },
       { key: 'word_wrap', value: 'true', type: 'boolean', description: '自动换行' },
       { key: 'spell_check', value: 'false', type: 'boolean', description: '拼写检查' },
-      { key: 'userAvatar', value: '', type: 'string', description: '用户头像' }
+      { key: 'userAvatar', value: '', type: 'string', description: '用户头像' },
+      { key: 'mcpEnabled', value: 'false', type: 'boolean', description: 'MCP服务开关' }
     ];
 
     const insertSetting = this.db.prepare(`
@@ -957,7 +983,7 @@ class DatabaseManager {
         this.db.exec('CREATE INDEX IF NOT EXISTS idx_changes_created_at ON changes(created_at DESC)');
         
         // 删除同步标记，触发全量同步
-        const syncMarkerPath = path.join(app.getPath('userData'), 'sync-initialized.marker');
+        const syncMarkerPath = path.join(getUserDataPath(), 'sync-initialized.marker');
         if (fs.existsSync(syncMarkerPath)) {
           fs.unlinkSync(syncMarkerPath);
           console.log('[迁移] 已删除同步标记，下次将触发全量同步');

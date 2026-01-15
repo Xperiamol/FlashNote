@@ -466,6 +466,20 @@ const zhCN = {
     syncedHoursAgo: '{hours} 小时前同步',
     lastSync: '最后同步',
     autoSyncEnabled: '自动同步已启用',
+    // 同步状态指示器
+    notes: '笔记',
+    images: '图片',
+    settings: '设置',
+    todos: '待办',
+    nutcloud: '坚果云',
+    ready: '就绪',
+    error: '异常',
+    allReady: '全部就绪',
+    syncNow: '立即同步',
+    syncStatus: '同步状态',
+    waitingFirstSync: '等待首次同步',
+    noModulesEnabled: '未启用任何同步模块',
+    syncNotEnabled: '同步未启用',
     conflictsDetected: '检测到 {count} 个同步冲突，需要手动解决',
     viewConflicts: '查看冲突',
     accountManagement: '账户管理',
@@ -623,10 +637,10 @@ const zhCN = {
   },
   about: {
     appName: 'FlashNote',
-    description: '一个简洁高效的笔记应用',
-    version: '版本 2.3.0 Xmas Update',
+    description: '一个简洁高效的记录应用',
+    version: '版本 2.3.1',
     githubRepo: 'GitHub 仓库',
-    copyright: '© 2025 FlashNote. All rights reserved.'
+    copyright: '© 2026 FlashNote. All rights reserved.'
   },
   dialog: {
     importData: '导入数据',

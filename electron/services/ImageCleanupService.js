@@ -6,13 +6,38 @@
 
 const fs = require('fs');
 const path = require('path');
-const { app } = require('electron');
 const DatabaseManager = require('../dao/DatabaseManager');
+
+// 尝试加载 Electron，如果失败则使用 null（独立运行模式）
+let app = null;
+try {
+  const electron = require('electron');
+  app = electron.app;
+} catch (e) {
+  // 独立运行模式（如 MCP Server），不依赖 Electron
+}
+
+// 获取用户数据目录
+const getUserDataPath = () => {
+  if (app) {
+    return app.getPath('userData');
+  }
+  // 独立运行模式：使用标准路径
+  const platform = process.platform;
+  const homeDir = process.env.HOME || process.env.USERPROFILE;
+  if (platform === 'win32') {
+    return path.join(process.env.APPDATA || homeDir, 'flashnote');
+  } else if (platform === 'darwin') {
+    return path.join(homeDir, 'Library', 'Application Support', 'flashnote');
+  } else {
+    return path.join(homeDir, '.config', 'flashnote');
+  }
+};
 
 class ImageCleanupService {
   constructor() {
     this.db = null;
-    this.imagesDir = path.join(app.getPath('userData'), 'images');
+    this.imagesDir = path.join(getUserDataPath(), 'images');
     this.whiteboardDir = path.join(this.imagesDir, 'whiteboard');
   }
 

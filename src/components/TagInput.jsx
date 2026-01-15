@@ -15,6 +15,7 @@ import {
   Tooltip,
   Divider
 } from '@mui/material';
+import { scrollbar } from '../styles/commonStyles';
 import { Tag as TagIcon, Clear as ClearIcon, AutoAwesome as AiIcon, KeyboardArrowRight as RightArrowIcon, KeyboardArrowLeft as LeftArrowIcon } from '@mui/icons-material';
 import { parseTags, formatTags, validateTags, getTagColor } from '../utils/tagUtils';
 import { usePluginExtensions } from '../hooks/usePluginExtensions';
@@ -314,7 +315,7 @@ const TagInput = ({
       <Box sx={{ position: 'relative', ...sx }}>
         {/* 非内嵌模式：标签显示在输入框上方 */}
         {!inline && tags.length > 0 && (
-          <Box sx={{ mb: 1, display: 'flex', gap: 0.5, overflowX: 'auto' }}>
+          <Box sx={{ mb: 1, display: 'flex', gap: 0.5, overflowX: 'auto', ...scrollbar.auto }}>
             {tags.map((tag, index) => (
               <Chip
                 key={`${tag}-${index}`}
@@ -362,27 +363,15 @@ const TagInput = ({
                 <InputAdornment position="start" sx={{ maxWidth: 'none', flex: 1 }}>
                   <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5, width: '100%' }}>
                     <TagIcon sx={{ color: 'action.active', mr: 0.5, flexShrink: 0 }} />
-                    <Box 
-                      sx={{ 
-                        display: 'flex', 
-                        gap: 0.5, 
+                    <Box
+                      sx={{
+                        display: 'flex',
+                        gap: 0.5,
                         overflowX: 'auto',
+                        overflowY: 'hidden',
                         flex: 1, // 占用所有剩余空间
                         minWidth: 0, // 允许缩小到0
-                        scrollbarWidth: 'thin',
-                        '&::-webkit-scrollbar': {
-                          height: '4px'
-                        },
-                        '&::-webkit-scrollbar-track': {
-                          background: 'transparent'
-                        },
-                        '&::-webkit-scrollbar-thumb': {
-                          background: 'rgba(0,0,0,0.2)',
-                          borderRadius: '2px'
-                        },
-                        '&::-webkit-scrollbar-thumb:hover': {
-                          background: 'rgba(0,0,0,0.3)'
-                        }
+                        ...scrollbar.auto
                       }}
                     >
                       {tags.map((tag, index) => (

@@ -124,6 +124,7 @@ const enUS = {
     dragImageHere: 'Drag image here'
   },
   settings: {
+    general: 'General',
     appearance: 'Appearance',
     shortcuts: 'Shortcuts',
     ai: 'AI',
@@ -453,6 +454,20 @@ const enUS = {
     syncedHoursAgo: 'Synced {hours} hours ago',
     lastSync: 'Last sync',
     autoSyncEnabled: 'Auto sync enabled',
+    // Sync status indicator
+    notes: 'Notes',
+    images: 'Images',
+    settings: 'Settings',
+    todos: 'Todos',
+    nutcloud: 'Nutcloud',
+    ready: 'Ready',
+    error: 'Error',
+    allReady: 'All Ready',
+    syncNow: 'Sync Now',
+    syncStatus: 'Sync Status',
+    waitingFirstSync: 'Waiting for first sync',
+    noModulesEnabled: 'No sync modules enabled',
+    syncNotEnabled: 'Sync not enabled',
     conflictsDetected: 'Detected {count} sync conflicts that need manual resolution',
     viewConflicts: 'View Conflicts',
     accountManagement: 'Account Management',
@@ -611,9 +626,9 @@ const enUS = {
   about: {
     appName: 'FlashNote',
     description: 'A simple and efficient note-taking app',
-    version: 'Version 2.3.0 Xmas Update',
+    version: 'Version 2.3.1',
     githubRepo: 'GitHub Repository',
-    copyright: '© 2025 FlashNote. All rights reserved.'
+    copyright: '© 2026 FlashNote. All rights reserved.'
   },
   dialog: {
     importData: 'Import Data',

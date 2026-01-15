@@ -2,8 +2,21 @@ const TodoDAO = require('../dao/TodoDAO');
 const TagService = require('./TagService');
 const RepeatUtils = require('../utils/repeatUtils');
 const TimeZoneUtils = require('../utils/timeZoneUtils');
-const { ipcMain } = require('electron');
 const EventEmitter = require('events');
+
+// 尝试加载 Electron IPC，如果失败则使用 mock（独立运行模式）
+let ipcMain = null;
+try {
+  const electron = require('electron');
+  ipcMain = electron.ipcMain;
+} catch (e) {
+  // 独立运行模式（如 MCP Server），使用 mock
+  ipcMain = {
+    handle: () => {},
+    on: () => {},
+    removeHandler: () => {}
+  };
+}
 
 class TodoService extends EventEmitter {
   constructor() {

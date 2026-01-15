@@ -113,93 +113,45 @@ class GoogleCalendarService {
   }
 
   /**
+   * 创建统一的 IPC handler（带错误处理）
+   */
+  createHandler(methodName, errorMsg, wrapData = true) {
+    return async (event, ...args) => {
+      try {
+        const result = await this[methodName](...args);
+        return wrapData && result !== undefined ? { success: true, data: result } : { success: true };
+      } catch (error) {
+        console.error(`[GoogleCalendar] ${errorMsg}:`, error);
+        return { success: false, error: error.message };
+      }
+    };
+  }
+
+  /**
    * 设置 IPC 处理器
    */
   setupIpcHandlers() {
-    // 开始 OAuth 授权流程 (使用本地服务器自动接收)
-    ipcMain.handle('google-calendar:start-auth', async (event) => {
-      try {
-        const result = await this.startOAuthFlowWithLocalServer();
-        return { success: true, data: result };
-      } catch (error) {
-        console.error('[GoogleCalendar] 启动授权失败:', error);
-        return { success: false, error: error.message };
-      }
+    const handlers = [
+      ['google-calendar:start-auth', 'startOAuthFlowWithLocalServer', '启动授权失败'],
+      ['google-calendar:complete-auth', 'completeOAuthFlow', '完成授权失败'],
+      ['google-calendar:save-config', 'saveConfig', '保存配置失败', false],
+      ['google-calendar:get-config', 'getConfig', '获取配置失败'],
+      ['google-calendar:sync', 'syncNow', '同步失败'],
+      ['google-calendar:get-status', 'getSyncStatus', '获取状态失败'],
+      ['google-calendar:disconnect', 'disconnect', '断开连接失败', false]
+    ];
+
+    handlers.forEach(([channel, method, errorMsg, wrapData = true]) => {
+      ipcMain.handle(channel, this.createHandler(method, errorMsg, wrapData));
     });
 
-    // 【已弃用】手动输入授权码 (保留以兼容旧版)
-    ipcMain.handle('google-calendar:complete-auth', async (event, authCode) => {
-      try {
-        const result = await this.completeOAuthFlow(authCode);
-        return { success: true, data: result };
-      } catch (error) {
-        console.error('[GoogleCalendar] 完成授权失败:', error);
-        return { success: false, error: error.message };
-      }
-    });
-
-    // 获取日历列表
+    // 获取日历列表（特殊处理：需要包装成 { calendars } 格式）
     ipcMain.handle('google-calendar:list-calendars', async () => {
       try {
         const calendars = await this.listCalendars();
         return { success: true, data: { calendars } };
       } catch (error) {
         console.error('[GoogleCalendar] 获取日历列表失败:', error);
-        return { success: false, error: error.message };
-      }
-    });
-
-    // 保存配置
-    ipcMain.handle('google-calendar:save-config', async (event, config) => {
-      try {
-        await this.saveConfig(config);
-        return { success: true };
-      } catch (error) {
-        console.error('[GoogleCalendar] 保存配置失败:', error);
-        return { success: false, error: error.message };
-      }
-    });
-
-    // 获取配置
-    ipcMain.handle('google-calendar:get-config', async () => {
-      try {
-        const config = await this.getConfig();
-        return { success: true, data: config };
-      } catch (error) {
-        console.error('[GoogleCalendar] 获取配置失败:', error);
-        return { success: false, error: error.message };
-      }
-    });
-
-    // 手动同步
-    ipcMain.handle('google-calendar:sync', async () => {
-      try {
-        const result = await this.syncNow();
-        return { success: true, data: result };
-      } catch (error) {
-        console.error('[GoogleCalendar] 同步失败:', error);
-        return { success: false, error: error.message };
-      }
-    });
-
-    // 获取同步状态
-    ipcMain.handle('google-calendar:get-status', async () => {
-      try {
-        const status = await this.getSyncStatus();
-        return { success: true, data: status };
-      } catch (error) {
-        console.error('[GoogleCalendar] 获取状态失败:', error);
-        return { success: false, error: error.message };
-      }
-    });
-
-    // 断开连接
-    ipcMain.handle('google-calendar:disconnect', async () => {
-      try {
-        await this.disconnect();
-        return { success: true };
-      } catch (error) {
-        console.error('[GoogleCalendar] 断开连接失败:', error);
         return { success: false, error: error.message };
       }
     });
@@ -724,6 +676,72 @@ class GoogleCalendarService {
   }
 
   /**
+   * 将扩展字段编码到 description（元数据格式）
+   * @param {object} todo - 待办对象
+   * @returns {string} 编码后的 description
+   * @private
+   */
+  _encodeDescription(todo) {
+    const metadata = [];
+    
+    // 编码四象限属性
+    if (todo.is_important) metadata.push('[重要]');
+    if (todo.is_urgent) metadata.push('[紧急]');
+    
+    // 编码标签
+    if (todo.tags && todo.tags.trim()) {
+      metadata.push(`[标签:${todo.tags}]`);
+    }
+    
+    // 组合：元数据 + 原始描述
+    const parts = [];
+    if (metadata.length > 0) parts.push(metadata.join(''));
+    if (todo.description && todo.description.trim()) parts.push(todo.description);
+    
+    return parts.join('\n');
+  }
+
+  /**
+   * 从 description 解码扩展字段
+   * @param {string} description - 云端描述
+   * @returns {object} { description, isImportant, isUrgent, tags }
+   * @private
+   */
+  _decodeDescription(description) {
+    if (!description || !description.trim()) {
+      return { description: '', isImportant: 0, isUrgent: 0, tags: '' };
+    }
+
+    let text = description;
+    let isImportant = 0;
+    let isUrgent = 0;
+    let tags = '';
+
+    // 解析元数据标记（必须在开头）
+    const metadataPattern = /^((?:\[(重要|紧急|标签:[^\]]+)\])+)\n?/;
+    const match = text.match(metadataPattern);
+    
+    if (match) {
+      const metadataStr = match[1];
+      text = text.slice(match[0].length); // 移除元数据部分
+      
+      // 解析各个标记
+      if (metadataStr.includes('[重要]')) isImportant = 1;
+      if (metadataStr.includes('[紧急]')) isUrgent = 1;
+      
+      const tagsMatch = metadataStr.match(/\[标签:([^\]]+)\]/);
+      if (tagsMatch) tags = tagsMatch[1];
+    }
+
+    return {
+      description: text.trim(),
+      isImportant,
+      isUrgent,
+      tags
+    };
+  }
+
+  /**
    * 将待办转换为 Google Calendar 事件格式
    * @param {object} todo - 待办对象
    * @returns {object} Google Calendar 事件对象
@@ -732,7 +750,7 @@ class GoogleCalendarService {
   _convertTodoToEvent(todo) {
     const event = {
       summary: todo.content,
-      description: todo.description || '',
+      description: this._encodeDescription(todo),
       status: todo.is_completed ? 'cancelled' : 'confirmed',
     };
 
@@ -1207,20 +1225,21 @@ class GoogleCalendarService {
           // 解析事件时间和类型
           const { dueDate, endDate, hasTime, itemType } = this._parseEventTime(event);
 
+          // 解码 description 中的元数据
+          const decoded = this._decodeDescription(event.description);
+
           const todoData = {
             content: event.summary || '无标题事件',
+            description: decoded.description,
             due_date: dueDate,
             end_date: endDate,
             has_time: hasTime,
             item_type: itemType,
             is_completed: event.status === 'cancelled' ? 1 : 0,
-            // 不设置is_important和is_urgent，让它们保持本地值或默认值
+            is_important: decoded.isImportant,
+            is_urgent: decoded.isUrgent,
+            tags: decoded.tags
           };
-
-          // 只有当云端有实际内容时才更新 description，避免空值覆盖本地
-          if (event.description && event.description.trim()) {
-            todoData.description = event.description;
-          }
 
           if (localTodo) {
             // 智能冲突处理：比较更新时间

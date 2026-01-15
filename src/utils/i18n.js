@@ -1,6 +1,12 @@
 import zhCN from '../locales/zh-CN';
 import enUS from '../locales/en-US';
 
+// 预声明 date-fns locale，使用显式映射避免包导出限制导致的 glob 报错
+const DATE_FNS_LOCALE_MODULES = {
+  'zh-CN': () => import('date-fns/locale/zh-CN'),
+  'en-US': () => import('date-fns/locale/en-US')
+};
+
 // 支持的语言列表
 export const SUPPORTED_LANGUAGES = [
   { code: 'zh-CN', name: '简体中文', nativeName: '简体中文' },
@@ -78,8 +84,14 @@ export function t(key, params = {}) {
   if (params.returnObjects && (Array.isArray(value) || typeof value === 'object')) {
     return value;
   }
+
+  // 如果值未找到（undefined 或 null），记录键未找到并返回键本身
+  if (value === undefined || value === null) {
+    console.warn(`Translation key not found: ${key}`);
+    return key;
+  }
   
-  // 如果最终值不是字符串，返回键本身
+  // 如果最终值不是字符串，记录并返回键本身
   if (typeof value !== 'string') {
     console.warn(`Translation value is not a string: ${key}`);
     return key;
@@ -118,10 +130,10 @@ export function useTranslation() {
   };
 }
 
-// 导出date-fns的语言包映射
+// date-fns 语言包 key（与路径名一致）
 export const DATE_FNS_LOCALES = {
-  'zh-CN': 'zhCN',
-  'en-US': 'enUS'
+  'zh-CN': 'zh-CN',
+  'en-US': 'en-US'
 };
 
 /**
@@ -130,17 +142,21 @@ export const DATE_FNS_LOCALES = {
  */
 export async function getDateFnsLocale(language = currentLanguage) {
   const localeKey = DATE_FNS_LOCALES[language] || DATE_FNS_LOCALES[DEFAULT_LANGUAGE];
-  
-  try {
-    // 动态导入date-fns的locale
-    const localeModule = await import(`date-fns/locale/${localeKey}/index.js`);
-    return localeModule[localeKey];
-  } catch (error) {
-    console.error(`Failed to load date-fns locale for ${language}:`, error);
-    // 返回默认的中文locale
-    const { zhCN } = await import('date-fns/locale');
-    return zhCN;
+  const loader = DATE_FNS_LOCALE_MODULES[localeKey];
+
+  if (loader) {
+    const mod = await loader();
+    return mod.default || mod[localeKey] || Object.values(mod)[0];
   }
+
+  // 回退到中文
+  const fallback = DATE_FNS_LOCALE_MODULES['zh-CN'];
+  if (fallback) {
+    const mod = await fallback();
+    return mod.default || mod['zh-CN'] || Object.values(mod)[0];
+  }
+
+  return null;
 }
 
 export default {

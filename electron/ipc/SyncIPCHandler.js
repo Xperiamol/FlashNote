@@ -6,6 +6,30 @@
 
 const { ipcMain, BrowserWindow } = require('electron');
 const { getInstance: getV3SyncService } = require('../services/sync/V3SyncService');
+const path = require('path');
+
+// 获取用户数据路径
+const getUserDataPath = () => {
+  let app = null;
+  try {
+    app = require('electron').app;
+  } catch (e) {
+    // Standalone mode
+  }
+  
+  if (app) return app.getPath('userData');
+  
+  const platform = process.platform;
+  const homeDir = process.env.HOME || process.env.USERPROFILE;
+  
+  if (platform === 'win32') {
+    return path.join(process.env.APPDATA || homeDir, 'flashnote');
+  } else if (platform === 'darwin') {
+    return path.join(homeDir, 'Library', 'Application Support', 'flashnote');
+  } else {
+    return path.join(homeDir, '.config', 'flashnote');
+  }
+}
 
 class SyncIPCHandler {
   constructor() {
@@ -78,9 +102,16 @@ class SyncIPCHandler {
 
     // 启用同步（切换服务）
     this.safeHandle('sync:switch-service', async (event, serviceName, config) => {
+      // 如果没有传密码，使用已保存的密码
+      let password = config.password;
+      if (!password && this.v3SyncService.config?.credentials?.password) {
+        password = this.v3SyncService.config.credentials.password;
+        console.log('[SyncIPCHandler] 使用已保存的密码');
+      }
+      
       await this.v3SyncService.setCredentials(
         config.username,
-        config.password,
+        password,
         config.baseUrl
       );
       await this.v3SyncService.enable();
@@ -90,6 +121,26 @@ class SyncIPCHandler {
     // 禁用同步
     this.safeHandle('sync:disable', async () => {
       if (this.v3SyncService.isEnabled) {
+        await this.v3SyncService.disable();
+      }
+      return { success: true };
+    });
+
+    // 启用特定类别的同步
+    this.safeHandle('sync:enable-category', async (event, category) => {
+      this.v3SyncService.enableCategory(category);
+      // 如果服务未启用，启用它
+      if (!this.v3SyncService.isEnabled && this.v3SyncService.config?.credentials?.username) {
+        await this.v3SyncService.enable();
+      }
+      return { success: true };
+    });
+
+    // 禁用特定类别的同步
+    this.safeHandle('sync:disable-category', async (event, category) => {
+      this.v3SyncService.disableCategory(category);
+      // 如果所有类别都禁用了，禁用服务
+      if (this.v3SyncService.config?.syncCategories?.length === 0 && this.v3SyncService.isEnabled) {
         await this.v3SyncService.disable();
       }
       return { success: true };
@@ -170,9 +221,7 @@ class SyncIPCHandler {
       }
 
       try {
-        const path = require('path');
-        const { app } = require('electron');
-        const localPath = path.join(app.getPath('userData'), relativePath);
+        const localPath = path.join(getUserDataPath(), relativePath);
 
         await this.v3SyncService.downloadImage(relativePath, localPath);
         return { success: true, localPath };
@@ -237,15 +286,6 @@ class SyncIPCHandler {
       setTimeout(() => {
         if (this.pendingConflicts.has(conflictId)) {
           this.pendingConflicts.delete(conflictId);
-
-          // 通知前端冲突已超时，关闭对话框
-          const allWindows = BrowserWindow.getAllWindows();
-          allWindows.forEach(win => {
-            if (win && !win.isDestroyed()) {
-              win.webContents.send('sync:conflict-timeout', { conflictId });
-            }
-          });
-
           reject(new Error('冲突解决超时'));
         }
       }, 5 * 60 * 1000);
@@ -296,26 +336,6 @@ class SyncIPCHandler {
       windows.forEach(win => {
         if (win && !win.isDestroyed()) {
           win.webContents.send('sync:error', { message: error.message });
-        }
-      });
-    });
-
-    // 转发图片上传失败事件
-    this.v3SyncService.on('imageUploadFailed', (data) => {
-      const windows = BrowserWindow.getAllWindows();
-      windows.forEach(win => {
-        if (win && !win.isDestroyed()) {
-          win.webContents.send('sync:image-upload-failed', data);
-        }
-      });
-    });
-
-    // 转发图片下载失败事件
-    this.v3SyncService.on('imageDownloadFailed', (data) => {
-      const windows = BrowserWindow.getAllWindows();
-      windows.forEach(win => {
-        if (win && !win.isDestroyed()) {
-          win.webContents.send('sync:image-download-failed', data);
         }
       });
     });

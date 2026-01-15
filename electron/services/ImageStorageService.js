@@ -1,7 +1,32 @@
 const fs = require('fs').promises;
 const path = require('path');
 const crypto = require('crypto');
-const { app } = require('electron');
+
+// 尝试加载 Electron，如果失败则使用 null（独立运行模式）
+let app = null;
+try {
+  const electron = require('electron');
+  app = electron.app;
+} catch (e) {
+  // 独立运行模式（如 MCP Server），不依赖 Electron
+}
+
+// 获取用户数据目录
+const getUserDataPath = () => {
+  if (app) {
+    return app.getPath('userData');
+  }
+  // 独立运行模式：使用标准路径
+  const platform = process.platform;
+  const homeDir = process.env.HOME || process.env.USERPROFILE;
+  if (platform === 'win32') {
+    return path.join(process.env.APPDATA || homeDir, 'flashnote');
+  } else if (platform === 'darwin') {
+    return path.join(homeDir, 'Library', 'Application Support', 'flashnote');
+  } else {
+    return path.join(homeDir, '.config', 'flashnote');
+  }
+};
 
 /**
  * 图片存储服务
@@ -11,7 +36,7 @@ const { app } = require('electron');
 class ImageStorageService {
   constructor() {
     // 图片存储目录
-    this.storageDir = path.join(app.getPath('userData'), 'images');
+    this.storageDir = path.join(getUserDataPath(), 'images');
     this.whiteboardDir = path.join(this.storageDir, 'whiteboard');
     this.initialized = false;
   }

@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import {
   Box,
   List,
@@ -122,10 +122,20 @@ const TodoList = ({ onTodoSelect, onViewModeChange, onShowCompletedChange, viewM
   const [anchorEl, setAnchorEl] = useState(null);
   const [selectedTodo, setSelectedTodo] = useState(null);
   const [filterBy, setFilterBy] = useState('all'); // all, urgent, important, normal, low
+  
+  // 添加ref防止重复加载
+  const isLoadingRef = useRef(false);
+  const todosRef = useRef([]);
+  const [isRefreshing, setIsRefreshing] = useState(false);
 
   // 新增筛选状态
   const [selectedTags, setSelectedTags] = useState([]);
   const [selectedPriorities, setSelectedPriorities] = useState([]);
+
+  // 保持 todos 的最新引用，供 loadTodos 判断是否已有数据
+  useEffect(() => {
+    todosRef.current = todos;
+  }, [todos]);
 
   // 双击完成相关状态
   const [pendingComplete, setPendingComplete] = useState(new Set());
@@ -138,14 +148,14 @@ const TodoList = ({ onTodoSelect, onViewModeChange, onShowCompletedChange, viewM
   const { search: searchTodos, isSearching } = useSearch({
     searchAPI: searchTodosAPI,
     onSearchResult: (results) => {
-      // 应用过滤和排序
+      // 直接设置搜索结果，不再应用过滤
       let filteredTodos = results;
 
       if (!showCompleted) {
         filteredTodos = filteredTodos.filter(todo => !todo.completed);
       }
 
-      setTodos(applyFiltersAndSort(filteredTodos));
+      setTodos(filteredTodos);
     },
     onError: (error) => {
       console.error('Todo search error:', error);
@@ -180,16 +190,28 @@ const TodoList = ({ onTodoSelect, onViewModeChange, onShowCompletedChange, viewM
     }
   })
 
-  // 定义loadTodos函数，确保在使用前初始化
-  const loadTodos = async () => {
-    // 如果使用外部数据，直接处理外部数据
-    if (isExternalData && externalTodos) {
+  // 定义loadTodos函数 - 将过滤排序逻辑内联，避免依赖循环
+  const loadTodos = useCallback(async () => {
+    // 防止重复加载
+    if (isLoadingRef.current) {
+      return;
+    }
+    
+    isLoadingRef.current = true;
+    // 如果已经有数据，避免切换到完整 loading UI，使用 isRefreshing 做背景刷新提示
+    const shouldShowLoading = !(todosRef.current && todosRef.current.length > 0);
+    if (shouldShowLoading) {
       setIsLoading(true);
-      try {
-        let filteredTodos = [...externalTodos];
-
-        // 映射数据字段（如果需要）
-        filteredTodos = filteredTodos.map(todo => ({
+    } else {
+      setIsRefreshing(true);
+    }
+    
+    try {
+      let rawTodos = [];
+      
+      // 如果使用外部数据，直接处理外部数据
+      if (isExternalData && externalTodos) {
+        rawTodos = [...externalTodos].map(todo => ({
           ...todo,
           completed: Boolean(todo.is_completed || todo.completed),
           title: todo.content || todo.title,
@@ -199,68 +221,88 @@ const TodoList = ({ onTodoSelect, onViewModeChange, onShowCompletedChange, viewM
             return Number.isFinite(focusSeconds) ? focusSeconds : 0;
           })()
         }));
-
-        // 根据完成状态筛选
-        if (!showCompleted) {
-          filteredTodos = filteredTodos.filter(todo => !todo.completed);
+      } else {
+        // 原有的数据加载逻辑
+        let result;
+        if (sortBy === 'priority') {
+          result = await fetchTodosByPriority();
+        } else if (sortBy === 'dueDate') {
+          result = await fetchTodosByDueDate();
+        } else {
+          result = await fetchTodosByCreatedAt();
         }
 
-        // 应用所有筛选和排序
-        setTodos(applyFiltersAndSort(filteredTodos));
-      } catch (error) {
-        console.error('处理外部待办事项数据失败:', error);
-        setTodos([]);
-      } finally {
-        setIsLoading(false);
-      }
-      return;
-    }
-
-    // 原有的数据加载逻辑
-    setIsLoading(true);
-    try {
-      let result;
-      if (sortBy === 'priority') {
-        result = await fetchTodosByPriority();
-      } else if (sortBy === 'dueDate') {
-        result = await fetchTodosByDueDate();
-      } else {
-        result = await fetchTodosByCreatedAt();
+        rawTodos = (result || []).map(todo => ({
+          ...todo,
+          completed: Boolean(todo.is_completed),
+          title: todo.content,
+          priority: getPriorityFromQuadrant(todo.is_important, todo.is_urgent),
+          focus_time_seconds: (() => {
+            const focusSeconds = Number(todo.focus_time_seconds ?? todo.focusSeconds ?? 0);
+            return Number.isFinite(focusSeconds) ? focusSeconds : 0;
+          })()
+        }));
       }
 
-      let filteredTodos = result || [];
-
-      // 映射数据字段
-      filteredTodos = filteredTodos.map(todo => ({
-        ...todo,
-        completed: Boolean(todo.is_completed),
-        title: todo.content,
-        priority: getPriorityFromQuadrant(todo.is_important, todo.is_urgent),
-        focus_time_seconds: (() => {
-          const focusSeconds = Number(todo.focus_time_seconds ?? todo.focusSeconds ?? 0);
-          return Number.isFinite(focusSeconds) ? focusSeconds : 0;
-        })()
-      }));
+      // 应用过滤和排序 - 内联逻辑
+      let filtered = rawTodos;
 
       // 根据完成状态筛选
       if (!showCompleted) {
-        filteredTodos = filteredTodos.filter(todo => !todo.completed);
+        filtered = filtered.filter(todo => !todo.completed);
       }
 
-      // 应用所有筛选和排序
-      setTodos(applyFiltersAndSort(filteredTodos));
+      // 按优先级过滤
+      if (filterBy !== 'all') {
+        filtered = filtered.filter(todo => todo.priority === filterBy);
+      }
+
+      // 按新的优先级筛选过滤
+      if (selectedPriorities.length > 0) {
+        filtered = filtered.filter(todo => selectedPriorities.includes(todo.priority));
+      }
+
+      // 按标签过滤
+      if (selectedTags.length > 0) {
+        filtered = filtered.filter(todo => {
+          if (!todo.tags) return false;
+          const todoTags = Array.isArray(todo.tags) ? todo.tags : todo.tags.split(',').map(tag => tag.trim());
+          return selectedTags.some(selectedTag => todoTags.includes(selectedTag));
+        });
+      }
+
+      // 排序
+      filtered.sort((a, b) => {
+        switch (sortBy) {
+          case 'priority':
+            return comparePriority(a, b);
+          case 'dueDate':
+            if (!a.due_date && !b.due_date) return 0;
+            if (!a.due_date) return 1;
+            if (!b.due_date) return -1;
+            return new Date(a.due_date) - new Date(b.due_date);
+          case 'createdAt':
+            return new Date(b.created_at) - new Date(a.created_at);
+          default:
+            return 0;
+        }
+      });
+
+      setTodos(filtered);
     } catch (error) {
       console.error('加载待办事项失败:', error);
       setTodos([]);
     } finally {
       setIsLoading(false);
+      setIsRefreshing(false);
+      isLoadingRef.current = false;
     }
-  };
+  }, [isExternalData, externalTodos, showCompleted, sortBy, filterBy, selectedPriorities, selectedTags, refreshTrigger]);
 
-  // 在loadTodos定义后添加相关的hooks和effects
+  // 统一的数据加载effect
   useEffect(() => {
     loadTodos();
-  }, [filterBy, sortBy, showCompleted, selectedTags, selectedPriorities, externalTodos, isExternalData]);
+  }, [loadTodos]);
 
   // 创建稳定的回调函数，避免无限循环
   const stableSearchFunction = useCallback((query) => {
@@ -284,50 +326,7 @@ const TodoList = ({ onTodoSelect, onViewModeChange, onShowCompletedChange, viewM
     if (refreshTrigger > 0) {
       loadTodos();
     }
-  }, [refreshTrigger]);
-
-  // 应用过滤和排序的辅助函数
-  const applyFiltersAndSort = (todoList) => {
-    let filtered = [...todoList];
-
-    // 按优先级过滤（保留原有逻辑）
-    if (filterBy !== 'all') {
-      filtered = filtered.filter(todo => todo.priority === filterBy);
-    }
-
-    // 按新的优先级筛选过滤
-    if (selectedPriorities.length > 0) {
-      filtered = filtered.filter(todo => selectedPriorities.includes(todo.priority));
-    }
-
-    // 按标签过滤
-    if (selectedTags.length > 0) {
-      filtered = filtered.filter(todo => {
-        if (!todo.tags) return false;
-        const todoTags = Array.isArray(todo.tags) ? todo.tags : todo.tags.split(',').map(tag => tag.trim());
-        return selectedTags.some(selectedTag => todoTags.includes(selectedTag));
-      });
-    }
-
-    // 排序
-    filtered.sort((a, b) => {
-      switch (sortBy) {
-        case 'priority':
-          return comparePriority(a, b);
-        case 'dueDate':
-          if (!a.due_date && !b.due_date) return 0;
-          if (!a.due_date) return 1;
-          if (!b.due_date) return -1;
-          return new Date(a.due_date) - new Date(b.due_date);
-        case 'createdAt':
-          return new Date(b.created_at) - new Date(a.created_at);
-        default:
-          return 0;
-      }
-    });
-
-    return filtered;
-  };
+  }, [refreshTrigger, loadTodos]);
 
   const handleTodoClick = (todo) => {
     if (!multiSelect.isMultiSelectMode) {
@@ -501,7 +500,7 @@ const TodoList = ({ onTodoSelect, onViewModeChange, onShowCompletedChange, viewM
       handleMenuClose();
     } catch (error) {
       console.error('转换为笔记失败:', error);
-      alert('转换失败: ' + error.message);
+      showError(error, '转换失败');
     }
   };
 
@@ -634,6 +633,10 @@ const TodoList = ({ onTodoSelect, onViewModeChange, onShowCompletedChange, viewM
                   filtersVisible={filtersVisible}
                   onToggle={toggleFiltersVisibility}
                 />
+                {/* 后台刷新时在搜索框内显示小型指示器，避免遮挡列表 */}
+                {isRefreshing && (
+                  <CircularProgress size={18} sx={{ ml: 1, color: 'text.secondary' }} />
+                )}
               </>
             )
           }}
@@ -928,4 +931,4 @@ const TodoList = ({ onTodoSelect, onViewModeChange, onShowCompletedChange, viewM
   );
 };
 
-export default TodoList;
+export default React.memo(TodoList);

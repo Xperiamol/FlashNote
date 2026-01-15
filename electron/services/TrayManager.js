@@ -112,7 +112,7 @@ class TrayManager {
       }
     ]);
     
-    this.tray.setToolTip('闪念速记');
+    this.tray.setToolTip('FlashNote');
     this.tray.setContextMenu(contextMenu);
   }
 

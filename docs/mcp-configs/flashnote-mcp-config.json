@@ -1,0 +1,10 @@
+{
+  "mcpServers": {
+    "flashnote": {
+      "command": "node",
+      "args": [
+        "C:\\Users\\KevinYe\\Desktop\\code\\flashnote\\electron\\mcp-server.js"
+      ]
+    }
+  }
+}

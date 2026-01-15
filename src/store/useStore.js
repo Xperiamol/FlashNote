@@ -15,6 +15,8 @@ import {
     batchSetNoteTags
 } from '../api/noteAPI'
 import { fetchInstalledPlugins } from '../api/pluginAPI'
+import { normalizeTags } from '../utils/tagUtils'
+import { searchNotesAPI } from '../api/searchAPI'
 
 const useStore = create(
     persist(
@@ -203,7 +205,6 @@ const useStore = create(
                     try {
                         const payload = options.deleted ? await fetchDeletedNotes() : await fetchNotes(options)
                         const rawNotes = Array.isArray(payload) ? payload : (payload?.notes || [])
-                        const { normalizeTags } = await import('../utils/tagUtils.js')
                         const normalized = rawNotes.map(n => ({
                             ...n,
                             tags: normalizeTags(n.tags)
@@ -238,7 +239,6 @@ const useStore = create(
                     try {
                         const result = await createNoteAPI(noteData)
                         if (result) {
-                            const { normalizeTags } = await import('../utils/tagUtils.js')
                             const newNote = {
                                 ...result,
                                 tags: normalizeTags(result.tags)
@@ -459,7 +459,6 @@ const useStore = create(
                 // 搜索笔记 - 使用通用搜索API
                 searchNotes: async (query) => {
                     try {
-                        const { searchNotesAPI } = await import('../api/searchAPI')
                         const result = await searchNotesAPI(query)
 
                         if (result?.success) {

@@ -9,8 +9,8 @@ import {
   List,
   ListItem,
   ListItemText,
+  ListItemIcon,
   Chip,
-  Alert,
   Divider,
   Badge
 } from '@mui/material';
@@ -19,95 +19,130 @@ import {
   CloudDone as CloudDoneIcon,
   CloudOff as CloudOffIcon,
   Sync as SyncIcon,
-  Error as ErrorIcon,
-  Warning as WarningIcon,
-  PriorityHigh as ExclamationIcon
+  StickyNote2 as NoteIcon,
+  Image as ImageIcon,
+  Settings as SettingsIcon,
+  CheckBox as TodoIcon
 } from '@mui/icons-material';
+import { scrollbar } from '../styles/commonStyles';
 import { useStore } from '../store/useStore';
+import { useTranslation } from '../utils/i18n';
 
 /**
- * 同步状态指示器组件
- * 显示云同步和日历同步的实时状态
+ * 同步状态指示器组件 - 新版
+ * 显示四个独立同步模块：笔记、图片、设置、待办
  */
 const SyncStatusIndicator = () => {
-  // 从store获取loadNotes函数，用于同步后刷新笔记
+  const { t, language } = useTranslation();
   const loadNotes = useStore(state => state.loadNotes);
   const loadTodos = useStore(state => state.loadTodos);
   
-  // 云存储同步状态
-  const [syncStatus, setSyncStatus] = useState({
-    isEnabled: false,
-    isSyncing: false,
-    lastSyncTime: null,
-    error: null,
-    syncIntervalMinutes: null,
-    stats: {
-      pushed: 0,
-      pulled: 0,
-      conflicts: 0
-    }
-  });
-
-  // 日历同步状态
-  const [calendarStatus, setCalendarStatus] = useState({
-    type: null, // 'caldav' | 'google' | null
-    isEnabled: false,
-    isSyncing: false,
-    lastSyncTime: null,
-    error: null,
-    syncIntervalMinutes: null
+  // 四个模块的同步状态
+  const [modules, setModules] = useState({
+    notes: { enabled: false, syncing: false, lastSync: null, error: null },
+    images: { enabled: false, syncing: false, lastSync: null, error: null },
+    settings: { enabled: false, syncing: false, lastSync: null, error: null },
+    todos: { enabled: false, syncing: false, lastSync: null, error: null, provider: null }
   });
 
   const [anchorEl, setAnchorEl] = useState(null);
 
   useEffect(() => {
-    // 获取初始状态
     loadSyncStatus();
-    loadCalendarStatus();
 
-    // 监听云同步事件
+    // 监听坚果云同步事件
     const removeStartListener = window.electronAPI?.sync?.onSyncStart?.(() => {
-      // 注意：不清除error，让错误保留直到同步真正成功
-      // 这样用户可以看到上次同步失败的原因，即使开始了新的同步
-      setSyncStatus(prev => ({ ...prev, isSyncing: true }));
+      setModules(prev => ({
+        ...prev,
+        notes: prev.notes.enabled ? { ...prev.notes, syncing: true } : prev.notes,
+        images: prev.images.enabled ? { ...prev.images, syncing: true } : prev.images,
+        settings: prev.settings.enabled ? { ...prev.settings, syncing: true } : prev.settings,
+        todos: prev.todos.provider === 'nutcloud' && prev.todos.enabled ? { ...prev.todos, syncing: true } : prev.todos,
+      }));
     });
 
     const removeCompleteListener = window.electronAPI?.sync?.onSyncComplete?.((result) => {
-      setSyncStatus(prev => ({
+      const now = new Date();
+      setModules(prev => ({
         ...prev,
-        isSyncing: false,
-        lastSyncTime: new Date(),
-        stats: {
-          pushed: result.uploaded || 0,  // V3使用uploaded
-          pulled: result.downloaded || 0,  // V3使用downloaded
-          conflicts: result.conflicts || 0
-        },
-        error: null  // 只有真正成功才清除错误
+        notes: prev.notes.enabled ? { ...prev.notes, syncing: false, lastSync: now, error: null } : prev.notes,
+        images: prev.images.enabled ? { ...prev.images, syncing: false, lastSync: now, error: null } : prev.images,
+        settings: prev.settings.enabled ? { ...prev.settings, syncing: false, lastSync: now, error: null } : prev.settings,
+        todos: prev.todos.provider === 'nutcloud' && prev.todos.enabled ? { ...prev.todos, syncing: false, lastSync: now, error: null } : prev.todos,
       }));
-      console.log('[SyncStatusIndicator] 同步成功，清除错误状态');
 
-      // 如果有远程更改，刷新笔记和待办列表
-      if (result.downloaded > 0) {  // V3使用downloaded
-        console.log('[SyncStatusIndicator] 检测到远程更改，刷新数据列表');
+      if (result.downloaded > 0) {
         loadNotes?.();
         loadTodos?.();
       }
     });
 
     const removeErrorListener = window.electronAPI?.sync?.onSyncError?.((error) => {
-      setSyncStatus(prev => ({
+      setModules(prev => ({
         ...prev,
-        isSyncing: false,
-        error: error.message || '同步失败'
-        // 注意：不更新 lastSyncTime，只有成功的同步才更新
+        notes: prev.notes.enabled ? { ...prev.notes, syncing: false, error: error.message } : prev.notes,
+        images: prev.images.enabled ? { ...prev.images, syncing: false, error: error.message } : prev.images,
+        settings: prev.settings.enabled ? { ...prev.settings, syncing: false, error: error.message } : prev.settings,
+        todos: prev.todos.provider === 'nutcloud' && prev.todos.enabled ? { ...prev.todos, syncing: false, error: error.message } : prev.todos,
       }));
     });
 
-    // 定期刷新状态
+    // 监听 Google Calendar 同步状态变化
+    const checkCalendarStatus = async () => {
+      try {
+        const googleStatus = await window.electronAPI?.invoke?.('google-calendar:get-status');
+        if (googleStatus?.success) {
+          setModules(prev => {
+            if (prev.todos.provider === 'google-calendar') {
+              return {
+                ...prev,
+                todos: {
+                  ...prev.todos,
+                  syncing: googleStatus.data?.syncing || false,
+                  lastSync: googleStatus.data?.lastSync ? new Date(googleStatus.data.lastSync) : prev.todos.lastSync,
+                  error: googleStatus.data?.error || null
+                }
+              };
+            }
+            return prev;
+          });
+        }
+      } catch (error) {
+        console.error('检查 Google Calendar 状态失败:', error);
+      }
+    };
+
+    // 监听 CalDAV 同步状态变化
+    const checkCaldavStatus = async () => {
+      try {
+        const caldavStatus = await window.electronAPI?.invoke?.('caldav:get-status');
+        if (caldavStatus?.success) {
+          setModules(prev => {
+            if (prev.todos.provider === 'caldav') {
+              return {
+                ...prev,
+                todos: {
+                  ...prev.todos,
+                  syncing: caldavStatus.data?.syncing || false,
+                  lastSync: caldavStatus.data?.lastSync ? new Date(caldavStatus.data.lastSync) : prev.todos.lastSync,
+                  error: caldavStatus.data?.error || null
+                }
+              };
+            }
+            return prev;
+          });
+        }
+      } catch (error) {
+        console.error('检查 CalDAV 状态失败:', error);
+      }
+    };
+
+    // 定期检查状态（10秒间隔，更快响应）
     const interval = setInterval(() => {
       loadSyncStatus();
-      loadCalendarStatus();
-    }, 30000); // 每30秒刷新
+      checkCalendarStatus();
+      checkCaldavStatus();
+    }, 10000);
 
     return () => {
       removeStartListener?.();
@@ -115,374 +150,209 @@ const SyncStatusIndicator = () => {
       removeErrorListener?.();
       clearInterval(interval);
     };
-  }, []);
+  }, [loadNotes, loadTodos]);
 
   const loadSyncStatus = async () => {
     try {
-      const response = await window.electronAPI?.sync?.getStatus?.();
-      console.log('[SyncStatusIndicator] getStatus response:', response); // 调试日志
-
-      // V3返回格式：{ v3: { enabled, status, lastSyncTime, config, lastError } }
-      if (response && response.v3) {
-        const v3Status = response.v3;
-        setSyncStatus(prev => {
-          // 如果前端有错误且后端没有错误，保留前端的错误
-          // 因为后端可能没有持久化错误状态
-          const shouldKeepError = prev.error && !v3Status.lastError && v3Status.status !== 'syncing';
-
-          const nextSyncIntervalMinutes = (() => {
-            const raw = v3Status.config?.autoSyncInterval;
-            const n = parseInt(raw, 10);
-            return Number.isFinite(n) && n > 0 ? n : prev.syncIntervalMinutes;
-          })();
-
-          return {
-            ...prev,
-            isEnabled: v3Status.enabled || false,
-            isSyncing: v3Status.status === 'syncing',
-            lastSyncTime: v3Status.lastSyncTime ? new Date(v3Status.lastSyncTime) : prev.lastSyncTime,
-            error: shouldKeepError ? prev.error : (v3Status.lastError || null),
-            syncIntervalMinutes: nextSyncIntervalMinutes
-          };
-        });
-      } else {
-        // V3未启用时，标记为未启用
-        setSyncStatus(prev => ({
-          ...prev,
-          isEnabled: false,
-          isSyncing: false,
-          error: null,
-          syncIntervalMinutes: null
-        }));
+      const nutcloudStatus = await window.electronAPI?.sync?.getStatus?.();
+      const googleCalConfig = await window.electronAPI?.invoke?.('google-calendar:get-config');
+      const caldavConfig = await window.electronAPI?.invoke?.('caldav:get-config');
+      
+      const v3 = nutcloudStatus?.v3 || {};
+      const syncCategories = v3.config?.syncCategories || [];
+      
+      // 确定待办的提供商
+      let todosProvider = null;
+      let todosEnabled = false;
+      let todosLastSync = null;
+      let todosError = null;
+      let todosSyncing = false;
+      
+      if (syncCategories.includes('todos')) {
+        todosProvider = 'nutcloud';
+        todosEnabled = v3.enabled || false;
+        todosLastSync = v3.lastSyncTime ? new Date(v3.lastSyncTime) : null;
+        todosError = v3.lastError || null;
+        todosSyncing = v3.status === 'syncing';
+      } else if (googleCalConfig?.success && googleCalConfig.data?.enabled) {
+        todosProvider = 'google-calendar';
+        todosEnabled = true;
+        const googleStatus = await window.electronAPI?.invoke?.('google-calendar:get-status');
+        todosLastSync = googleStatus?.data?.lastSync ? new Date(googleStatus.data.lastSync) : null;
+        todosError = googleStatus?.data?.error || null;
+        todosSyncing = googleStatus?.data?.syncing || false;
+      } else if (caldavConfig?.success && caldavConfig.data?.enabled) {
+        todosProvider = 'caldav';
+        todosEnabled = true;
+        const caldavStatus = await window.electronAPI?.invoke?.('caldav:get-status');
+        todosLastSync = caldavStatus?.data?.lastSync ? new Date(caldavStatus.data.lastSync) : null;
+        todosError = caldavStatus?.data?.error || null;
+        todosSyncing = caldavStatus?.data?.syncing || false;
       }
+
+      setModules({
+        notes: {
+          enabled: v3.enabled && syncCategories.includes('notes'),
+          syncing: v3.enabled && syncCategories.includes('notes') && v3.status === 'syncing',
+          lastSync: v3.lastSyncTime ? new Date(v3.lastSyncTime) : null,
+          error: v3.enabled && syncCategories.includes('notes') ? v3.lastError : null
+        },
+        images: {
+          enabled: v3.enabled && syncCategories.includes('images'),
+          syncing: v3.enabled && syncCategories.includes('images') && v3.status === 'syncing',
+          lastSync: v3.lastSyncTime ? new Date(v3.lastSyncTime) : null,
+          error: v3.enabled && syncCategories.includes('images') ? v3.lastError : null
+        },
+        settings: {
+          enabled: v3.enabled && syncCategories.includes('settings'),
+          syncing: v3.enabled && syncCategories.includes('settings') && v3.status === 'syncing',
+          lastSync: v3.lastSyncTime ? new Date(v3.lastSyncTime) : null,
+          error: v3.enabled && syncCategories.includes('settings') ? v3.lastError : null
+        },
+        todos: {
+          enabled: todosEnabled,
+          syncing: todosSyncing,
+          lastSync: todosLastSync,
+          error: todosError,
+          provider: todosProvider
+        }
+      });
     } catch (error) {
       console.error('加载同步状态失败:', error);
     }
   };
 
-  const loadCalendarStatus = async () => {
-    try {
-      // 检查 CalDAV
-      const caldavConfig = await window.electronAPI?.invoke?.('caldav:get-config');
-      if (caldavConfig?.success && caldavConfig.data.enabled) {
-        const caldavStatus = await window.electronAPI?.invoke?.('caldav:get-status');
-        const intervalMinutes = (() => {
-          const n = parseInt(caldavConfig?.data?.syncInterval, 10);
-          return Number.isFinite(n) && n > 0 ? n : null;
-        })();
-        setCalendarStatus(prev => {
-          // 如果前端有错误且后端没有错误，保留前端的错误
-          const shouldKeepError = prev.error && !caldavStatus?.data?.error && !caldavStatus?.data?.syncing;
-          
-          return {
-            type: 'caldav',
-            isEnabled: true,
-            isSyncing: caldavStatus?.data?.syncing || false,
-            lastSyncTime: caldavStatus?.data?.lastSync || prev.lastSyncTime,
-            error: shouldKeepError ? prev.error : (caldavStatus?.data?.error || null),
-            syncIntervalMinutes: intervalMinutes
-          };
-        });
-        return;
-      }
-
-      // 检查 Google Calendar
-      const googleConfig = await window.electronAPI?.invoke?.('google-calendar:get-config');
-      if (googleConfig?.success && googleConfig.data.enabled && googleConfig.data.connected) {
-        const googleStatus = await window.electronAPI?.invoke?.('google-calendar:get-status');
-        const intervalMinutes = (() => {
-          const n = parseInt(googleConfig?.data?.syncInterval, 10);
-          return Number.isFinite(n) && n > 0 ? n : null;
-        })();
-        setCalendarStatus(prev => {
-          // 如果前端有错误且后端没有错误，保留前端的错误
-          const shouldKeepError = prev.error && !googleStatus?.data?.error && !googleStatus?.data?.syncing;
-          
-          return {
-            type: 'google',
-            isEnabled: true,
-            isSyncing: googleStatus?.data?.syncing || false,
-            lastSyncTime: googleStatus?.data?.lastSync || prev.lastSyncTime,
-            error: shouldKeepError ? prev.error : (googleStatus?.data?.error || null),
-            syncIntervalMinutes: intervalMinutes
-          };
-        });
-        return;
-      }
-
-      // 均未启用
-      setCalendarStatus(prev => ({ ...prev, isEnabled: false, type: null, syncIntervalMinutes: null }));
-    } catch (error) {
-      console.error('加载日历状态失败:', error);
-    }
-  };
-
-  const getTimeoutMsFromIntervalMinutes = (intervalMinutes) => {
-    const DEFAULT_MINUTES = 10;
-    const minutes = Number.isFinite(intervalMinutes) && intervalMinutes > 0 ? intervalMinutes : DEFAULT_MINUTES;
-    return minutes * 60 * 1000;
-  };
-
-  const handleClick = (event) => {
-    setAnchorEl(event.currentTarget);
-  };
-
-  const handleClose = () => {
-    setAnchorEl(null);
-  };
-
   const handleManualSync = async () => {
     try {
-      // 触发云同步
-      if (syncStatus.isEnabled) {
+      // 立即设置同步中状态
+      setModules(prev => ({
+        ...prev,
+        notes: prev.notes.enabled ? { ...prev.notes, syncing: true } : prev.notes,
+        images: prev.images.enabled ? { ...prev.images, syncing: true } : prev.images,
+        settings: prev.settings.enabled ? { ...prev.settings, syncing: true } : prev.settings,
+        todos: prev.todos.enabled ? { ...prev.todos, syncing: true } : prev.todos,
+      }));
+
+      // 触发坚果云同步
+      const hasNutcloudModule = modules.notes.enabled || modules.images.enabled || modules.settings.enabled || (modules.todos.enabled && modules.todos.provider === 'nutcloud');
+      if (hasNutcloudModule) {
         await window.electronAPI?.sync?.manualSync?.();
       }
       
       // 触发日历同步
-      if (calendarStatus.isEnabled) {
-        // 设置同步中状态（清除旧错误，因为这是用户手动触发的新同步）
-        setCalendarStatus(prev => ({ ...prev, isSyncing: true, error: null }));
-        
-        try {
-          let result;
-          if (calendarStatus.type === 'caldav') {
-            result = await window.electronAPI?.invoke?.('caldav:sync');
-          } else if (calendarStatus.type === 'google') {
-            result = await window.electronAPI?.invoke?.('google-calendar:sync');
-          }
-          
-          // 检查返回结果
-          if (result && !result.success) {
-            // 后端返回失败，抛出错误
-            throw new Error(result.error || '日历同步失败');
-          }
-          
-          // 同步成功，更新状态
-          setCalendarStatus(prev => ({
-            ...prev,
-            isSyncing: false,
-            lastSyncTime: new Date(),
-            error: null
-          }));
-        } catch (calendarError) {
-          // 日历同步失败，记录错误，不更新 lastSyncTime
-          console.error('日历同步失败:', calendarError);
-          setCalendarStatus(prev => ({
-            ...prev,
-            isSyncing: false,
-            error: calendarError.message || '日历同步失败'
-          }));
+      if (modules.todos.enabled && modules.todos.provider !== 'nutcloud') {
+        if (modules.todos.provider === 'caldav') {
+          await window.electronAPI?.invoke?.('caldav:sync');
+        } else if (modules.todos.provider === 'google-calendar') {
+          await window.electronAPI?.invoke?.('google-calendar:sync');
         }
-        
-        // 注意：不再刷新状态，避免覆盖前端设置的错误
-        // 后端可能没有持久化错误状态，所以不能重新加载
       }
+
+      // 同步完成后立即刷新状态（避免等待轮询）
+      setTimeout(() => loadSyncStatus(), 500);
     } catch (error) {
       console.error('手动同步失败:', error);
+      // 出错时也刷新状态，清除转圈
+      loadSyncStatus();
     }
   };
 
-  // 计算聚合状态
   const getAggregateState = () => {
-    const services = [];
-    const now = new Date();
-    const cloudTimeoutMs = getTimeoutMsFromIntervalMinutes(syncStatus.syncIntervalMinutes);
-    const calendarTimeoutMs = getTimeoutMsFromIntervalMinutes(calendarStatus.syncIntervalMinutes);
-
-    // 检查云同步状态
-    if (syncStatus.isEnabled) {
-      let hasIssue = false;
-
-      // 1. 检查是否有错误
-      if (syncStatus.error) {
-        hasIssue = true;
-      }
-
-      // 2. 检查是否超过 2 倍间隔时间未同步（给予宽限期）
-      if (syncStatus.lastSyncTime) {
-        const timeSinceLastSync = now - new Date(syncStatus.lastSyncTime);
-        if (timeSinceLastSync > cloudTimeoutMs * 2) {
-          hasIssue = true;
-        }
-      }
-      // 注意：从未同步过（lastSyncTime 为空）不算异常，因为可能刚启用等待首次同步
-
-      services.push({ name: 'cloud', error: hasIssue });
-    }
-
-    // 检查日历同步状态
-    if (calendarStatus.isEnabled) {
-      let hasIssue = false;
-
-      // 1. 检查是否有错误
-      if (calendarStatus.error) {
-        hasIssue = true;
-      }
-
-      // 2. 检查是否超过 2 倍间隔时间未同步（给予宽限期）
-      if (calendarStatus.lastSyncTime) {
-        const timeSinceLastSync = now - new Date(calendarStatus.lastSyncTime);
-        if (timeSinceLastSync > calendarTimeoutMs * 2) {
-          hasIssue = true;
-        }
-      }
-      // 注意：从未同步过（lastSyncTime 为空）不算异常，因为可能刚启用等待首次同步
-
-      services.push({ name: 'calendar', error: hasIssue });
-    }
-
-    console.log('[SyncStatusIndicator] Aggregate calculation:', {
-      syncEnabled: syncStatus.isEnabled,
-      syncLastTime: syncStatus.lastSyncTime,
-      syncError: syncStatus.error,
-      calendarEnabled: calendarStatus.isEnabled,
-      calendarLastTime: calendarStatus.lastSyncTime,
-      calendarError: calendarStatus.error,
-      services,
-      now: now.toISOString()
-    }); // 调试日志
-
-    if (services.length === 0) return 'disabled'; // 两个都未启用 -> 灰色
-
-    const errorCount = services.filter(s => s.error).length;
-
-    // 修复：只要有一个服务有问题，就不能是绿色
-    if (errorCount === 0) return 'success'; // 所有启用的服务都正常 -> 绿色
-    if (errorCount === services.length) return 'error'; // 所有启用的服务都异常 -> 红色感叹号
-    return 'warning'; // 部分服务异常 -> 橙色感叹号
+    const enabledModules = Object.values(modules).filter(m => m.enabled);
+    if (enabledModules.length === 0) return 'disabled';
+    
+    const hasError = enabledModules.some(m => m.error);
+    const allError = enabledModules.every(m => m.error);
+    const anySyncing = enabledModules.some(m => m.syncing);
+    
+    if (anySyncing) return 'syncing';
+    if (allError) return 'error';
+    if (hasError) return 'warning';
+    return 'success';
   };
 
   const renderMainIcon = () => {
     const state = getAggregateState();
-    const isAnySyncing = syncStatus.isSyncing || calendarStatus.isSyncing;
 
-    if (isAnySyncing) {
+    if (state === 'syncing') {
       return <CircularProgress size={20} color="inherit" />;
     }
 
     switch (state) {
       case 'success':
-        return <CloudDoneIcon fontSize="small" sx={{ color: '#4caf50' }} />; // 绿色勾
+        return <CloudDoneIcon fontSize="small" sx={{ color: '#4caf50' }} />;
       case 'warning':
-        // 部分服务异常 - 橙色云图标 + 感叹号
         return (
-          <Box sx={{ position: 'relative', display: 'inline-flex', width: 20, height: 20 }}>
-            <CloudIcon fontSize="small" sx={{ 
-              color: '#ff9800',
-              position: 'absolute',
-              top: 0,
-              left: 0
-            }} />
-            <Box sx={{
-              position: 'absolute',
-              top: '52%',
-              left: '50%',
-              transform: 'translate(-50%, -50%)',
-              fontSize: 12,
-              fontWeight: 'bold',
-              color: '#fff',
-              textShadow: '0 0 2px rgba(0,0,0,0.8)',
-              lineHeight: 1
-            }}>!</Box>
-          </Box>
+          <Badge badgeContent="!" color="warning" sx={{ '& .MuiBadge-badge': { fontSize: 10, minWidth: 14, height: 14 } }}>
+            <CloudIcon fontSize="small" sx={{ color: '#ff9800' }} />
+          </Badge>
         );
       case 'error':
-        // 全部服务异常 - 红色云图标 + 感叹号
         return (
-          <Box sx={{ position: 'relative', display: 'inline-flex', width: 20, height: 20 }}>
-            <CloudIcon fontSize="small" sx={{ 
-              color: '#f44336',
-              position: 'absolute',
-              top: 0,
-              left: 0
-            }} />
-            <Box sx={{
-              position: 'absolute',
-              top: '52%',
-              left: '50%',
-              transform: 'translate(-50%, -50%)',
-              fontSize: 12,
-              fontWeight: 'bold',
-              color: '#fff',
-              textShadow: '0 0 2px rgba(0,0,0,0.8)',
-              lineHeight: 1
-            }}>!</Box>
-          </Box>
+          <Badge badgeContent="!" color="error" sx={{ '& .MuiBadge-badge': { fontSize: 10, minWidth: 14, height: 14 } }}>
+            <CloudIcon fontSize="small" sx={{ color: '#f44336' }} />
+          </Badge>
         );
       case 'disabled':
       default:
-        return <CloudOffIcon fontSize="small" sx={{ color: 'text.disabled' }} />; // 灰色
+        return <CloudOffIcon fontSize="small" sx={{ color: 'text.disabled' }} />;
     }
   };
 
-  const getStatusText = () => {
-    const parts = [];
-    const now = new Date();
-    const cloudTimeoutMs = getTimeoutMsFromIntervalMinutes(syncStatus.syncIntervalMinutes);
-    const calendarTimeoutMs = getTimeoutMsFromIntervalMinutes(calendarStatus.syncIntervalMinutes);
-
-    if (syncStatus.isEnabled) {
-      if (syncStatus.isSyncing) {
-        parts.push('云端: 同步中...');
-      } else if (syncStatus.error) {
-        parts.push('云端异常: ' + syncStatus.error);
-      } else if (!syncStatus.lastSyncTime) {
-        parts.push('云端: 等待首次同步');
-      } else {
-        const timeSinceLastSync = now - new Date(syncStatus.lastSyncTime);
-        if (timeSinceLastSync > cloudTimeoutMs * 2) {
-          const minutesAgo = Math.floor(timeSinceLastSync / 60000);
-          parts.push(`云端: ${minutesAgo}分钟前（超时）`);
-        } else {
-          const minutesAgo = Math.floor(timeSinceLastSync / 60000);
-          if (minutesAgo < 1) {
-            parts.push('云端: 刚刚同步');
-          } else {
-            parts.push(`云端: ${minutesAgo}分钟前`);
-          }
-        }
-      }
-    } else {
-      parts.push('云端: 未启用');
-    }
-
-    if (calendarStatus.isEnabled) {
-      if (calendarStatus.isSyncing) {
-        parts.push('日历: 同步中...');
-      } else if (calendarStatus.error) {
-        parts.push('日历异常: ' + calendarStatus.error);
-      } else if (!calendarStatus.lastSyncTime) {
-        parts.push('日历: 等待首次同步');
-      } else {
-        const timeSinceLastSync = now - new Date(calendarStatus.lastSyncTime);
-        if (timeSinceLastSync > calendarTimeoutMs * 2) {
-          const minutesAgo = Math.floor(timeSinceLastSync / 60000);
-          parts.push(`日历: ${minutesAgo}分钟前（超时）`);
-        } else {
-          const minutesAgo = Math.floor(timeSinceLastSync / 60000);
-          if (minutesAgo < 1) {
-            parts.push('日历: 刚刚同步');
-          } else {
-            parts.push(`日历: ${minutesAgo}分钟前`);
-          }
-        }
-      }
-    } else if (!syncStatus.isEnabled) {
-      // 只有两个都未启用时才显示
-      parts.push('日历: 未启用');
-    }
-
-    if (parts.length === 0) return '同步未启用';
+  const getTooltipText = () => {
+    const enabledModules = [];
+    if (modules.notes.enabled) enabledModules.push({ name: t('cloudSync.notes'), ...modules.notes });
+    if (modules.images.enabled) enabledModules.push({ name: t('cloudSync.images'), ...modules.images });
+    if (modules.settings.enabled) enabledModules.push({ name: t('cloudSync.settings'), ...modules.settings });
+    if (modules.todos.enabled) enabledModules.push({ name: t('cloudSync.todos'), ...modules.todos });
+    
+    if (enabledModules.length === 0) return t('cloudSync.syncNotEnabled');
+    
+    // 检查是否全部正常
+    const allNormal = enabledModules.every(m => !m.syncing && !m.error);
+    if (allNormal) return t('cloudSync.allReady');
+    
+    // 有异常时才显示详情
+    const parts = enabledModules.map(m => 
+      `${m.name}: ${m.syncing ? t('cloudSync.syncing') : m.error ? t('cloudSync.error') : t('cloudSync.ready')}`
+    );
     return parts.join(' | ');
   };
 
-  const open = Boolean(anchorEl);
+  const renderModuleStatus = (module, icon, name) => {
+    if (!module.enabled) return null;
+    
+    return (
+      <ListItem>
+        <ListItemIcon sx={{ minWidth: 40 }}>
+          {module.syncing ? <CircularProgress size={20} /> : icon}
+        </ListItemIcon>
+        <ListItemText
+          primary={name}
+          secondary={
+            module.error 
+              ? <Typography variant="caption" color="error">{module.error}</Typography>
+              : module.lastSync 
+                ? `${t('cloudSync.lastSync')}: ${new Date(module.lastSync).toLocaleTimeString(language)}`
+                : t('cloudSync.waitingFirstSync')
+          }
+          secondaryTypographyProps={{ component: 'div' }}
+        />
+        <Chip
+          label={module.syncing ? t('cloudSync.syncing') : module.error ? t('cloudSync.error') : t('cloudSync.ready')}
+          size="small"
+          color={module.syncing ? 'info' : module.error ? 'error' : 'success'}
+          sx={{ ml: 1 }}
+        />
+      </ListItem>
+    );
+  };
 
   return (
     <>
-      <Tooltip title={getStatusText()}>
+      <Tooltip title={getTooltipText()}>
         <Box 
-          onClick={handleClick}
+          onClick={(e) => setAnchorEl(e.currentTarget)}
           sx={{ 
             display: 'flex', 
             alignItems: 'center', 
@@ -500,17 +370,11 @@ const SyncStatusIndicator = () => {
       </Tooltip>
 
       <Popover
-        open={open}
+        open={Boolean(anchorEl)}
         anchorEl={anchorEl}
-        onClose={handleClose}
-        anchorOrigin={{
-          vertical: 'bottom',
-          horizontal: 'right',
-        }}
-        transformOrigin={{
-          vertical: 'top',
-          horizontal: 'right',
-        }}
+        onClose={() => setAnchorEl(null)}
+        anchorOrigin={{ vertical: 'bottom', horizontal: 'right' }}
+        transformOrigin={{ vertical: 'top', horizontal: 'right' }}
         PaperProps={{
           sx: (theme) => ({
             backdropFilter: 'blur(20px) saturate(180%)',
@@ -519,251 +383,64 @@ const SyncStatusIndicator = () => {
               ? 'rgba(30, 41, 59, 0.85)'
               : 'rgba(255, 255, 255, 0.85)',
             border: `1px solid ${theme.palette.divider}`,
-            borderRadius: '8px'
+            borderRadius: '8px',
+            maxHeight: '80vh'
           })
         }}
       >
-        <Box sx={{ p: 2, minWidth: 320 }}>
+        <Box sx={{ p: 2, minWidth: 320, maxHeight: '70vh', overflow: 'auto', ...scrollbar.auto }}>
           <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', mb: 2 }}>
-            <Typography variant="h6">同步状态</Typography>
+            <Typography variant="h6">{t('cloudSync.syncStatus')}</Typography>
             <IconButton
               size="small"
               onClick={handleManualSync}
-              disabled={(syncStatus.isSyncing || !syncStatus.isEnabled) && (calendarStatus.isSyncing || !calendarStatus.isEnabled)}
-              title="立即同步所有"
+              disabled={!Object.values(modules).some(m => m.enabled) || Object.values(modules).some(m => m.syncing)}
+              title={t('cloudSync.syncNow')}
             >
               <SyncIcon />
             </IconButton>
           </Box>
 
-          {/* 云存储同步部分 */}
-          <Typography variant="subtitle2" color="text.secondary" sx={{ mb: 1 }}>
-            云存储同步
-          </Typography>
-          
-          {syncStatus.error && (
-            <Alert severity="error" sx={{ mb: 2 }}>
-              {syncStatus.error}
-            </Alert>
-          )}
-
           <List dense disablePadding>
-            <ListItem>
-              <ListItemText
-                primary="服务状态"
-                secondary={
-                  <Chip
-                    label={syncStatus.isEnabled ? '已启用' : '未启用'}
-                    size="small"
-                    color={syncStatus.isEnabled ? 'success' : 'default'}
-                  />
-                }
-                secondaryTypographyProps={{
-                  component: 'div'
-                }}
-              />
-            </ListItem>
-
-            {syncStatus.isEnabled && (
+            {renderModuleStatus(modules.notes, <NoteIcon />, t('cloudSync.notes'))}
+            {renderModuleStatus(modules.images, <ImageIcon />, t('cloudSync.images'))}
+            {renderModuleStatus(modules.settings, <SettingsIcon />, t('cloudSync.settings'))}
+            {modules.todos.enabled && (
               <>
+                {Object.values(modules).filter(m => m.enabled).length > 1 && <Divider sx={{ my: 1 }} />}
                 <ListItem>
+                  <ListItemIcon sx={{ minWidth: 40 }}>
+                    {modules.todos.syncing ? <CircularProgress size={20} /> : <TodoIcon />}
+                  </ListItemIcon>
                   <ListItemText
-                    primary="同步状态"
+                    primary={`${t('cloudSync.todos')} (${modules.todos.provider === 'nutcloud' ? t('cloudSync.nutcloud') : modules.todos.provider === 'google-calendar' ? 'Google' : 'CalDAV'})`}
                     secondary={
-                      (() => {
-                        const now = new Date();
-                        const timeoutMs = getTimeoutMsFromIntervalMinutes(syncStatus.syncIntervalMinutes);
-
-                        if (syncStatus.isSyncing) {
-                          return (
-                            <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-                              <CircularProgress size={16} />
-                              <Typography variant="body2" component="span">正在同步</Typography>
-                            </Box>
-                          );
-                        }
-
-                        // 有错误，显示为挂起
-                        if (syncStatus.error) {
-                          return (
-                            <Typography variant="body2" color="warning.main">
-                              挂起 (上次同步失败)
-                            </Typography>
-                          );
-                        }
-
-                        // 从未同步过，但这是正常状态（等待自动同步或用户手动同步）
-                        if (!syncStatus.lastSyncTime) {
-                          return (
-                            <Typography variant="body2" color="text.secondary">
-                              等待首次同步
-                            </Typography>
-                          );
-                        }
-
-                        // 超时未同步（超过预期间隔时间）
-                        if ((now - new Date(syncStatus.lastSyncTime)) > timeoutMs * 2) {
-                          return (
-                            <Typography variant="body2" color="warning.main">
-                              挂起 (超时未同步)
-                            </Typography>
-                          );
-                        }
-
-                        return <Typography variant="body2" color="success.main">空闲</Typography>;
-                      })()
+                      modules.todos.error 
+                        ? <Typography variant="caption" color="error">{modules.todos.error}</Typography>
+                        : modules.todos.lastSync 
+                          ? `${t('cloudSync.lastSync')}: ${new Date(modules.todos.lastSync).toLocaleTimeString(language)}`
+                          : t('cloudSync.waitingFirstSync')
                     }
-                    secondaryTypographyProps={{
-                      component: 'div'
-                    }}
+                    secondaryTypographyProps={{ component: 'div' }}
+                  />
+                  <Chip
+                    label={modules.todos.syncing ? t('cloudSync.syncing') : modules.todos.error ? t('cloudSync.error') : t('cloudSync.ready')}
+                    size="small"
+                    color={modules.todos.syncing ? 'info' : modules.todos.error ? 'error' : 'success'}
+                    sx={{ ml: 1 }}
                   />
                 </ListItem>
-
-                {syncStatus.lastSyncTime && (
-                  <ListItem>
-                    <ListItemText
-                      primary="上次同步"
-                      secondary={new Date(syncStatus.lastSyncTime).toLocaleString('zh-CN')}
-                    />
-                  </ListItem>
-                )}
-
-                {syncStatus.error && (
-                  <ListItem>
-                    <ListItemText
-                      primary="错误信息"
-                      secondary={
-                        <Typography variant="body2" color="error">
-                          {syncStatus.error}
-                        </Typography>
-                      }
-                      secondaryTypographyProps={{
-                        component: 'div'
-                      }}
-                    />
-                  </ListItem>
-                )}
               </>
             )}
           </List>
 
-          <Divider sx={{ my: 2 }} />
-
-          {/* 日历同步部分 */}
-          <Typography variant="subtitle2" color="text.secondary" sx={{ mb: 1 }}>
-            日历同步 ({calendarStatus.type === 'caldav' ? 'CalDAV' : calendarStatus.type === 'google' ? 'Google' : '未配置'})
-          </Typography>
-
-          {calendarStatus.error && (
-            <Alert severity="error" sx={{ mb: 2 }}>
-              {calendarStatus.error}
-            </Alert>
-          )}
-
-          <List dense disablePadding>
-            <ListItem>
-              <ListItemText
-                primary="服务状态"
-                secondary={
-                  <Chip
-                    label={calendarStatus.isEnabled ? '已启用' : '未启用'}
-                    size="small"
-                    color={calendarStatus.isEnabled ? 'success' : 'default'}
-                  />
-                }
-                secondaryTypographyProps={{
-                  component: 'div'
-                }}
-              />
-            </ListItem>
-
-            {calendarStatus.isEnabled && (
-              <>
-                <ListItem>
-                  <ListItemText
-                    primary="同步状态"
-                    secondary={
-                      (() => {
-                        const now = new Date();
-                        const timeoutMs = getTimeoutMsFromIntervalMinutes(calendarStatus.syncIntervalMinutes);
-
-                        if (calendarStatus.isSyncing) {
-                          return (
-                            <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-                              <CircularProgress size={16} />
-                              <Typography variant="body2" component="span">正在同步</Typography>
-                            </Box>
-                          );
-                        }
-
-                        // 有错误，显示为挂起
-                        if (calendarStatus.error) {
-                          return (
-                            <Typography variant="body2" color="warning.main">
-                              挂起 (上次同步失败)
-                            </Typography>
-                          );
-                        }
-
-                        // 从未同步过，但这是正常状态（等待自动同步或用户手动同步）
-                        if (!calendarStatus.lastSyncTime) {
-                          return (
-                            <Typography variant="body2" color="text.secondary">
-                              等待首次同步
-                            </Typography>
-                          );
-                        }
-
-                        // 超时未同步（超过预期间隔时间的 2 倍）
-                        if ((now - new Date(calendarStatus.lastSyncTime)) > timeoutMs * 2) {
-                          return (
-                            <Typography variant="body2" color="warning.main">
-                              挂起 (超时未同步)
-                            </Typography>
-                          );
-                        }
-
-                        return <Typography variant="body2" color="success.main">空闲</Typography>;
-                      })()
-                    }
-                    secondaryTypographyProps={{
-                      component: 'div'
-                    }}
-                  />
-                </ListItem>
-
-                {calendarStatus.lastSyncTime && (
-                  <ListItem>
-                    <ListItemText
-                      primary="上次同步"
-                      secondary={new Date(calendarStatus.lastSyncTime).toLocaleString('zh-CN')}
-                    />
-                  </ListItem>
-                )}
-
-                {calendarStatus.error && (
-                  <ListItem>
-                    <ListItemText
-                      primary="错误信息"
-                      secondary={
-                        <Typography variant="body2" color="error">
-                          {calendarStatus.error}
-                        </Typography>
-                      }
-                      secondaryTypographyProps={{
-                        component: 'div'
-                      }}
-                    />
-                  </ListItem>
-                )}
-              </>
-            )}
-          </List>
-
-          {!syncStatus.isEnabled && !calendarStatus.isEnabled && (
-            <Typography variant="body2" color="text.secondary" sx={{ mt: 2, textAlign: 'center' }}>
-              请在设置中启用同步服务
-            </Typography>
+          {!Object.values(modules).some(m => m.enabled) && (
+            <Box sx={{ textAlign: 'center', py: 3 }}>
+              <CloudOffIcon sx={{ fontSize: 48, color: 'text.disabled', mb: 1 }} />
+              <Typography variant="body2" color="text.secondary">
+                {t('cloudSync.noModulesEnabled')}
+              </Typography>
+            </Box>
           )}
         </Box>
       </Popover>

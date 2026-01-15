@@ -48,6 +48,8 @@ const ImageService = require('./services/ImageService')
 const { getInstance: getImageStorageInstance } = require('./services/ImageStorageService')
 const PluginManager = require('./services/PluginManager')
 const AIService = require('./services/AIService')
+const MCPDownloader = require('./services/MCPDownloader')
+const { setupMCPHandlers } = require('./ipc/mcpHandlers')
 const STTService = require('./services/STTService')
 const Mem0Service = require('./services/Mem0Service')
 const HistoricalDataMigrationService = require('./services/HistoricalDataMigrationService')
@@ -280,54 +282,40 @@ function createTray() {
   try {
     // 创建托盘图标 - 根据是否打包使用不同路径
     let iconPath
-    let svgIconPath
+    let pngIconPath
 
     if (isDev) {
       // 开发环境路径
-      iconPath = path.join(__dirname, '../logo.png')
-      svgIconPath = path.join(__dirname, '../assets/tray-icon.svg')
+      iconPath = path.join(__dirname, '../build/logo.ico')
+      pngIconPath = path.join(__dirname, '../logo.png')
     } else {
       // 打包后路径 - 图标文件会被复制到resources目录
-      iconPath = path.join(process.resourcesPath, 'logo.png')
-      svgIconPath = path.join(process.resourcesPath, 'assets/tray-icon.svg')
+      iconPath = path.join(process.resourcesPath, 'build/logo.ico')
+      pngIconPath = path.join(process.resourcesPath, 'logo.png')
     }
 
     let trayIcon
 
     console.log('尝试创建托盘图标，开发环境:', isDev)
-    console.log('PNG图标路径:', iconPath)
-    console.log('SVG图标路径:', svgIconPath)
+    console.log('ICO图标路径:', iconPath)
+    console.log('PNG图标路径:', pngIconPath)
 
-    // 检查图标文件是否存在
+    // 优先使用 ICO 文件
     if (fs.existsSync(iconPath)) {
-      console.log('找到logo.png文件')
+      console.log('找到 logo.ico 文件')
       trayIcon = nativeImage.createFromPath(iconPath)
-
-      // 检查图标是否成功创建
-      if (trayIcon.isEmpty()) {
-        console.log('logo.png创建的图标为空，尝试使用SVG图标')
-        // 如果PNG图标创建失败，尝试使用SVG图标
-        if (fs.existsSync(svgIconPath)) {
-          trayIcon = nativeImage.createFromPath(svgIconPath)
-        }
-      }
-
+      console.log('ICO 图标创建结果:', !trayIcon.isEmpty())
+    } else if (fs.existsSync(pngIconPath)) {
+      console.log('ICO 不存在，使用 logo.png 文件')
+      trayIcon = nativeImage.createFromPath(pngIconPath)
       // 调整图标大小适应托盘 - Windows推荐16x16
       if (!trayIcon.isEmpty()) {
         trayIcon = trayIcon.resize({ width: 16, height: 16 })
-        console.log('图标大小已调整为16x16')
+        console.log('PNG 图标已调整为16x16')
       }
     } else {
-      console.log('logo.png文件不存在，尝试使用SVG图标')
-      // 如果主图标不存在，尝试使用SVG图标
-      if (fs.existsSync(svgIconPath)) {
-        trayIcon = nativeImage.createFromPath(svgIconPath)
-        trayIcon = trayIcon.resize({ width: 16, height: 16 })
-      } else {
-        console.log('SVG图标也不存在，创建空图标')
-        // 创建一个简单的默认图标
-        trayIcon = nativeImage.createEmpty()
-      }
+      console.log('所有图标文件都不存在')
+      trayIcon = nativeImage.createEmpty()
     }
 
     // 确保图标不为空
@@ -355,7 +343,7 @@ function createTray() {
     tray = new Tray(trayIcon)
 
     // 设置托盘提示文本
-    tray.setToolTip('FlashNote 2.3 Zeta - 快速笔记应用')
+    tray.setToolTip('FlashNote')
 
     // 创建托盘菜单
     const contextMenu = Menu.buildFromTemplate([
@@ -489,7 +477,7 @@ async function initializeServices() {
     services.settingsService = new SettingsService()
     services.todoService = new TodoService()
     services.tagService = new TagService()
-    services.dataImportService = new DataImportService(services.noteService, services.settingsService)
+    services.dataImportService = new DataImportService(services.noteService, services.settingsService, services.imageStorageService)
     services.imageService = new ImageService()
 
     // 暴露 DAO 供插件使用
@@ -498,33 +486,32 @@ async function initializeServices() {
     services.noteDAO = new NoteDAO()
     services.todoDAO = new TodoDAO()
 
-    // 初始化AI服务
+    // 并行初始化AI/STT/Mem0服务，减少启动时间
     const SettingDAO = require('./dao/SettingDAO')
     const settingDAO = new SettingDAO()
+    
     services.aiService = new AIService(settingDAO)
-    await services.aiService.initialize()
-
-    // 初始化STT服务
     services.sttService = new STTService(settingDAO)
-    await services.sttService.initialize()
-
-    // 初始化 Mem0 服务 - 使用正确的数据库路径
+    
     const dbPath = path.join(app.getPath('userData'), 'database', 'flashnote.db')
     const appDataPath = app.getPath('userData')
     services.mem0Service = new Mem0Service(dbPath, appDataPath)
     services.migrationService = new HistoricalDataMigrationService(services.mem0Service)
 
-    // 异步初始化，不阻塞启动
-    services.mem0Service.initialize().then(result => {
-      if (result.success) {
-        console.log('[Main] Mem0 service initialized')
-        // Mem0 初始化成功后，启动自动迁移(每天执行一次)
-        services.migrationService.startAutoMigration('current_user')
-      } else {
-        console.warn('[Main] Mem0 service initialization failed:', result.error)
-      }
-    }).catch(error => {
-      console.error('[Main] Mem0 service error:', error)
+    // 并行初始化所有AI服务
+    Promise.all([
+      services.aiService.initialize().catch(e => console.error('[Main] AI service init failed:', e)),
+      services.sttService.initialize().catch(e => console.error('[Main] STT service init failed:', e)),
+      services.mem0Service.initialize().then(result => {
+        if (result.success) {
+          console.log('[Main] Mem0 service initialized')
+          services.migrationService.startAutoMigration('current_user')
+        } else {
+          console.warn('[Main] Mem0 service initialization failed:', result.error)
+        }
+      }).catch(e => console.error('[Main] Mem0 service error:', e))
+    ]).then(() => {
+      console.log('[Main] 所有AI服务初始化完成')
     })
 
     // 初始化通知服务
@@ -548,6 +535,10 @@ async function initializeServices() {
     // 初始化代理服务
     services.proxyService = new ProxyService()
     console.log('[Main] Proxy service initialized')
+
+    // 初始化 MCP 下载服务
+    services.mcpDownloader = new MCPDownloader()
+    console.log('[Main] MCP Downloader initialized')
 
     // 将通知服务连接到TodoService
     services.todoService.setNotificationService(services.notificationService)
@@ -599,6 +590,23 @@ async function initializeServices() {
       })
     }
 
+    // 监听 DataImportService 的 Obsidian 事件并转发到渲染进程
+    if (services && services.dataImportService) {
+      const events = [
+        'obsidian-import-started', 'obsidian-import-file-processing', 'obsidian-import-phase-changed',
+        'obsidian-import-completed', 'obsidian-import-error',
+        'obsidian-export-started', 'obsidian-export-note-processing', 
+        'obsidian-export-completed', 'obsidian-export-error',
+        'obsidian-import-warning', 'obsidian-export-warning'
+      ];
+      
+      events.forEach(event => {
+        services.dataImportService.on(event, (data) => broadcastToAll(event, data));
+      });
+
+      console.log('[Main] DataImportService 事件监听器已设置');
+    }
+
     pluginManager = new PluginManager({
       app,
       services,
@@ -615,11 +623,21 @@ async function initializeServices() {
       shortcutService.setPluginManager(pluginManager)
     }
 
-    await pluginManager.initialize()
-
+    // 延迟插件初始化，不阻塞窗口显示
     pluginManager.on('store-event', (event) => {
       broadcastToAll('plugin-store:event', event)
     })
+
+    // 在窗口创建后异步初始化插件
+    setTimeout(async () => {
+      try {
+        console.log('[Main] 开始异步初始化插件...')
+        await pluginManager.initialize()
+        console.log('[Main] 插件初始化完成')
+      } catch (error) {
+        console.error('[Main] 插件初始化失败:', error)
+      }
+    }, 500)
 
     pluginManager.on('store-event', (event) => {
       if (event?.type === 'ready') {
@@ -633,12 +651,12 @@ async function initializeServices() {
       if (notesResult.success && notesResult.data && notesResult.data.notes && notesResult.data.notes.length === 0) {
         console.log('检测到首次启动，创建示例笔记')
         const welcomeNote = {
-          title: '欢迎使用 FlashNote 2.3 Zeta！',
+          title: '欢迎使用 FlashNote 2.3！',
           content: `# 欢迎使用 FlashNote 2.3！ 🎉
 
 恭喜你成功安装了 FlashNote，这是一个现代化的本地笔记应用。
 
-## 2.3 版本新功能
+## 版本新功能
 
 ### 白板笔记
 - **Excalidraw 集成**：创建白板笔记，支持手绘图形和流程图
@@ -786,34 +804,27 @@ if (!gotTheLock) {
           return new Response('File not found', { status: 404 })
         }
 
-        // 读取文件
-        const data = fs.readFileSync(fullPath)
-
         // 确定 MIME 类型
         const ext = path.extname(fullPath).toLowerCase()
-        let mimeType = 'application/octet-stream'
-        switch (ext) {
-          case '.jpg':
-          case '.jpeg':
-            mimeType = 'image/jpeg'
-            break
-          case '.png':
-            mimeType = 'image/png'
-            break
-          case '.gif':
-            mimeType = 'image/gif'
-            break
-          case '.webp':
-            mimeType = 'image/webp'
-            break
-          case '.svg':
-            mimeType = 'image/svg+xml'
-            break
+        const mimeTypes = {
+          '.jpg': 'image/jpeg',
+          '.jpeg': 'image/jpeg',
+          '.png': 'image/png',
+          '.gif': 'image/gif',
+          '.webp': 'image/webp',
+          '.svg': 'image/svg+xml'
         }
+        const mimeType = mimeTypes[ext] || 'application/octet-stream'
 
+        // 使用流式读取，提升大文件性能
+        const data = fs.readFileSync(fullPath)
+        
         console.log('[Protocol] 返回文件，MIME:', mimeType)
         return new Response(data, {
-          headers: { 'Content-Type': mimeType }
+          headers: { 
+            'Content-Type': mimeType,
+            'Cache-Control': 'public, max-age=31536000'
+          }
         })
       } catch (error) {
         console.error('[Protocol] 处理请求失败:', error)
@@ -834,6 +845,9 @@ if (!gotTheLock) {
 
     createWindow()
     createTray()
+
+    // 设置 MCP 相关 IPC 处理器（在窗口创建后）
+    setupMCPHandlers(services.mcpDownloader, mainWindow)
 
     // 监听系统主题变化
     nativeTheme.on('updated', () => {
@@ -966,6 +980,21 @@ app.on('activate', () => {
 // 你也可以将它们放在单独的文件中并在这里引入
 
 // ============= IPC 处理程序 =============
+
+const registerIpcHandlers = (handlers) => {
+  for (const { channel, handler } of handlers) {
+    ipcMain.handle(channel, handler)
+  }
+}
+
+const createServicePassthroughHandler = (getService, methodName) => {
+  return async (event, ...args) => {
+    const service = getService()
+    return await service[methodName](...args)
+  }
+}
+
+const getEventWindow = (event) => BrowserWindow.fromWebContents(event.sender)
 
 // 应用基础API
 ipcMain.handle('app-version', () => {
@@ -1157,174 +1186,82 @@ ipcMain.handle('db:repair', async () => {
   }
 })
 
-// 笔记相关IPC处理
-ipcMain.handle('note:create', async (event, noteData) => {
-  return await services.noteService.createNote(noteData)
-})
+// ===== 表驱动 IPC（收益最大：大量透传/模板化） =====
+registerIpcHandlers([
+  // 笔记相关 IPC
+  ...Object.entries({
+    'note:create': 'createNote',
+    'note:get-by-id': 'getNoteById',
+    'note:get-all': 'getNotes',
+    'note:get-pinned': 'getPinnedNotes',
+    'note:get-deleted': 'getDeletedNotes',
+    'note:get-recently-modified': 'getRecentlyModifiedNotes',
+    'note:update': 'updateNote',
+    'note:delete': 'deleteNote',
+    'note:restore': 'restoreNote',
+    'note:permanent-delete': 'permanentDeleteNote',
+    'note:toggle-pin': 'togglePinNote',
+    'note:search': 'searchNotes',
+    'note:batch-update': 'batchUpdateNotes',
+    'note:batch-delete': 'batchDeleteNotes',
+    'note:batch-restore': 'batchRestoreNotes',
+    'note:batch-permanent-delete': 'batchPermanentDeleteNotes',
+    'note:batch-set-tags': 'batchSetTags',
+    'note:get-stats': 'getStats',
+    'note:export': 'exportNotes',
+    'note:import': 'importNotes'
+  }).map(([channel, methodName]) => ({
+    channel,
+    handler: createServicePassthroughHandler(() => services.noteService, methodName)
+  })),
+  {
+    channel: 'note:auto-save',
+    handler: async (event, id, content) => {
+      return await services.noteService.autoSaveNote(id, { content })
+    }
+  },
 
-ipcMain.handle('note:get-by-id', async (event, id) => {
-  return await services.noteService.getNoteById(id)
-})
-
-ipcMain.handle('note:get-all', async (event, options) => {
-  return await services.noteService.getNotes(options)
-})
-
-ipcMain.handle('note:get-pinned', async (event) => {
-  return await services.noteService.getPinnedNotes()
-})
-
-ipcMain.handle('note:get-deleted', async (event) => {
-  return await services.noteService.getDeletedNotes()
-})
-
-ipcMain.handle('note:get-recently-modified', async (event, limit) => {
-  return await services.noteService.getRecentlyModifiedNotes(limit)
-})
-
-ipcMain.handle('note:update', async (event, id, updates) => {
-  return await services.noteService.updateNote(id, updates)
-})
-
-ipcMain.handle('note:auto-save', async (event, id, content) => {
-  return await services.noteService.autoSaveNote(id, { content })
-})
-
-ipcMain.handle('note:delete', async (event, id) => {
-  return await services.noteService.deleteNote(id)
-})
-
-ipcMain.handle('note:restore', async (event, id) => {
-  return await services.noteService.restoreNote(id)
-})
-
-ipcMain.handle('note:permanent-delete', async (event, id) => {
-  return await services.noteService.permanentDeleteNote(id)
-})
-
-ipcMain.handle('note:toggle-pin', async (event, id) => {
-  return await services.noteService.togglePinNote(id)
-})
-
-ipcMain.handle('note:search', async (event, query, options) => {
-  return await services.noteService.searchNotes(query, options)
-})
-
-ipcMain.handle('note:batch-update', async (event, ids, updates) => {
-  return await services.noteService.batchUpdateNotes(ids, updates)
-})
-
-ipcMain.handle('note:batch-delete', async (event, ids) => {
-  return await services.noteService.batchDeleteNotes(ids)
-})
-
-ipcMain.handle('note:batch-restore', async (event, ids) => {
-  return await services.noteService.batchRestoreNotes(ids)
-})
-
-ipcMain.handle('note:batch-permanent-delete', async (event, ids) => {
-  return await services.noteService.batchPermanentDeleteNotes(ids)
-})
-
-ipcMain.handle('note:batch-set-tags', async (event, params) => {
-  return await services.noteService.batchSetTags(params)
-})
-
-ipcMain.handle('note:get-stats', async (event) => {
-  return await services.noteService.getStats()
-})
-
-ipcMain.handle('note:export', async (event, options) => {
-  return await services.noteService.exportNotes(options)
-})
-
-ipcMain.handle('note:import', async (event, data) => {
-  return await services.noteService.importNotes(data)
-})
-
-// 设置相关IPC处理
-ipcMain.handle('setting:get', async (event, key) => {
-  return await services.settingsService.getSetting(key)
-})
-
-ipcMain.handle('setting:get-multiple', async (event, keys) => {
-  return await services.settingsService.getMultipleSettings(keys)
-})
-
-ipcMain.handle('setting:get-all', async (event) => {
-  return await services.settingsService.getAllSettings()
-})
-
-ipcMain.handle('setting:get-by-type', async (event, type) => {
-  return await services.settingsService.getSettingsByType(type)
-})
-
-ipcMain.handle('setting:get-theme', async (event) => {
-  return await services.settingsService.getThemeSettings()
-})
-
-ipcMain.handle('setting:get-window', async (event) => {
-  return await services.settingsService.getWindowSettings()
-})
-
-ipcMain.handle('setting:get-editor', async (event) => {
-  return await services.settingsService.getEditorSettings()
-})
-
-ipcMain.handle('setting:set', async (event, key, value) => {
-  // 自动推断类型
-  let type = 'string'
-  if (typeof value === 'boolean') {
-    type = 'boolean'
-  } else if (typeof value === 'number') {
-    type = 'number'
-  } else if (Array.isArray(value)) {
-    type = 'array'
-  } else if (typeof value === 'object' && value !== null) {
-    type = 'object'
+  // 设置相关 IPC
+  ...Object.entries({
+    'setting:get': 'getSetting',
+    'setting:get-multiple': 'getMultipleSettings',
+    'setting:get-all': 'getAllSettings',
+    'setting:get-by-type': 'getSettingsByType',
+    'setting:get-theme': 'getThemeSettings',
+    'setting:get-window': 'getWindowSettings',
+    'setting:get-editor': 'getEditorSettings',
+    'setting:set-multiple': 'setMultipleSettings',
+    'setting:delete': 'deleteSetting',
+    'setting:delete-multiple': 'deleteMultipleSettings',
+    'setting:reset': 'resetSetting',
+    'setting:reset-all': 'resetAllSettings',
+    'setting:search': 'searchSettings',
+    'setting:get-stats': 'getStats',
+    'setting:export': 'exportSettings',
+    'setting:import': 'importSettings',
+    'setting:select-wallpaper': 'selectWallpaper'
+  }).map(([channel, methodName]) => ({
+    channel,
+    handler: createServicePassthroughHandler(() => services.settingsService, methodName)
+  })),
+  {
+    channel: 'setting:set',
+    handler: async (event, key, value) => {
+      // 自动推断类型
+      let type = 'string'
+      if (typeof value === 'boolean') {
+        type = 'boolean'
+      } else if (typeof value === 'number') {
+        type = 'number'
+      } else if (Array.isArray(value)) {
+        type = 'array'
+      } else if (typeof value === 'object' && value !== null) {
+        type = 'object'
+      }
+      return await services.settingsService.setSetting(key, value, type)
+    }
   }
-  return await services.settingsService.setSetting(key, value, type)
-})
-
-ipcMain.handle('setting:set-multiple', async (event, settings) => {
-  return await services.settingsService.setMultipleSettings(settings)
-})
-
-ipcMain.handle('setting:delete', async (event, key) => {
-  return await services.settingsService.deleteSetting(key)
-})
-
-ipcMain.handle('setting:delete-multiple', async (event, keys) => {
-  return await services.settingsService.deleteMultipleSettings(keys)
-})
-
-ipcMain.handle('setting:reset', async (event, key) => {
-  return await services.settingsService.resetSetting(key)
-})
-
-ipcMain.handle('setting:reset-all', async (event) => {
-  return await services.settingsService.resetAllSettings()
-})
-
-ipcMain.handle('setting:search', async (event, query) => {
-  return await services.settingsService.searchSettings(query)
-})
-
-ipcMain.handle('setting:get-stats', async (event) => {
-  return await services.settingsService.getStats()
-})
-
-ipcMain.handle('setting:export', async (event) => {
-  return await services.settingsService.exportSettings()
-})
-
-ipcMain.handle('setting:import', async (event, data) => {
-  return await services.settingsService.importSettings(data)
-})
-
-ipcMain.handle('setting:select-wallpaper', async (event) => {
-  return await services.settingsService.selectWallpaper()
-})
+])
 
 // 开机自启相关IPC处理
 ipcMain.handle('setting:set-auto-launch', async (event, enabled) => {
@@ -1366,203 +1303,237 @@ ipcMain.handle('proxy:test', async (event, config) => {
 })
 
 // 数据导入导出IPC处理
-ipcMain.handle('data:export-notes', async (event, options) => {
-  return await services.dataImportService.exportNotes(options)
-})
+registerIpcHandlers(
+  Object.entries({
+    'data:export-notes': 'exportNotes',
+    'data:export-settings': 'exportSettings',
+    'data:import-notes': 'importNotes',
+    'data:import-settings': 'importSettings',
+    'data:import-folder': 'importFolder',
+    'data:get-supported-formats': 'getSupportedFormats',
+    'data:get-stats': 'getStats',
+    'data:select-file': 'selectFile'
+  }).map(([channel, methodName]) => ({
+    channel,
+    handler: createServicePassthroughHandler(() => services.dataImportService, methodName)
+  }))
+)
 
-ipcMain.handle('data:export-settings', async (event, filePath) => {
-  return await services.dataImportService.exportSettings(filePath)
-})
-
-ipcMain.handle('data:import-notes', async (event, options) => {
-  return await services.dataImportService.importNotes(options)
-})
-
-ipcMain.handle('data:import-settings', async (event, filePath) => {
-  return await services.dataImportService.importSettings(filePath)
-})
-
-ipcMain.handle('data:import-folder', async (event) => {
-  return await services.dataImportService.importFolder()
-})
-
-ipcMain.handle('data:get-supported-formats', async (event) => {
-  return services.dataImportService.getSupportedFormats()
-})
-
-ipcMain.handle('data:get-stats', async (event) => {
-  return services.dataImportService.getStats()
-})
-
-ipcMain.handle('data:select-file', async (event) => {
-  return await services.dataImportService.selectFile()
-})
+// Obsidian 导入导出 IPC 处理
+registerIpcHandlers([
+  {
+    channel: 'data:import-obsidian-vault',
+    handler: async (event, options) => {
+      try {
+        return await services.dataImportService.importObsidianVault(options)
+      } catch (error) {
+        console.error('导入 Obsidian vault 失败:', error)
+        return { success: false, error: error.message }
+      }
+    }
+  },
+  {
+    channel: 'data:export-to-obsidian',
+    handler: async (event, options) => {
+      try {
+        return await services.dataImportService.exportToObsidian(options)
+      } catch (error) {
+        console.error('导出到 Obsidian 失败:', error)
+        return { success: false, error: error.message }
+      }
+    }
+  },
+  {
+    channel: 'data:get-importer-config',
+    handler: async (event, importerName) => {
+      try {
+        const config = services.dataImportService.getImporterConfig(importerName)
+        return { success: true, data: config }
+      } catch (error) {
+        console.error('获取导入器配置失败:', error)
+        return { success: false, error: error.message }
+      }
+    }
+  },
+  {
+    channel: 'data:update-importer-config',
+    handler: async (event, { importerName, config }) => {
+      try {
+        const success = services.dataImportService.updateImporterConfig(importerName, config)
+        return { success, data: success }
+      } catch (error) {
+        console.error('更新导入器配置失败:', error)
+        return { success: false, error: error.message }
+      }
+    }
+  },
+  {
+    channel: 'data:get-exporter-config',
+    handler: async (event, exporterName) => {
+      try {
+        const config = services.dataImportService.getExporterConfig(exporterName)
+        return { success: true, data: config }
+      } catch (error) {
+        console.error('获取导出器配置失败:', error)
+        return { success: false, error: error.message }
+      }
+    }
+  },
+  {
+    channel: 'data:update-exporter-config',
+    handler: async (event, { exporterName, config }) => {
+      try {
+        const success = services.dataImportService.updateExporterConfig(exporterName, config)
+        return { success, data: success }
+      } catch (error) {
+        console.error('更新导出器配置失败:', error)
+        return { success: false, error: error.message }
+      }
+    }
+  },
+  {
+    channel: 'data:get-available-importers-exporters',
+    handler: async () => {
+      try {
+        const data = services.dataImportService.getAvailableImportersAndExporters()
+        return { success: true, data }
+      } catch (error) {
+        console.error('获取可用导入导出器失败:', error)
+        return { success: false, error: error.message }
+      }
+    }
+  }
+])
 
 // AI 相关 IPC 处理
-ipcMain.handle('ai:get-config', async (event) => {
-  try {
-    return await services.aiService.getConfig()
-  } catch (error) {
-    console.error('获取AI配置失败:', error)
-    return { success: false, error: error.message }
+const createTryCatchHandler = (serviceName, methodName, errorMsg) => {
+  return async (event, ...args) => {
+    try {
+      const service = services[serviceName]
+      return await service[methodName](...args)
+    } catch (error) {
+      console.error(`${errorMsg}:`, error)
+      return { success: false, error: error.message }
+    }
   }
-})
+}
 
-ipcMain.handle('ai:save-config', async (event, config) => {
-  try {
-    return await services.aiService.saveConfig(config)
-  } catch (error) {
-    console.error('保存AI配置失败:', error)
-    return { success: false, error: error.message }
-  }
-})
-
-ipcMain.handle('ai:test-connection', async (event, config) => {
-  try {
-    return await services.aiService.testConnection(config)
-  } catch (error) {
-    console.error('测试AI连接失败:', error)
-    return { success: false, error: error.message }
-  }
-})
-
-ipcMain.handle('ai:get-providers', async (event) => {
-  try {
-    return services.aiService.getProviders()
-  } catch (error) {
-    console.error('获取AI提供商列表失败:', error)
-    return { success: false, error: error.message }
-  }
-})
-
-ipcMain.handle('ai:chat', async (event, messages, options) => {
-  try {
-    return await services.aiService.chat(messages, options)
-  } catch (error) {
-    console.error('AI聊天失败:', error)
-    return { success: false, error: error.message }
-  }
-})
+registerIpcHandlers([
+  { channel: 'ai:get-config', handler: createTryCatchHandler('aiService', 'getConfig', '获取AI配置失败') },
+  { channel: 'ai:save-config', handler: createTryCatchHandler('aiService', 'saveConfig', '保存AI配置失败') },
+  { channel: 'ai:test-connection', handler: createTryCatchHandler('aiService', 'testConnection', '测试AI连接失败') },
+  { channel: 'ai:get-providers', handler: createTryCatchHandler('aiService', 'getProviders', '获取AI提供商列表失败') },
+  { channel: 'ai:chat', handler: createTryCatchHandler('aiService', 'chat', 'AI聊天失败') }
+])
 
 // STT (Speech-to-Text) 相关 IPC 处理
-ipcMain.handle('stt:get-config', async (event) => {
-  try {
-    return await services.sttService.getConfig()
-  } catch (error) {
-    console.error('获取STT配置失败:', error)
-    return { success: false, error: error.message }
+registerIpcHandlers([
+  { channel: 'stt:get-config', handler: createTryCatchHandler('sttService', 'getConfig', '获取STT配置失败') },
+  { channel: 'stt:save-config', handler: createTryCatchHandler('sttService', 'saveConfig', '保存STT配置失败') },
+  { channel: 'stt:test-connection', handler: createTryCatchHandler('sttService', 'testConnection', '测试STT连接失败') },
+  { channel: 'stt:get-providers', handler: createTryCatchHandler('sttService', 'getProviders', '获取STT提供商列表失败') },
+  {
+    channel: 'stt:transcribe',
+    handler: async (event, { audioFile, options }) => {
+      try {
+        return await services.sttService.transcribe(audioFile, options)
+      } catch (error) {
+        console.error('语音转文字失败:', error)
+        return { success: false, error: error.message }
+      }
+    }
   }
-})
-
-ipcMain.handle('stt:save-config', async (event, config) => {
-  try {
-    return await services.sttService.saveConfig(config)
-  } catch (error) {
-    console.error('保存STT配置失败:', error)
-    return { success: false, error: error.message }
-  }
-})
-
-ipcMain.handle('stt:test-connection', async (event, config) => {
-  try {
-    return await services.sttService.testConnection(config)
-  } catch (error) {
-    console.error('测试STT连接失败:', error)
-    return { success: false, error: error.message }
-  }
-})
-
-ipcMain.handle('stt:get-providers', async (event) => {
-  try {
-    return services.sttService.getProviders()
-  } catch (error) {
-    console.error('获取STT提供商列表失败:', error)
-    return { success: false, error: error.message }
-  }
-})
-
-ipcMain.handle('stt:transcribe', async (event, { audioFile, options }) => {
-  try {
-    return await services.sttService.transcribe(audioFile, options)
-  } catch (error) {
-    console.error('语音转文字失败:', error)
-    return { success: false, error: error.message }
-  }
-})
+])
 
 // Mem0 记忆管理相关 IPC 处理
-ipcMain.handle('mem0:add', async (event, { userId, content, options }) => {
-  try {
-    return await services.mem0Service.addMemory(userId, content, options)
-  } catch (error) {
-    console.error('添加记忆失败:', error)
-    return { success: false, error: error.message }
-  }
-})
-
-ipcMain.handle('mem0:search', async (event, { userId, query, options }) => {
-  try {
-    const results = await services.mem0Service.searchMemories(userId, query, options)
-    return { success: true, results }
-  } catch (error) {
-    console.error('搜索记忆失败:', error)
-    return { success: false, error: error.message, results: [] }
-  }
-})
-
-ipcMain.handle('mem0:get', async (event, { userId, options }) => {
-  try {
-    console.log('[Mem0] 获取记忆请求:', { userId, options })
-    const memories = await services.mem0Service.getMemories(userId, options)
-    console.log(`[Mem0] 返回 ${memories.length} 条记忆`)
-    if (memories.length > 0) {
-      console.log('[Mem0] 第一条记忆类别:', memories[0].category)
+registerIpcHandlers([
+  {
+    channel: 'mem0:add',
+    handler: async (event, { userId, content, options }) => {
+      try {
+        return await services.mem0Service.addMemory(userId, content, options)
+      } catch (error) {
+        console.error('添加记忆失败:', error)
+        return { success: false, error: error.message }
+      }
     }
-    return { success: true, memories }
-  } catch (error) {
-    console.error('获取记忆列表失败:', error)
-    return { success: false, error: error.message, memories: [] }
+  },
+  {
+    channel: 'mem0:search',
+    handler: async (event, { userId, query, options }) => {
+      try {
+        const results = await services.mem0Service.searchMemories(userId, query, options)
+        return { success: true, results }
+      } catch (error) {
+        console.error('搜索记忆失败:', error)
+        return { success: false, error: error.message, results: [] }
+      }
+    }
+  },
+  {
+    channel: 'mem0:get',
+    handler: async (event, { userId, options }) => {
+      try {
+        console.log('[Mem0] 获取记忆请求:', { userId, options })
+        const memories = await services.mem0Service.getMemories(userId, options)
+        console.log(`[Mem0] 返回 ${memories.length} 条记忆`)
+        if (memories.length > 0) {
+          console.log('[Mem0] 第一条记忆类别:', memories[0].category)
+        }
+        return { success: true, memories }
+      } catch (error) {
+        console.error('获取记忆列表失败:', error)
+        return { success: false, error: error.message, memories: [] }
+      }
+    }
+  },
+  {
+    channel: 'mem0:delete',
+    handler: async (event, { memoryId }) => {
+      try {
+        const deleted = await services.mem0Service.deleteMemory(memoryId)
+        return { success: deleted }
+      } catch (error) {
+        console.error('删除记忆失败:', error)
+        return { success: false, error: error.message }
+      }
+    }
+  },
+  {
+    channel: 'mem0:clear',
+    handler: async (event, { userId }) => {
+      try {
+        const count = await services.mem0Service.clearUserMemories(userId)
+        return { success: true, count }
+      } catch (error) {
+        console.error('清除记忆失败:', error)
+        return { success: false, error: error.message }
+      }
+    }
+  },
+  {
+    channel: 'mem0:stats',
+    handler: async (event, { userId }) => {
+      try {
+        const stats = await services.mem0Service.getStats(userId)
+        return { success: true, stats }
+      } catch (error) {
+        console.error('获取统计信息失败:', error)
+        return { success: false, error: error.message }
+      }
+    }
+  },
+  {
+    channel: 'mem0:is-available',
+    handler: async () => {
+      try {
+        return { available: services.mem0Service.isAvailable() }
+      } catch (error) {
+        return { available: false }
+      }
+    }
   }
-})
-
-ipcMain.handle('mem0:delete', async (event, { memoryId }) => {
-  try {
-    const deleted = await services.mem0Service.deleteMemory(memoryId)
-    return { success: deleted }
-  } catch (error) {
-    console.error('删除记忆失败:', error)
-    return { success: false, error: error.message }
-  }
-})
-
-ipcMain.handle('mem0:clear', async (event, { userId }) => {
-  try {
-    const count = await services.mem0Service.clearUserMemories(userId)
-    // 无需额外清理：数据库是唯一真实来源，清空记忆后去重自动生效
-    return { success: true, count }
-  } catch (error) {
-    console.error('清除记忆失败:', error)
-    return { success: false, error: error.message }
-  }
-})
-
-ipcMain.handle('mem0:stats', async (event, { userId }) => {
-  try {
-    const stats = await services.mem0Service.getStats(userId)
-    return { success: true, stats }
-  } catch (error) {
-    console.error('获取统计信息失败:', error)
-    return { success: false, error: error.message }
-  }
-})
-
-ipcMain.handle('mem0:is-available', async (event) => {
-  try {
-    return { available: services.mem0Service.isAvailable() }
-  } catch (error) {
-    return { available: false }
-  }
-})
+])
 
 // 历史数据迁移 - 使用 migrationService 实现去重
 ipcMain.handle('mem0:migrate-historical', async (event) => {
@@ -1578,251 +1549,195 @@ ipcMain.handle('mem0:migrate-historical', async (event) => {
   }
 })
 
-// 云同步相关IPC处理 - 已迁移到 SyncIPCHandler
-// 以下处理器已由 SyncIPCHandler 统一管理，包含对 V3 同步服务的支持
-/*
-ipcMain.handle('sync:get-available-services', async (event) => {
-  try {
-    return services.cloudSyncManager.getAvailableServices()
-  } catch (error) {
-    console.error('获取可用同步服务失败:', error)
-    return []
-  }
-})
-
-ipcMain.handle('sync:get-status', async (event) => {
-  try {
-    return services.cloudSyncManager.getStatus()
-  } catch (error) {
-    console.error('获取同步状态失败:', error)
-    return { hasActiveService: false, activeService: null, status: null }
-  }
-})
-
-ipcMain.handle('sync:test-connection', async (event, serviceName, config) => {
-  try {
-    return await services.cloudSyncManager.testConnection(serviceName, config)
-  } catch (error) {
-    console.error('测试同步连接失败:', error)
-    return { success: false, message: error.message }
-  }
-})
-
-ipcMain.handle('sync:switch-service', async (event, serviceName, config) => {
-  try {
-    return await services.cloudSyncManager.switchToService(serviceName, config)
-  } catch (error) {
-    console.error('切换同步服务失败:', error)
-    return { success: false, message: error.message }
-  }
-})
-
-ipcMain.handle('sync:disable', async (event) => {
-  try {
-    await services.cloudSyncManager.disableCurrentService()
-    return { success: true, message: '云同步已禁用' }
-  } catch (error) {
-    console.error('禁用云同步失败:', error)
-    return { success: false, message: error.message }
-  }
-})
-
-ipcMain.handle('sync:manual-sync', async (event) => {
-  try {
-    return await services.cloudSyncManager.sync()
-  } catch (error) {
-    console.error('手动同步失败:', error)
-    return { success: false, message: error.message }
-  }
-})
-
-ipcMain.handle('sync:force-stop', async (event) => {
-  try {
-    await services.cloudSyncManager.forceStopSync()
-    return { success: true, message: '同步已强制停止' }
-  } catch (error) {
-    console.error('强制停止同步失败:', error)
-    return { success: false, message: error.message }
-  }
-})
-
-ipcMain.handle('sync:get-conflicts', async (event) => {
-  try {
-    return services.cloudSyncManager.getConflicts()
-  } catch (error) {
-    console.error('获取冲突列表失败:', error)
-    return []
-  }
-})
-
-ipcMain.handle('sync:resolve-conflict', async (event, conflictId, resolution) => {
-  try {
-    await services.cloudSyncManager.resolveConflict(conflictId, resolution)
-    return { success: true, message: '冲突已解决' }
-  } catch (error) {
-    console.error('解决冲突失败:', error)
-    return { success: false, message: error.message }
-  }
-})
-
-ipcMain.handle('sync:export-data', async (event, filePath) => {
-  try {
-    await services.cloudSyncManager.exportData(filePath)
-    return { success: true, message: '数据导出成功' }
-  } catch (error) {
-    console.error('导出数据失败:', error)
-    return { success: false, message: error.message }
-  }
-})
-
-ipcMain.handle('sync:import-data', async (event, filePath) => {
-  try {
-    await services.cloudSyncManager.importData(filePath)
-    return { success: true, message: '数据导入成功' }
-  } catch (error) {
-    console.error('导入数据失败:', error)
-    return { success: false, message: error.message }
-  }
-})
-*/
-
-// ===== 图片存储相关 IPC 处理器（已移至上方） =====
+// ===== 云同步相关 IPC：已由 SyncIPCHandler 统一管理 =====
 
 // 窗口管理IPC处理
-ipcMain.handle('window:ready', async (event) => {
-  // 页面已准备就绪的通知（由 dom-ready 事件自动处理显示，此处仅作确认）
-  console.log('收到窗口准备就绪通知')
-  return true
-})
-
-ipcMain.handle('window:minimize', async (event) => {
-  const window = BrowserWindow.fromWebContents(event.sender)
-  if (window) window.minimize()
-  return true
-})
-
-ipcMain.handle('window:maximize', async (event) => {
-  const window = BrowserWindow.fromWebContents(event.sender)
-  if (window) {
-    if (window.isMaximized()) {
-      window.unmaximize()
-    } else {
-      window.maximize()
+registerIpcHandlers([
+  // 窗口管理 IPC
+  {
+    channel: 'window:ready',
+    handler: async () => {
+      // 页面已准备就绪的通知（由 dom-ready 事件自动处理显示，此处仅作确认）
+      console.log('收到窗口准备就绪通知')
+      return true
+    }
+  },
+  {
+    channel: 'window:minimize',
+    handler: async (event) => {
+      const window = getEventWindow(event)
+      if (window) window.minimize()
+      return true
+    }
+  },
+  {
+    channel: 'window:maximize',
+    handler: async (event) => {
+      const window = getEventWindow(event)
+      if (window) {
+        if (window.isMaximized()) {
+          window.unmaximize()
+        } else {
+          window.maximize()
+        }
+      }
+      return true
+    }
+  },
+  {
+    channel: 'window:close',
+    handler: async (event) => {
+      const window = getEventWindow(event)
+      if (window) window.close()
+      return true
+    }
+  },
+  {
+    channel: 'window:hide',
+    handler: async (event) => {
+      const window = getEventWindow(event)
+      if (window) window.hide()
+      return true
+    }
+  },
+  {
+    channel: 'window:show',
+    handler: async (event) => {
+      const window = getEventWindow(event)
+      if (window) window.show()
+      return true
+    }
+  },
+  {
+    channel: 'window:focus',
+    handler: async (event) => {
+      const window = getEventWindow(event)
+      if (window) window.focus()
+      return true
+    }
+  },
+  {
+    channel: 'window:is-maximized',
+    handler: async (event) => {
+      const window = getEventWindow(event)
+      return window ? window.isMaximized() : false
+    }
+  },
+  {
+    channel: 'window:is-minimized',
+    handler: async (event) => {
+      const window = getEventWindow(event)
+      return window ? window.isMinimized() : false
+    }
+  },
+  {
+    channel: 'window:is-visible',
+    handler: async (event) => {
+      const window = getEventWindow(event)
+      return window ? window.isVisible() : false
+    }
+  },
+  {
+    channel: 'window:is-focused',
+    handler: async (event) => {
+      const window = getEventWindow(event)
+      return window ? window.isFocused() : false
+    }
+  },
+  {
+    channel: 'window:get-bounds',
+    handler: async (event) => {
+      const window = getEventWindow(event)
+      return window ? window.getBounds() : null
+    }
+  },
+  {
+    channel: 'window:set-bounds',
+    handler: async (event, bounds) => {
+      const window = getEventWindow(event)
+      if (window) window.setBounds(bounds)
+      return true
+    }
+  },
+  {
+    channel: 'window:get-size',
+    handler: async (event) => {
+      const window = getEventWindow(event)
+      return window ? window.getSize() : null
+    }
+  },
+  {
+    channel: 'window:set-size',
+    handler: async (event, width, height) => {
+      const window = getEventWindow(event)
+      if (window) window.setSize(width, height)
+      return true
+    }
+  },
+  {
+    channel: 'window:get-position',
+    handler: async (event) => {
+      const window = getEventWindow(event)
+      return window ? window.getPosition() : null
+    }
+  },
+  {
+    channel: 'window:set-position',
+    handler: async (event, x, y) => {
+      const window = getEventWindow(event)
+      if (window) window.setPosition(x, y)
+      return true
+    }
+  },
+  {
+    channel: 'window:create-floating-ball',
+    handler: async () => {
+      return await windowManager.createFloatingBall()
+    }
+  },
+  {
+    channel: 'window:create-note-window',
+    handler: async (event, noteId, options) => {
+      return await windowManager.createNoteWindow(noteId, options)
+    }
+  },
+  {
+    channel: 'window:is-note-open',
+    handler: async (event, noteId) => {
+      try {
+        const isOpen = windowManager.isNoteOpenInWindow(noteId)
+        return { success: true, isOpen }
+      } catch (error) {
+        console.error('检查笔记窗口状态失败:', error)
+        return { success: false, error: error.message, isOpen: false }
+      }
+    }
+  },
+  {
+    channel: 'window:create-todo-window',
+    handler: async (event, todoListId) => {
+      return await windowManager.createTodoWindow(todoListId)
+    }
+  },
+  {
+    channel: 'window:get-all',
+    handler: async () => {
+      return windowManager.getAllWindows()
+    }
+  },
+  {
+    channel: 'window:get-by-id',
+    handler: async (event, id) => {
+      return windowManager.getWindowById(id)
+    }
+  },
+  {
+    channel: 'window:close-window',
+    handler: async (event, id) => {
+      return windowManager.closeWindow(id)
     }
   }
-  return true
-})
-
-ipcMain.handle('window:close', async (event) => {
-  const window = BrowserWindow.fromWebContents(event.sender)
-  if (window) window.close()
-  return true
-})
-
-ipcMain.handle('window:hide', async (event) => {
-  const window = BrowserWindow.fromWebContents(event.sender)
-  if (window) window.hide()
-  return true
-})
-
-ipcMain.handle('window:show', async (event) => {
-  const window = BrowserWindow.fromWebContents(event.sender)
-  if (window) window.show()
-  return true
-})
-
-ipcMain.handle('window:focus', async (event) => {
-  const window = BrowserWindow.fromWebContents(event.sender)
-  if (window) window.focus()
-  return true
-})
-
-ipcMain.handle('window:is-maximized', async (event) => {
-  const window = BrowserWindow.fromWebContents(event.sender)
-  return window ? window.isMaximized() : false
-})
-
-ipcMain.handle('window:is-minimized', async (event) => {
-  const window = BrowserWindow.fromWebContents(event.sender)
-  return window ? window.isMinimized() : false
-})
-
-ipcMain.handle('window:is-visible', async (event) => {
-  const window = BrowserWindow.fromWebContents(event.sender)
-  return window ? window.isVisible() : false
-})
-
-ipcMain.handle('window:is-focused', async (event) => {
-  const window = BrowserWindow.fromWebContents(event.sender)
-  return window ? window.isFocused() : false
-})
-
-ipcMain.handle('window:get-bounds', async (event) => {
-  const window = BrowserWindow.fromWebContents(event.sender)
-  return window ? window.getBounds() : null
-})
-
-ipcMain.handle('window:set-bounds', async (event, bounds) => {
-  const window = BrowserWindow.fromWebContents(event.sender)
-  if (window) window.setBounds(bounds)
-  return true
-})
-
-ipcMain.handle('window:get-size', async (event) => {
-  const window = BrowserWindow.fromWebContents(event.sender)
-  return window ? window.getSize() : null
-})
-
-ipcMain.handle('window:set-size', async (event, width, height) => {
-  const window = BrowserWindow.fromWebContents(event.sender)
-  if (window) window.setSize(width, height)
-  return true
-})
-
-ipcMain.handle('window:get-position', async (event) => {
-  const window = BrowserWindow.fromWebContents(event.sender)
-  return window ? window.getPosition() : null
-})
-
-ipcMain.handle('window:set-position', async (event, x, y) => {
-  const window = BrowserWindow.fromWebContents(event.sender)
-  if (window) window.setPosition(x, y)
-  return true
-})
-
-ipcMain.handle('window:create-floating-ball', async (event) => {
-  return await windowManager.createFloatingBall()
-})
-
-ipcMain.handle('window:create-note-window', async (event, noteId, options) => {
-  return await windowManager.createNoteWindow(noteId, options)
-})
-
-ipcMain.handle('window:is-note-open', async (event, noteId) => {
-  try {
-    const isOpen = windowManager.isNoteOpenInWindow(noteId)
-    return { success: true, isOpen }
-  } catch (error) {
-    console.error('检查笔记窗口状态失败:', error)
-    return { success: false, error: error.message, isOpen: false }
-  }
-})
-
-ipcMain.handle('window:create-todo-window', async (event, todoListId) => {
-  return await windowManager.createTodoWindow(todoListId)
-})
-
-ipcMain.handle('window:get-all', async (event) => {
-  return windowManager.getAllWindows()
-})
-
-ipcMain.handle('window:get-by-id', async (event, id) => {
-  return windowManager.getWindowById(id)
-})
-
-ipcMain.handle('window:close-window', async (event, id) => {
-  return windowManager.closeWindow(id)
-})
+])
 
 ipcMain.handle('window:toggle-dev-tools', async (event) => {
   try {
@@ -1849,41 +1764,41 @@ ipcMain.handle('window:toggle-dev-tools', async (event) => {
 })
 
 // 系统相关IPC处理
-ipcMain.handle('system:get-platform', async (event) => {
-  return process.platform
-})
-
-ipcMain.handle('system:get-version', async (event) => {
-  return app.getVersion()
-})
-
-ipcMain.handle('system:get-path', async (event, name) => {
-  return app.getPath(name)
-})
-
-ipcMain.handle('system:show-open-dialog', async (event, options) => {
-  const window = BrowserWindow.fromWebContents(event.sender)
-  return await dialog.showOpenDialog(window, options)
-})
-
-ipcMain.handle('system:show-save-dialog', async (event, options) => {
-  const window = BrowserWindow.fromWebContents(event.sender)
-  return await dialog.showSaveDialog(window, options)
-})
-
-ipcMain.handle('system:show-message-box', async (event, options) => {
-  const window = BrowserWindow.fromWebContents(event.sender)
-  return await dialog.showMessageBox(window, options)
-})
-
-ipcMain.handle('system:write-text', async (event, text) => {
-  clipboard.writeText(text)
-  return true
-})
-
-ipcMain.handle('system:read-text', async (event) => {
-  return clipboard.readText()
-})
+registerIpcHandlers([
+  // 系统相关 IPC
+  { channel: 'system:get-platform', handler: async () => process.platform },
+  { channel: 'system:get-version', handler: async () => app.getVersion() },
+  { channel: 'system:get-path', handler: async (event, name) => app.getPath(name) },
+  {
+    channel: 'system:show-open-dialog',
+    handler: async (event, options) => {
+      const window = getEventWindow(event)
+      return await dialog.showOpenDialog(window, options)
+    }
+  },
+  {
+    channel: 'system:show-save-dialog',
+    handler: async (event, options) => {
+      const window = getEventWindow(event)
+      return await dialog.showSaveDialog(window, options)
+    }
+  },
+  {
+    channel: 'system:show-message-box',
+    handler: async (event, options) => {
+      const window = getEventWindow(event)
+      return await dialog.showMessageBox(window, options)
+    }
+  },
+  {
+    channel: 'system:write-text',
+    handler: async (event, text) => {
+      clipboard.writeText(text)
+      return true
+    }
+  },
+  { channel: 'system:read-text', handler: async () => clipboard.readText() }
+])
 
 ipcMain.handle('system:show-notification', async (event, options) => {
   // 确保通知包含应用图标
@@ -1988,128 +1903,96 @@ ipcMain.handle('system:read-image-as-base64', async (event, filePath) => {
 })
 
 // 标签相关IPC处理
-ipcMain.handle('tag:get-all', async (event, options) => {
-  return await services.tagService.getAllTags(options)
-})
-
-ipcMain.handle('tag:search', async (event, query, limit) => {
-  return await services.tagService.searchTags(query, limit)
-})
-
-ipcMain.handle('tag:get-suggestions', async (event, input, limit) => {
-  return await services.tagService.getTagSuggestions(input, limit)
-})
-
-ipcMain.handle('tag:get-popular', async (event, limit) => {
-  return await services.tagService.getAllTags({ limit, orderBy: 'usage_count', order: 'DESC' })
-})
-
-ipcMain.handle('tags:getPopular', async (event, limit) => {
-  return await services.tagService.getPopularTags(limit);
-});
-
-ipcMain.handle('tag:get-stats', async (event) => {
-  return await services.tagService.getTagStats()
-})
-
-ipcMain.handle('tag:delete', async (event, tagName) => {
-  return await services.tagService.deleteTag(tagName)
-})
-
-ipcMain.handle('tag:cleanup', async (event) => {
-  return await services.tagService.cleanupUnusedTags()
-})
-
-ipcMain.handle('tag:recalculate-usage', async (event) => {
-  return await services.tagService.recalculateTagUsage()
-})
-
-ipcMain.handle('tag:batch-delete', async (event, tagNames) => {
-  const results = [];
-  for (const tagName of tagNames) {
-    const result = await services.tagService.deleteTag(tagName);
-    results.push(result);
+registerIpcHandlers([
+  ...Object.entries({
+    'tag:get-all': 'getAllTags',
+    'tag:search': 'searchTags',
+    'tag:get-suggestions': 'getTagSuggestions',
+    'tag:get-stats': 'getTagStats',
+    'tag:delete': 'deleteTag',
+    'tag:cleanup': 'cleanupUnusedTags',
+    'tag:recalculate-usage': 'recalculateTagUsage'
+  }).map(([channel, methodName]) => ({
+    channel,
+    handler: createServicePassthroughHandler(() => services.tagService, methodName)
+  })),
+  {
+    channel: 'tag:get-popular',
+    handler: async (event, limit) => {
+      return await services.tagService.getAllTags({ limit, orderBy: 'usage_count', order: 'DESC' })
+    }
+  },
+  {
+    channel: 'tags:getPopular',
+    handler: async (event, limit) => {
+      return await services.tagService.getPopularTags(limit)
+    }
   }
-  return { success: true, data: results };
-})
+])
+
+registerIpcHandlers([{
+  channel: 'tag:batch-delete',
+  handler: async (event, tagNames) => {
+    const results = []
+    for (const tagName of tagNames) {
+      const result = await services.tagService.deleteTag(tagName)
+      results.push(result)
+    }
+    return { success: true, data: results }
+  }
+}])
 
 // 快捷键相关的IPC处理程序
-ipcMain.handle('shortcut:update', async (event, shortcutId, newShortcut, action) => {
-  try {
-    if (!shortcutService) {
-      throw new Error('快捷键服务未初始化')
+const createShortcutHandler = (methodName, errorMsg) => {
+  return async (event, ...args) => {
+    try {
+      if (!shortcutService) {
+        throw new Error('快捷键服务未初始化')
+      }
+      const result = await shortcutService[methodName](...args)
+      return { success: true, data: result }
+    } catch (error) {
+      console.error(`${errorMsg}:`, error)
+      return { success: false, error: error.message }
     }
-
-    const result = await shortcutService.updateShortcut(shortcutId, newShortcut, action)
-    return { success: true, data: result }
-  } catch (error) {
-    console.error('更新快捷键失败:', error)
-    return { success: false, error: error.message }
   }
-})
+}
 
-ipcMain.handle('shortcut:reset', async (event, shortcutId) => {
-  try {
-    if (!shortcutService) {
-      throw new Error('快捷键服务未初始化')
-    }
-
-    const result = await shortcutService.resetShortcut(shortcutId)
-    return { success: true, data: result }
-  } catch (error) {
-    console.error('重置快捷键失败:', error)
-    return { success: false, error: error.message }
-  }
-})
-
-ipcMain.handle('shortcut:reset-all', async (event) => {
-  try {
-    if (!shortcutService) {
-      throw new Error('快捷键服务未初始化')
-    }
-
-    const result = await shortcutService.resetAllShortcuts()
-    return { success: true, data: result }
-  } catch (error) {
-    console.error('重置所有快捷键失败:', error)
-    return { success: false, error: error.message }
-  }
-})
-
-ipcMain.handle('shortcut:get-all', async (event) => {
-  try {
-    if (!shortcutService) {
-      throw new Error('快捷键服务未初始化')
-    }
-
-    const shortcuts = await shortcutService.getAllShortcuts()
-    return { success: true, data: shortcuts }
-  } catch (error) {
-    console.error('获取快捷键配置失败:', error)
-    return { success: false, error: error.message }
-  }
-})
+registerIpcHandlers([
+  { channel: 'shortcut:update', handler: createShortcutHandler('updateShortcut', '更新快捷键失败') },
+  { channel: 'shortcut:reset', handler: createShortcutHandler('resetShortcut', '重置快捷键失败') },
+  { channel: 'shortcut:reset-all', handler: createShortcutHandler('resetAllShortcuts', '重置所有快捷键失败') },
+  { channel: 'shortcut:get-all', handler: createShortcutHandler('getAllShortcuts', '获取快捷键配置失败') }
+])
 
 // 图片相关 IPC 处理器
-ipcMain.handle('image:save-from-buffer', async (event, buffer, fileName) => {
-  try {
-    const imagePath = await services.imageService.saveImage(Buffer.from(buffer), fileName)
-    return { success: true, data: imagePath }
-  } catch (error) {
-    console.error('保存图片失败:', error)
-    return { success: false, error: error.message }
+const createImageServiceHandler = (methodName, errorMsg, wrapData = true) => {
+  return async (event, ...args) => {
+    try {
+      const result = await services.imageService[methodName](...args)
+      return wrapData ? { success: true, data: result } : result
+    } catch (error) {
+      console.error(`${errorMsg}:`, error)
+      return { success: false, error: error.message }
+    }
   }
-})
+}
 
-ipcMain.handle('image:save-from-path', async (event, sourcePath, fileName) => {
-  try {
-    const imagePath = await services.imageService.saveImageFromPath(sourcePath, fileName)
-    return { success: true, data: imagePath }
-  } catch (error) {
-    console.error('从路径保存图片失败:', error)
-    return { success: false, error: error.message }
-  }
-})
+registerIpcHandlers([
+  {
+    channel: 'image:save-from-buffer',
+    handler: async (event, buffer, fileName) => {
+      try {
+        const imagePath = await services.imageService.saveImage(Buffer.from(buffer), fileName)
+        return { success: true, data: imagePath }
+      } catch (error) {
+        console.error('保存图片失败:', error)
+        return { success: false, error: error.message }
+      }
+    }
+  },
+  { channel: 'image:save-from-path', handler: createImageServiceHandler('saveImageFromPath', '从路径保存图片失败') }
+])
 
 ipcMain.handle('image:select-file', async () => {
   try {
@@ -2141,42 +2024,26 @@ ipcMain.handle('image:select-file', async () => {
   }
 })
 
-ipcMain.handle('image:get-path', async (event, relativePath) => {
-  try {
-    const fullPath = services.imageService.getImagePath(relativePath)
-    const fs = require('fs')
-
-    // 检查文件是否存在
-    if (fs.existsSync(fullPath)) {
-      return { success: true, data: fullPath }
-    } else {
-      return { success: false, error: '图片文件不存在' }
+registerIpcHandlers([
+  {
+    channel: 'image:get-path',
+    handler: async (event, relativePath) => {
+      try {
+        const fullPath = services.imageService.getImagePath(relativePath)
+        if (fs.existsSync(fullPath)) {
+          return { success: true, data: fullPath }
+        } else {
+          return { success: false, error: '图片文件不存在' }
+        }
+      } catch (error) {
+        console.error('获取图片路径失败:', error)
+        return { success: false, error: error.message }
+      }
     }
-  } catch (error) {
-    console.error('获取图片路径失败:', error)
-    return { success: false, error: error.message }
-  }
-})
-
-ipcMain.handle('image:get-base64', async (event, relativePath) => {
-  try {
-    const base64Data = await services.imageService.getBase64(relativePath)
-    return { success: true, data: base64Data }
-  } catch (error) {
-    console.error('获取图片base64失败:', error)
-    return { success: false, error: error.message }
-  }
-})
-
-ipcMain.handle('image:delete', async (event, relativePath) => {
-  try {
-    const result = await services.imageService.deleteImage(relativePath)
-    return { success: true, data: result }
-  } catch (error) {
-    console.error('删除图片失败:', error)
-    return { success: false, error: error.message }
-  }
-})
+  },
+  { channel: 'image:get-base64', handler: createImageServiceHandler('getBase64', '获取图片base64失败') },
+  { channel: 'image:delete', handler: createImageServiceHandler('deleteImage', '删除图片失败') }
+])
 
 // 白板图片存储 IPC 处理器
 ipcMain.handle('whiteboard:save-images', async (event, files) => {

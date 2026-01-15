@@ -9,28 +9,29 @@
  * @param {string} query - 搜索查询字符串
  * @returns {Promise<Object>} 搜索结果
  */
+import { normalizeTags } from '../utils/tagUtils'
+
 export const searchNotesAPI = async (query) => {
   try {
     if (!window.electronAPI?.notes?.search) {
       throw new Error('Notes search API not available');
     }
-    
+
     const result = await window.electronAPI.notes.search(query);
-    
+
     if (result?.success) {
       // 使用tagUtils标准化笔记数据格式
-      const { normalizeTags } = await import('../utils/tagUtils.js');
       const normalizedNotes = (result.data || []).map(note => ({
         ...note,
         tags: normalizeTags(note.tags)
       }));
-      
+
       return {
         success: true,
         data: normalizedNotes
       };
     }
-    
+
     return result;
   } catch (error) {
     console.error('Failed to search notes:', error);

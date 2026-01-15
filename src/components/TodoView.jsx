@@ -25,6 +25,7 @@ import {
   Select,
   MenuItem
 } from '@mui/material';
+import { scrollbar } from '../styles/commonStyles';
 import MultiSelectToolbar from './MultiSelectToolbar';
 import {
   Add as AddIcon,
@@ -55,6 +56,7 @@ import appLocale from '../locales/zh-CN';
 import { todoSchema, extractValidationErrors } from '../validators/todoValidation';
 import { ANIMATIONS, createTransitionString } from '../utils/animationConfig';
 import useTodoDrag from '../hooks/useTodoDrag';
+import { useError } from './ErrorProvider';
 
 const {
   todo: { dialog: todoDialog }
@@ -62,6 +64,7 @@ const {
 
 const TodoView = ({ viewMode, showCompleted, onViewModeChange, onShowCompletedChange, onRefresh, onTodoSelect }) => {
   const { t } = useTranslation();
+  const { showError, showSuccess } = useError();
   const theme = useTheme();
   const effectiveViewMode = viewMode === 'list' ? 'focus' : viewMode;
   const [todos, setTodos] = useState([]);
@@ -134,6 +137,7 @@ const TodoView = ({ viewMode, showCompleted, onViewModeChange, onShowCompletedCh
       setStats(computeStatsFromList(statsSource));
     } catch (error) {
       console.error('加载待办事项失败:', error);
+      showError(error, '加载待办事项失败');
       setTodos([]);
       setStats({ total: 0, completed: 0, pending: 0, overdue: 0 });
     } finally {
@@ -157,6 +161,7 @@ const TodoView = ({ viewMode, showCompleted, onViewModeChange, onShowCompletedCh
         }
       } catch (error) {
         console.error('更新待办事项失败:', error);
+        showError(error, '更新待办事项失败');
       }
       return;
     }
@@ -178,6 +183,7 @@ const TodoView = ({ viewMode, showCompleted, onViewModeChange, onShowCompletedCh
             }
           } catch (err) {
             console.error('更新待办事项失败:', err);
+            showError(err, '更新待办事项失败');
           }
 
           // 清除庆祝状态
@@ -198,6 +204,7 @@ const TodoView = ({ viewMode, showCompleted, onViewModeChange, onShowCompletedCh
         });
       } catch (error) {
         console.error('更新待办事项失败:', error);
+        showError(error, '更新待办事项失败');
       }
     } else {
       // 第一次点击，标记为待完成
@@ -224,6 +231,7 @@ const TodoView = ({ viewMode, showCompleted, onViewModeChange, onShowCompletedCh
       }
     } catch (error) {
       console.error('更新待办事项失败:', error);
+      showError(error, '更新待办事项失败');
       throw error;
     }
   };
@@ -262,6 +270,7 @@ const TodoView = ({ viewMode, showCompleted, onViewModeChange, onShowCompletedCh
       }
     } catch (error) {
       console.error('删除待办事项失败:', error);
+      showError(error, '删除待办事项失败');
     }
   };
   // 渲染单个待办事项
@@ -485,7 +494,7 @@ const TodoView = ({ viewMode, showCompleted, onViewModeChange, onShowCompletedCh
                       </Box>
                     </Box>
                   ) : (
-                    <Box sx={{ flex: 1, overflow: 'auto', pr: 1 }}>
+                    <Box sx={{ flex: 1, overflow: 'auto', pr: 1, ...scrollbar.auto }}>
                       <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1 }}>
                         {quadrant.todos.map(renderTodoItem)}
                       </Box>
@@ -550,6 +559,7 @@ const TodoView = ({ viewMode, showCompleted, onViewModeChange, onShowCompletedCh
       setSelectedTodos([]);
     } catch (error) {
       console.error('批量完成待办事项失败:', error);
+      showError(error, '批量完成失败');
     }
   };
 
@@ -566,6 +576,7 @@ const TodoView = ({ viewMode, showCompleted, onViewModeChange, onShowCompletedCh
       setSelectedTodos([]);
     } catch (error) {
       console.error('批量删除待办事项失败:', error);
+      showError(error, '批量删除失败');
     }
   };
 

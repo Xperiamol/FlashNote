@@ -1,4 +1,5 @@
 import { create } from 'zustand'
+import { normalizeTags } from '../utils/tagUtils'
 
 /**
  * 独立窗口状态管理
@@ -43,19 +44,7 @@ export const useStandaloneStore = create((set, get) => ({
       const response = await window.electronAPI.notes.getById(noteId)
       if (response.success && response.data) {
         const noteRaw = response.data
-        // 规范化标签以与主应用保持一致
-        let normalizedTags = []
-        try {
-          const { normalizeTags } = await import('../utils/tagUtils.js')
-          normalizedTags = normalizeTags(noteRaw.tags)
-        } catch (e) {
-          normalizedTags = Array.isArray(noteRaw.tags)
-            ? noteRaw.tags
-            : (typeof noteRaw.tags === 'string' && noteRaw.tags.trim())
-              ? noteRaw.tags.split(',').map(t => t.trim()).filter(Boolean)
-              : []
-        }
-        const note = { ...noteRaw, tags: normalizedTags }
+        const note = { ...noteRaw, tags: normalizeTags(noteRaw.tags) }
         set({
           notes: [note], // 独立窗口只需要当前笔记
           selectedNoteId: note.id // 使用返回的真实ID
@@ -77,19 +66,7 @@ export const useStandaloneStore = create((set, get) => ({
       const result = await window.electronAPI.notes.update(noteId, updates)
       if (result?.success && result.data) {
         const noteRaw = result.data
-        // 规范化标签
-        let normalizedTags = []
-        try {
-          const { normalizeTags } = await import('../utils/tagUtils.js')
-          normalizedTags = normalizeTags(noteRaw.tags)
-        } catch (e) {
-          normalizedTags = Array.isArray(noteRaw.tags)
-            ? noteRaw.tags
-            : (typeof noteRaw.tags === 'string' && noteRaw.tags.trim())
-              ? noteRaw.tags.split(',').map(t => t.trim()).filter(Boolean)
-              : []
-        }
-        const updatedNote = { ...noteRaw, tags: normalizedTags }
+        const updatedNote = { ...noteRaw, tags: normalizeTags(noteRaw.tags) }
         set(state => ({
           notes: state.notes.map(note => 
             note.id === updatedNote.id ? updatedNote : note
@@ -125,18 +102,7 @@ export const useStandaloneStore = create((set, get) => ({
       if (response?.success) {
         if (response.data) {
           const noteRaw = response.data
-          let normalizedTags = []
-          try {
-            const { normalizeTags } = await import('../utils/tagUtils.js')
-            normalizedTags = normalizeTags(noteRaw.tags)
-          } catch (e) {
-            normalizedTags = Array.isArray(noteRaw.tags)
-              ? noteRaw.tags
-              : (typeof noteRaw.tags === 'string' && noteRaw.tags.trim())
-                ? noteRaw.tags.split(',').map(t => t.trim()).filter(Boolean)
-                : []
-          }
-          const updatedNote = { ...noteRaw, tags: normalizedTags }
+          const updatedNote = { ...noteRaw, tags: normalizeTags(noteRaw.tags) }
           set(state => ({
             notes: state.notes.map(note => 
               note.id === updatedNote.id ? updatedNote : note
@@ -166,19 +132,7 @@ export const useStandaloneStore = create((set, get) => ({
       const state = get()
       if (state.selectedNoteId !== incoming.id) return
       
-      // 规范化标签
-      let normalizedTags = []
-      try {
-        const { normalizeTags } = await import('../utils/tagUtils.js')
-        normalizedTags = normalizeTags(incoming.tags)
-      } catch (e) {
-        normalizedTags = Array.isArray(incoming.tags)
-          ? incoming.tags
-          : (typeof incoming.tags === 'string' && incoming.tags.trim())
-            ? incoming.tags.split(',').map(t => t.trim()).filter(Boolean)
-            : []
-      }
-      const merged = { ...incoming, tags: normalizedTags }
+      const merged = { ...incoming, tags: normalizeTags(incoming.tags) }
       set(state => ({
         notes: state.notes.map(n => n.id === merged.id ? merged : n)
       }))

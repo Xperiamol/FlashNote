@@ -5,6 +5,29 @@ const { EventEmitter } = require('events')
 const { Worker } = require('worker_threads')
 const crypto = require('crypto')
 
+// 获取用户数据路径（兼容 standalone 模式）
+const getUserDataPath = () => {
+  let app = null;
+  try {
+    app = require('electron').app;
+  } catch (e) {
+    // Standalone mode
+  }
+  
+  if (app) return app.getPath('userData');
+  
+  const platform = process.platform;
+  const homeDir = process.env.HOME || process.env.USERPROFILE;
+  
+  if (platform === 'win32') {
+    return path.join(process.env.APPDATA || homeDir, 'flashnote');
+  } else if (platform === 'darwin') {
+    return path.join(homeDir, 'Library', 'Application Support', 'flashnote');
+  } else {
+    return path.join(homeDir, '.config', 'flashnote');
+  }
+}
+
 const ALLOWED_PERMISSIONS = new Set([
 	// 笔记和待办
 	'notes:read',
@@ -111,7 +134,7 @@ class PluginManager extends EventEmitter {
 		if (this.app && typeof this.app.getPath === 'function') {
 			return path.join(this.app.getPath('userData'), 'plugins')
 		}
-		return path.resolve(process.cwd(), '.flashnote', 'plugins')
+		return path.join(getUserDataPath(), 'plugins')
 	}
 
 	resolveRegistryPath() {

@@ -7,7 +7,30 @@
 const { EventEmitter } = require('events');
 const path = require('path');
 const fs = require('fs');
-const { app } = require('electron');
+
+// 获取用户数据路径（兼容 standalone 模式）
+const getUserDataPath = () => {
+  let app = null;
+  try {
+    app = require('electron').app;
+  } catch (e) {
+    // Standalone mode
+  }
+  
+  if (app) return app.getPath('userData');
+  
+  const platform = process.platform;
+  const homeDir = process.env.HOME || process.env.USERPROFILE;
+  
+  if (platform === 'win32') {
+    return path.join(process.env.APPDATA || homeDir, 'flashnote');
+  } else if (platform === 'darwin') {
+    return path.join(homeDir, 'Library', 'Application Support', 'flashnote');
+  } else {
+    return path.join(homeDir, '.config', 'flashnote');
+  }
+};
+
 const SyncEngine = require('./SyncEngine');
 
 /**
@@ -38,7 +61,7 @@ class V3SyncService extends EventEmitter {
     this.syncIPCHandler = null;
 
     // 配置文件路径
-    this.configPath = path.join(app.getPath('userData'), 'v3-sync-config.json');
+    this.configPath = path.join(getUserDataPath(), 'v3-sync-config.json');
 
     // 加载配置
     this.loadConfig();
@@ -90,6 +113,7 @@ class V3SyncService extends EventEmitter {
       rootPath: this.config.rootPath || '/FlashNote/',
       enableDebugLog: this.config.enableDebugLog || false,
       syncIPCHandler: this.syncIPCHandler, // 传递冲突解决处理器
+      syncCategories: this.config.syncCategories || ['notes', 'images', 'settings', 'todos'], // 传递启用的类别
     });
 
     // 转发事件
@@ -293,6 +317,59 @@ class V3SyncService extends EventEmitter {
   }
 
   /**
+   * 启用特定类别的同步
+   * @param {string} category - 类别名称：'notes', 'images', 'settings', 'todos'
+   */
+  enableCategory(category) {
+    if (!this.config.syncCategories) {
+      this.config.syncCategories = [];
+    }
+    if (!this.config.syncCategories.includes(category)) {
+      this.config.syncCategories.push(category);
+      this.saveConfig();
+      console.log(`[V3SyncService] 已启用类别: ${category}`);
+      
+      // 如果引擎已创建，更新引擎的配置
+      if (this.engine) {
+        this.engine.config.syncCategories = [...this.config.syncCategories];
+      }
+    }
+  }
+
+  /**
+   * 禁用特定类别的同步
+   * @param {string} category - 类别名称：'notes', 'images', 'settings', 'todos'
+   */
+  disableCategory(category) {
+    if (!this.config.syncCategories) {
+      this.config.syncCategories = [];
+    }
+    const index = this.config.syncCategories.indexOf(category);
+    if (index > -1) {
+      this.config.syncCategories.splice(index, 1);
+      this.saveConfig();
+      console.log(`[V3SyncService] 已禁用类别: ${category}`);
+      
+      // 如果引擎已创建，更新引擎的配置
+      if (this.engine) {
+        this.engine.config.syncCategories = [...this.config.syncCategories];
+      }
+    }
+  }
+
+  /**
+   * 检查特定类别是否启用
+   * @param {string} category - 类别名称
+   * @returns {boolean}
+   */
+  isCategoryEnabled(category) {
+    if (!this.config.syncCategories) {
+      return false;
+    }
+    return this.config.syncCategories.includes(category);
+  }
+
+  /**
    * 获取状态
    */
   getStatus() {
@@ -309,6 +386,7 @@ class V3SyncService extends EventEmitter {
         autoSyncInterval: (this.config?.autoSyncInterval || this.autoSyncInterval) / 1000 / 60, // 转为分钟
         baseUrl: this.config?.baseUrl || '',
         username: this.config?.credentials?.username || '',
+        syncCategories: this.config?.syncCategories || [],
       },
     };
   }
@@ -368,6 +446,7 @@ class V3SyncService extends EventEmitter {
       rootPath: '/FlashNote/',
       enableDebugLog: false,
       credentials: null,
+      syncCategories: ['notes', 'images', 'settings', 'todos'], // 默认同步所有类别
     };
   }
 
@@ -590,7 +669,7 @@ class V3SyncService extends EventEmitter {
     }
 
     // 删除本地 manifest 缓存
-    const manifestPath = path.join(app.getPath('userData'), 'sync-manifest.json');
+    const manifestPath = path.join(getUserDataPath(), 'sync-manifest.json');
     if (fs.existsSync(manifestPath)) {
       fs.unlinkSync(manifestPath);
     }

@@ -22,8 +22,10 @@ import {
   Memory as MemoryIcon,
   Wifi as WifiIcon,
   Info as InfoIcon,
-  RecordVoiceOver as STTIcon
+  RecordVoiceOver as STTIcon,
+  Code as CodeIcon
 } from '@mui/icons-material';
+import { scrollbar } from '../styles/commonStyles';
 import { useStore } from '../store/useStore';
 import NoteList from './NoteList';
 import TodoList from './TodoList';
@@ -62,6 +64,7 @@ const SecondarySidebar = ({ open, onClose, width = 320, onTodoSelect, onViewMode
       case 'todo':
         return (
           <TodoList 
+            key="todo-list-stable"
             onTodoSelect={onTodoSelect}
             onViewModeChange={onViewModeChange}
             onShowCompletedChange={onShowCompletedChange}
@@ -126,7 +129,7 @@ const SecondarySidebar = ({ open, onClose, width = 320, onTodoSelect, onViewMode
               {t('plugins.categories')}
             </Typography>
 
-            <List dense disablePadding sx={{ overflowY: 'auto' }}>
+            <List dense disablePadding sx={{ overflowY: 'auto', ...scrollbar.auto }}>
               {categories.map((category) => (
                 <ListItemButton
                   key={category.id || category}
@@ -161,7 +164,8 @@ const SecondarySidebar = ({ open, onClose, width = 320, onTodoSelect, onViewMode
           { id: 6, name: t('settings.cloud'), icon: <CloudIcon /> },
           { id: 7, name: t('settings.proxy'), icon: <WifiIcon /> },
           { id: 8, name: t('settings.data'), icon: <ImportIcon /> },
-          { id: 9, name: t('settings.about'), icon: <InfoIcon /> }
+          { id: 9, name: 'MCP 服务', icon: <CodeIcon /> },
+          { id: 10, name: t('settings.about'), icon: <InfoIcon /> }
         ]
 
         return (
@@ -180,7 +184,7 @@ const SecondarySidebar = ({ open, onClose, width = 320, onTodoSelect, onViewMode
               {t('settings.settings')}
             </Typography>
 
-            <List dense disablePadding sx={{ overflowY: 'auto' }}>
+            <List dense disablePadding sx={{ overflowY: 'auto', ...scrollbar.auto }}>
               {settingsCategories.map((category) => (
                 <ListItemButton
                   key={category.id}

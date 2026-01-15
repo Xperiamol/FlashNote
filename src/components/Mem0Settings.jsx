@@ -1,5 +1,6 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { useTranslation } from '../utils/i18n';
+import { useError } from './ErrorProvider';
 import {
   Box,
   Typography,
@@ -32,9 +33,11 @@ import {
   Refresh as RefreshIcon,
   Search as SearchIcon
 } from '@mui/icons-material';
+import { scrollbar } from '../styles/commonStyles';
 
 const Mem0Settings = () => {
   const { t } = useTranslation();
+  const { showError, showSuccess } = useError();
   const [available, setAvailable] = useState(false);
   const [loading, setLoading] = useState(true);
   const [stats, setStats] = useState(null);
@@ -59,7 +62,7 @@ const Mem0Settings = () => {
     }
   }, [selectedCategory, available]);
 
-  const checkAvailability = async () => {
+  const checkAvailability = useCallback(async () => {
     setLoading(true);
     try {
       if (window.electronAPI?.invoke) {
@@ -78,13 +81,14 @@ const Mem0Settings = () => {
       }
     } catch (error) {
       console.error('检查 Mem0 可用性失败:', error);
+      showError(error, 'Mem0 服务检查失败');
       setMessage({ type: 'error', text: t('mem0.checkServiceFailed') });
       setAvailable(false);
     }
     setLoading(false);
-  };
+  }, [t, showError]);
 
-  const loadStats = async () => {
+  const loadStats = useCallback(async () => {
     try {
       if (window.electronAPI?.invoke) {
         const result = await window.electronAPI.invoke('mem0:stats', { userId });
@@ -94,11 +98,12 @@ const Mem0Settings = () => {
       }
     } catch (error) {
       console.error('加载统计信息失败:', error);
+      showError(error, '加载统计信息失败');
       setStats(null);
     }
-  };
+  }, [userId, showError]);
 
-  const loadMemories = async () => {
+  const loadMemories = useCallback(async () => {
     try {
       if (window.electronAPI?.invoke) {
         const options = {
@@ -126,10 +131,11 @@ const Mem0Settings = () => {
       }
     } catch (error) {
       console.error('加载记忆列表失败:', error);
+      showError(error, '加载记忆列表失败');
       setMessage({ type: 'error', text: t('mem0.loadMemoriesFailed') });
       setMemories([]);
     }
-  };
+  }, [selectedCategory, userId, showError, t]);
 
   const handleSearch = async () => {
     if (!searchQuery.trim()) {
@@ -161,6 +167,7 @@ const Mem0Settings = () => {
       }
     } catch (error) {
       console.error('搜索失败:', error);
+      showError(error, '搜索失败');
       setMessage({ type: 'error', text: t('mem0.searchFailed') });
       setSearchResults([]);
     }
@@ -183,6 +190,7 @@ const Mem0Settings = () => {
       }
     } catch (error) {
       console.error('删除记忆失败:', error);
+      showError(error, '删除记忆失败');
       setMessage({ type: 'error', text: t('mem0.deleteFailed') });
     }
   };
@@ -201,6 +209,7 @@ const Mem0Settings = () => {
       }
     } catch (error) {
       console.error('清除记忆失败:', error);
+      showError(error, '清除记忆失败');
       setMessage({ type: 'error', text: t('mem0.clearFailed') });
     }
   };
@@ -235,6 +244,7 @@ const Mem0Settings = () => {
       }
     } catch (error) {
       console.error('迁移历史数据失败:', error);
+      showError(error, '迁移历史数据失败');
       setMessage({ type: 'error', text: '处理历史数据时出错' });
     } finally {
       setLoading(false);
@@ -385,7 +395,7 @@ const Mem0Settings = () => {
               </Box>
               
               {Array.isArray(searchResults) && searchResults.length > 0 && (
-                <Box sx={{ maxHeight: 300, overflowY: 'auto', border: '1px solid', borderColor: 'divider', borderRadius: 1 }}>
+                <Box sx={{ maxHeight: 300, overflowY: 'auto', border: '1px solid', borderColor: 'divider', borderRadius: 1, ...scrollbar.auto }}>
                   <List dense disablePadding>
                     {searchResults.map((memory) => (
                       <ListItem key={memory.id} divider>
@@ -455,7 +465,7 @@ const Mem0Settings = () => {
                   {t('mem0.noMemories')}
                 </Typography>
               ) : (
-                <Box sx={{ maxHeight: 400, overflowY: 'auto', border: '1px solid', borderColor: 'divider', borderRadius: 1 }}>
+                <Box sx={{ maxHeight: 400, overflowY: 'auto', border: '1px solid', borderColor: 'divider', borderRadius: 1, ...scrollbar.auto }}>
                   <List dense disablePadding>
                     {memories.map((memory) => (
                       <ListItem key={memory.id} divider>

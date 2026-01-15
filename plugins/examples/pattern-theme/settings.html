@@ -1,4 +1,4 @@
-<!DOCTYPE html>
+﻿<!DOCTYPE html>
 <html lang="zh-CN">
 <head>
 	<meta charset="UTF-8">
@@ -147,31 +147,23 @@
 							{ getSettings: true }
 						)
 
-						console.log('[PatternSettings] 原始响应:', JSON.stringify(result, null, 2))
-						console.log('[PatternSettings] result 类型:', typeof result)
-						console.log('[PatternSettings] result.success:', result.success)
-						console.log('[PatternSettings] result.data:', result.data)
-						console.log('[PatternSettings] result.currentSettings:', result.currentSettings)
-						
-						// 处理返回数据：可能是多种格式
-						let responseData
-						
+
 						// 格式1: { success: true, data: { currentSettings: {...}, availableStyles: [...] } }
 						if (result.data && result.data.currentSettings) {
-							console.log('[PatternSettings] 使用格式1: result.data')
+							
 							responseData = result.data
 						}
 						// 格式2: { success: true, currentSettings: {...}, availableStyles: [...] }
 						else if (result.currentSettings) {
-							console.log('[PatternSettings] 使用格式2: result 直接包含 currentSettings')
+							
 							responseData = result
 						}
 						else {
 							console.error('[PatternSettings] 未知的数据格式')
-							throw new Error('返回数据格式不正确: ' + JSON.stringify(result))
+							throw new Error('返回数据格式不正确')
 						}
 						
-						console.log('[PatternSettings] 解析后的 responseData:', responseData)
+						
 						
 						if (responseData && responseData.currentSettings) {
 							const current = responseData.currentSettings
@@ -180,7 +172,7 @@
 							setTempEnabled(current.enabled !== false)
 							setTempStyle(current.style || 'dots')
 							setCustomImage(current.customImageUrl || null)
-							console.log('[PatternSettings] ✅ 设置加载成功:', current)
+
 						} else {
 							console.error('[PatternSettings] responseData 无效:', responseData)
 							throw new Error('无法加载设置：缺少 currentSettings')
@@ -208,30 +200,18 @@
 					setMessage(null)
 
 					try {
-						console.log('[PatternSettings] 开始应用设置...')
-						console.log('[PatternSettings] 目标设置:', {
-							enabled: tempEnabled,
+					// 一次性发送所有设置
+					const result = await window.flashnotePlugin.executeCommand(
+						'pattern-theme',
+						'pattern-theme.settings',
+						{
+							getSettings: true,						needsImageData: false, // 避免控制台输出base64							enabled: tempEnabled,
 							style: tempStyle,
 							opacity: tempOpacity,
-							customImage: customImage ? '(有图片)' : '(无图片)'
-						})
-
-						// 一次性发送所有设置
-						const result = await window.flashnotePlugin.executeCommand(
-							'pattern-theme',
-							'pattern-theme.settings',
-							{
-								getSettings: true,
-								enabled: tempEnabled,
-								style: tempStyle,
-								opacity: tempOpacity,
-								maskMode: 'full',
-								customImage: customImage
-							}
-						)
-
-						console.log('[PatternSettings] 应用结果:', result)
-						
+							maskMode: 'full',
+							customImage: customImage
+						}
+					)
 						if (result.success) {
 							setMessage({ type: 'success', text: '设置已应用！' })
 							// 重新加载设置以确保同步
@@ -598,3 +578,4 @@
 	</script>
 </body>
 </html>
+

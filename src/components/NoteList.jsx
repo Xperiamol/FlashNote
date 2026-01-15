@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from 'react'
+import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react'
 import { useTranslation } from '../utils/i18n'
 import {
   Box,
@@ -21,7 +21,13 @@ import {
   Collapse,
   CircularProgress,
   Checkbox,
-  useTheme
+  useTheme,
+  Dialog,
+  DialogTitle,
+  DialogContent,
+  DialogContentText,
+  DialogActions,
+  Button
 } from '@mui/material'
 import {
   PushPin as PinIcon,
@@ -58,9 +64,11 @@ import MultiSelectToolbar from './MultiSelectToolbar'
 import { createDragHandler } from '../utils/DragManager'
 import { useDragAnimation } from './DragAnimationProvider'
 import { ANIMATIONS, createTransitionString } from '../utils/animationConfig'
+import { useError } from './ErrorProvider'
 
 const NoteList = ({ showDeleted = false, onMultiSelectChange, onMultiSelectRefChange }) => {
   const { t } = useTranslation()
+  const { showError, showSuccess } = useError()
   const theme = useTheme()
   const {
     notes,
@@ -84,6 +92,23 @@ const NoteList = ({ showDeleted = false, onMultiSelectChange, onMultiSelectRefCh
   const [selectedTagFilters, setSelectedTagFilters] = useState([])
   const [permanentDeleteConfirm, setPermanentDeleteConfirm] = useState(false)
   const [batchPermanentDeleteConfirm, setBatchPermanentDeleteConfirm] = useState(false)
+  const [isRefreshing, setIsRefreshing] = useState(false)
+  const [confirmDialog, setConfirmDialog] = useState({ 
+    open: false, 
+    type: '', // 'restore' | 'delete'
+    count: 0, 
+    ids: [] 
+  })
+
+  // 添加ref防止重复加载
+  const isLoadingRef = useRef(false)
+  const notesRef = useRef([])
+  const lastFetchedViewRef = useRef(null)
+
+  // 保持 notes 的最新引用，供 loadNotes 判断是否已有数据
+  useEffect(() => {
+    notesRef.current = notes
+  }, [notes])
 
   // 筛选器可见性状态
   const { filtersVisible, toggleFiltersVisibility } = useFiltersVisibility('note_filters_visible')
@@ -96,6 +121,7 @@ const NoteList = ({ showDeleted = false, onMultiSelectChange, onMultiSelectRefCh
       await window.electronAPI.createNoteWindow(note.id, endPosition ? { x: endPosition.x, y: endPosition.y } : {})
     } catch (error) {
       console.error('创建笔记独立窗口失败:', error)
+      showError(error, '打开独立窗口失败')
     }
   }, {
     onDragStart: (dragData) => {
@@ -108,24 +134,26 @@ const NoteList = ({ showDeleted = false, onMultiSelectChange, onMultiSelectRefCh
     }
   })
 
-  // 过滤笔记
-  const filteredNotes = notes.filter(note => {
-    const matchesDeletedStatus = showDeleted ? note.is_deleted : !note.is_deleted;
+  // 过滤笔记 - 使用 useMemo 避免每次渲染都重新计算
+  const filteredNotes = useMemo(() => {
+    return notes.filter(note => {
+      const matchesDeletedStatus = showDeleted ? note.is_deleted : !note.is_deleted;
 
-    // 如果没有选择标签筛选，只按删除状态筛选
-    if (selectedTagFilters.length === 0) {
-      return matchesDeletedStatus;
-    }
+      // 如果没有选择标签筛选，只按删除状态筛选
+      if (selectedTagFilters.length === 0) {
+        return matchesDeletedStatus;
+      }
 
-    // 检查笔记是否包含选中的标签
-    const noteTags = note.tags ?
-      (Array.isArray(note.tags) ? note.tags : note.tags.split(',').map(tag => tag.trim())) : [];
-    const hasSelectedTags = selectedTagFilters.some(filterTag =>
-      noteTags.includes(filterTag)
-    );
+      // 检查笔记是否包含选中的标签
+      const noteTags = note.tags ?
+        (Array.isArray(note.tags) ? note.tags : note.tags.split(',').map(tag => tag.trim())) : [];
+      const hasSelectedTags = selectedTagFilters.some(filterTag =>
+        noteTags.includes(filterTag)
+      );
 
-    return matchesDeletedStatus && hasSelectedTags;
-  })
+      return matchesDeletedStatus && hasSelectedTags;
+    })
+  }, [notes, showDeleted, selectedTagFilters])
 
   // 使用多选管理hook
   const multiSelect = useMultiSelectManager({
@@ -137,8 +165,13 @@ const NoteList = ({ showDeleted = false, onMultiSelectChange, onMultiSelectRefCh
 
   useEffect(() => {
     const handleTransition = async () => {
+      const alreadyLoadedCurrentView = lastFetchedViewRef.current === showDeleted && notesRef.current.length > 0
+      if (alreadyLoadedCurrentView) return
+
+      lastFetchedViewRef.current = showDeleted
+      isLoadingRef.current = true
+
       setIsTransitioning(true)
-      // 添加短暂延迟以显示过渡动画
       await new Promise(resolve => setTimeout(resolve, 150))
 
       if (showDeleted) {
@@ -148,10 +181,11 @@ const NoteList = ({ showDeleted = false, onMultiSelectChange, onMultiSelectRefCh
       }
 
       setIsTransitioning(false)
+      isLoadingRef.current = false
     }
 
     handleTransition()
-  }, [showDeleted]) // 移除 loadNotes 依赖，避免无限循环
+  }, [showDeleted, loadNotes])
 
   // 使用通用搜索hook
   const { search: searchNotes, isSearching } = useSearch({
@@ -183,45 +217,46 @@ const NoteList = ({ showDeleted = false, onMultiSelectChange, onMultiSelectRefCh
     debounceDelay: 300
   })
 
-  const handleNoteClick = (noteId) => {
+  const handleNoteClick = useCallback((noteId) => {
     if (!multiSelect.isMultiSelectMode) {
       setSelectedNoteId(noteId)
     }
-  }
+  }, [multiSelect.isMultiSelectMode, setSelectedNoteId])
 
-  const handleMenuClick = (event, note) => {
-    event.stopPropagation()
-    setAnchorEl(event.currentTarget)
-    setSelectedNote(note)
-  }
+  const handleMenuClick = useCallback((e, note) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setAnchorEl(e.currentTarget);
+    setSelectedNote(note);
+  }, []);
 
-  const handleMenuClose = () => {
+  const handleMenuClose = useCallback(() => {
     setAnchorEl(null)
     setSelectedNote(null)
-  }
+  }, [])
 
-  const handleTogglePin = async () => {
+  const handleTogglePin = useCallback(async () => {
     if (selectedNote) {
       await togglePinNote(selectedNote.id)
       handleMenuClose()
     }
-  }
+  }, [selectedNote, togglePinNote, handleMenuClose])
 
-  const handleDelete = async () => {
+  const handleDelete = useCallback(async () => {
     if (selectedNote) {
       await deleteNote(selectedNote.id)
       handleMenuClose()
     }
-  }
+  }, [selectedNote, deleteNote, handleMenuClose])
 
-  const handleRestore = async () => {
+  const handleRestore = useCallback(async () => {
     if (selectedNote) {
       await restoreNote(selectedNote.id)
       handleMenuClose()
     }
-  }
+  }, [selectedNote, restoreNote, handleMenuClose])
 
-  const handlePermanentDelete = async () => {
+  const handlePermanentDelete = useCallback(async () => {
     if (selectedNote) {
       if (!permanentDeleteConfirm) {
         // 第一次点击，设置确认状态
@@ -238,10 +273,10 @@ const NoteList = ({ showDeleted = false, onMultiSelectChange, onMultiSelectRefCh
         handleMenuClose()
       }
     }
-  }
+  }, [selectedNote, permanentDeleteConfirm, handleMenuClose])
 
   // 在独立窗口打开笔记
-  const handleOpenStandalone = async () => {
+  const handleOpenStandalone = useCallback(async () => {
     if (!selectedNote) return
 
     try {
@@ -249,11 +284,12 @@ const NoteList = ({ showDeleted = false, onMultiSelectChange, onMultiSelectRefCh
       handleMenuClose()
     } catch (error) {
       console.error('打开独立窗口失败:', error)
+      showError(error, '打开独立窗口失败')
     }
-  }
+  }, [selectedNote, handleMenuClose, showError])
 
   // 转换笔记为待办事项
-  const handleConvertToTodo = async () => {
+  const handleConvertToTodo = useCallback(async () => {
     if (!selectedNote) return
 
     try {
@@ -295,92 +331,66 @@ const NoteList = ({ showDeleted = false, onMultiSelectChange, onMultiSelectRefCh
       handleMenuClose()
     } catch (error) {
       console.error('转换为待办失败:', error)
-      alert('转换失败: ' + error.message)
+      showError(error, '转换为待办失败')
     }
-  }
+  }, [selectedNote, deleteNote, handleMenuClose, showError])
 
   // 批量操作处理函数
-  const handleBatchRestore = async (selectedIds) => {
+  const handleBatchRestore = useCallback(async (selectedIds) => {
     if (selectedIds.length === 0) return
+    setConfirmDialog({ open: true, type: 'restore', count: selectedIds.length, ids: selectedIds })
+  }, [])
 
-    const confirmed = window.confirm(`确定要恢复 ${selectedIds.length} 个笔记吗？`)
-    if (confirmed) {
-      const result = await batchRestoreNotes(selectedIds)
-      if (result.success) {
-        multiSelect.clearSelection()
-      }
+  const handleBatchDelete = useCallback(async (selectedIds) => {
+    if (selectedIds.length === 0) return
+    setConfirmDialog({ open: true, type: 'delete', count: selectedIds.length, ids: selectedIds })
+  }, [])
+
+  const handleConfirmAction = useCallback(async () => {
+    const { type, ids } = confirmDialog
+    setConfirmDialog({ open: false, type: '', count: 0, ids: [] })
+    
+    const result = type === 'restore' 
+      ? await batchRestoreNotes(ids)
+      : await batchDeleteNotes(ids)
+    
+    if (result.success) {
+      multiSelect.clearSelection()
     }
-  }
+  }, [confirmDialog, batchRestoreNotes, batchDeleteNotes, multiSelect])
 
-  const handleBatchPermanentDelete = async (selectedIds) => {
+  const handleBatchPermanentDelete = useCallback(async (selectedIds) => {
     if (selectedIds.length === 0) return
 
     if (!batchPermanentDeleteConfirm) {
-      // 第一次点击，设置确认状态
       setBatchPermanentDeleteConfirm(true)
-      // 3秒后自动重置状态
-      setTimeout(() => {
-        setBatchPermanentDeleteConfirm(false)
-      }, 3000)
+      setTimeout(() => setBatchPermanentDeleteConfirm(false), 3000)
     } else {
-      // 第二次点击，执行删除
       const result = await batchPermanentDeleteNotes(selectedIds)
-      if (result.success) {
-        multiSelect.clearSelection()
-      }
+      if (result.success) multiSelect.clearSelection()
       setBatchPermanentDeleteConfirm(false)
     }
-  }
+  }, [batchPermanentDeleteNotes, batchPermanentDeleteConfirm, multiSelect])
 
-  const handleBatchDelete = async (selectedIds) => {
-    if (selectedIds.length === 0) return
-
-    const confirmed = window.confirm(`确定要删除 ${selectedIds.length} 个笔记吗？`)
-    if (confirmed) {
-      const result = await batchDeleteNotes(selectedIds)
-      if (result.success) {
-        multiSelect.clearSelection()
-      }
-    }
-  }
-
-  const handleClearSearch = () => {
+  const handleClearSearch = useCallback(() => {
     setLocalSearchQuery('')
-  }
+  }, [setLocalSearchQuery])
 
   const formatDate = (value) => {
     if (!value) return t('notes.unknownTime')
 
     try {
-      let date
+      const str = String(value)
+      // 尝试解析：纯数字 → 时间戳，包含 T/Z → ISO，否则 → SQLite 格式
+      const date = /^\d+$/.test(str) 
+        ? new Date(Number(str))
+        : (str.includes('T') || str.includes('Z'))
+          ? new Date(str)
+          : new Date(str.replace(' ', 'T') + 'Z')
 
-      // 数字 / 纯数字字符串：视为毫秒时间戳
-      if (typeof value === 'number') {
-        date = new Date(value)
-      } else {
-        const str = String(value)
-        if (/^\d+$/.test(str)) {
-          date = new Date(Number(str))
-        } else if (str.includes('T') || str.includes('Z')) {
-          // ISO 格式
-          date = new Date(str)
-        } else {
-          // SQLite CURRENT_TIMESTAMP（UTC，无时区）："YYYY-MM-DD HH:MM:SS"
-          date = new Date(str.replace(' ', 'T') + 'Z')
-        }
-
-        // 兜底再尝试一次
-        if (isNaN(date.getTime())) {
-          date = new Date(str)
-        }
-      }
-
-      if (isNaN(date.getTime())) return t('notes.unknownTime')
-
-      return formatDistanceToNow(date, {
-        addSuffix: true,
-        locale: dateFnsZhCN
-      })
+      return isNaN(date.getTime()) 
+        ? t('notes.unknownTime')
+        : formatDistanceToNow(date, { addSuffix: true, locale: dateFnsZhCN })
     } catch {
       return t('notes.unknownTime')
     }
@@ -881,6 +891,33 @@ const NoteList = ({ showDeleted = false, onMultiSelectChange, onMultiSelectRefCh
             ]
           )}
       </Menu >
+
+      {/* 批量操作确认对话框 */}
+      <Dialog 
+        open={confirmDialog.open} 
+        onClose={() => setConfirmDialog({ open: false, type: '', count: 0, ids: [] })} 
+        maxWidth="xs" 
+        fullWidth
+      >
+        <DialogTitle>
+          {confirmDialog.type === 'restore' ? '确认恢复' : '确认删除'}
+        </DialogTitle>
+        <DialogContent>
+          <DialogContentText>
+            确定要{confirmDialog.type === 'restore' ? '恢复' : '删除'} {confirmDialog.count} 个笔记吗？
+          </DialogContentText>
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => setConfirmDialog({ open: false, type: '', count: 0, ids: [] })}>取消</Button>
+          <Button 
+            onClick={handleConfirmAction} 
+            color={confirmDialog.type === 'restore' ? 'primary' : 'error'} 
+            variant="contained"
+          >
+            确认
+          </Button>
+        </DialogActions>
+      </Dialog>
     </Box >
   )
 }

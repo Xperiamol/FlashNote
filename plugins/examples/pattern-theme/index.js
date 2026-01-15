@@ -436,7 +436,9 @@ async function applyPattern() {
   }
 
   const css = generatePatternCSS()
-  runtime.logger.info('[applyPattern] 生成的CSS长度:', css.length)
+  // 避免输出包含base64的完整CSS
+  const cssPreview = css.length > 200 ? css.substring(0, 200) + '... (共' + css.length + '字符)' : css
+  runtime.logger.info('[applyPattern] 生成的CSS:', cssPreview)
 
   const result = await runtime.theme.registerGlobalStyle('main-pattern', css, {
     priority: 10 // 低优先级，确保不覆盖其他样式
@@ -480,7 +482,14 @@ async function loadState() {
     if (primaryColor) currentState.primaryColor = primaryColor
     if (customImageUrl) currentState.customImageUrl = customImageUrl
 
-    runtime.logger.info('主题外观状态已加载', currentState)
+    // 避免输出包含base64的完整状态
+    runtime.logger.info('主题外观状态已加载', {
+      enabled: currentState.enabled,
+      styleId: currentState.styleId,
+      opacity: currentState.opacity,
+      primaryColor: currentState.primaryColor,
+      hasCustomImage: !!currentState.customImageUrl
+    })
   } catch (error) {
     runtime.logger.error('加载状态失败', error)
   }
@@ -638,17 +647,33 @@ runtime.onActivate(async () => {
             isCustom: PATTERN_STYLES[id].isCustom || false
           }))
 
+          // 构建返回数据，避免在控制台输出完整base64
+          const responseSettings = {
+            enabled: currentState.enabled,
+            style: currentState.styleId,
+            styleName,
+            opacity: currentState.opacity,
+            primaryColor: currentState.primaryColor,
+            maskMode: currentState.maskMode
+          }
+
+          // 只在有自定义图片且前端明确请求时才返回完整的base64数据
+          // 其他情况只返回是否有图片的标志
+          if (currentState.customImageUrl) {
+            if (payload.getSettings && payload.needsImageData !== false) {
+              // 前端加载设置时需要完整数据
+              responseSettings.customImageUrl = currentState.customImageUrl
+            } else {
+              // 其他情况只返回标志
+              responseSettings.hasCustomImage = true
+            }
+          } else {
+            responseSettings.customImageUrl = null
+          }
+
           return {
             success: true,
-            currentSettings: {
-              enabled: currentState.enabled,
-              style: currentState.styleId,
-              styleName,
-              opacity: currentState.opacity,
-              primaryColor: currentState.primaryColor,
-              customImageUrl: currentState.customImageUrl,
-              maskMode: currentState.maskMode
-            },
+            currentSettings: responseSettings,
             availableStyles
           }
         }

@@ -116,9 +116,18 @@ class Mem0Service extends EventEmitter {
     try {
       console.log('[Mem0] Loading embedding model...');
 
-      // 动态导入 transformers.js
-      const { pipeline, env } = require('@xenova/transformers');
-      const { app } = require('electron');
+      // 动态导入 transformers.js (ESM 模块)
+      const transformers = await import('@xenova/transformers');
+      const { pipeline, env } = transformers;
+      
+      // 检查是否在 Electron 环境
+      let app = null;
+      try {
+        const electron = await import('electron');
+        app = electron.app;
+      } catch (e) {
+        // Standalone mode (非 Electron 环境)
+      }
 
       // 设置模型缓存路径
       // 打包后：使用 process.resourcesPath/models（预下载的模型）
@@ -126,15 +135,47 @@ class Mem0Service extends EventEmitter {
       let modelsPath;
       let localFilesOnly = false;
 
-      if (app.isPackaged) {
-        // 生产环境：使用打包的模型
-        modelsPath = path.join(process.resourcesPath, 'models');
-        localFilesOnly = true; // 禁止下载，只使用本地文件
-        console.log('[Mem0] Using bundled models (production mode)');
-      } else {
-        // 开发环境：允许下载模型
+      // 检测是否在打包环境（独立 MCP Server 或 Electron）
+      let isPackaged = false;
+      let isStandaloneMCP = false;
+      
+      try {
+        const { app } = require('electron');
+        isPackaged = app && app.isPackaged;
+      } catch (e) {
+        // 独立 Node.js 环境
+        // 检查是否是用户下载的独立 MCP Server（在用户数据目录）
+        isStandaloneMCP = __dirname.includes('mcp-server') && (
+          __dirname.includes(path.join('AppData', 'Roaming', 'flashnote')) ||
+          __dirname.includes(path.join('Application Support', 'flashnote')) ||
+          __dirname.includes(path.join('.config', 'flashnote'))
+        );
+        isPackaged = __dirname.includes('app.asar') && !isStandaloneMCP;
+      }
+
+      if (isPackaged) {
+        // Electron 打包环境：使用 app.asar.unpacked/models
+        try {
+          const { app } = require('electron');
+          // 模型在 asarUnpack 中，路径为 resources/app.asar.unpacked/models
+          modelsPath = path.join(process.resourcesPath, 'app.asar.unpacked', 'models');
+        } catch (e) {
+          // resources/mcp-server 模式
+          modelsPath = path.join(__dirname, '..', '..', 'models');
+        }
+        localFilesOnly = true;
+        console.log('[Mem0] Using bundled models (Electron production mode)');
+      } else if (isStandaloneMCP) {
+        // 独立 MCP Server（用户下载安装到用户数据目录）
+        // 允许首次运行时下载模型到用户数据目录
         modelsPath = path.join(this.appDataPath, 'models');
-        localFilesOnly = false; // 允许下载
+        localFilesOnly = false;
+        console.log('[Mem0] Using user data directory for models (standalone MCP)');
+        console.log('[Mem0] Models will be downloaded on first use (~22MB)');
+      } else {
+        // 开发环境
+        modelsPath = path.join(this.appDataPath, 'models');
+        localFilesOnly = false;
         console.log('[Mem0] Using cache directory (development mode)');
       }
 

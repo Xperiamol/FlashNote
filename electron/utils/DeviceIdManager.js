@@ -1,7 +1,24 @@
 const fs = require('fs');
 const path = require('path');
 const crypto = require('crypto');
-const { app } = require('electron');
+
+// 尝试加载 Electron，如果失败则使用 null（独立运行模式）
+let app = null;
+try {
+  const electron = require('electron');
+  app = electron.app;
+} catch (e) {
+  // 独立运行模式
+}
+
+const getUserDataPath = () => {
+  if (app) return app.getPath('userData');
+  const platform = process.platform;
+  const homeDir = process.env.HOME || process.env.USERPROFILE;
+  if (platform === 'win32') return path.join(process.env.APPDATA || homeDir, 'flashnote');
+  if (platform === 'darwin') return path.join(homeDir, 'Library', 'Application Support', 'flashnote');
+  return path.join(homeDir, '.config', 'flashnote');
+};
 
 /**
  * 设备 ID 管理器
@@ -18,7 +35,7 @@ class DeviceIdManager {
    */
   getDeviceIdPath() {
     if (!this.deviceIdPath) {
-      this.deviceIdPath = path.join(app.getPath('userData'), 'device-id.txt');
+      this.deviceIdPath = path.join(getUserDataPath(), 'device-id.txt');
     }
     return this.deviceIdPath;
   }

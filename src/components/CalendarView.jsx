@@ -1,5 +1,6 @@
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useMemo, useCallback } from 'react';
 import { useTranslation } from '../utils/i18n';
+import { scrollbar } from '../styles/commonStyles';
 import {
   Box,
   Typography,
@@ -34,6 +35,7 @@ import useTodoDrag from '../hooks/useTodoDrag';
 import MarkdownPreview from './MarkdownPreview';
 import { Excalidraw } from '@excalidraw/excalidraw';
 import '@excalidraw/excalidraw/index.css';
+import { useError } from './ErrorProvider';
 
 // 白板预览组件 - 只读模式
 const WhiteboardPreview = ({ content, theme }) => {
@@ -95,6 +97,7 @@ const WhiteboardPreview = ({ content, theme }) => {
         setWhiteboardData({ elements, appState, files });
       } catch (error) {
         console.error('[WhiteboardPreview] 解析白板数据失败:', error);
+        // 不显示错误提示，这是后台操作
         setWhiteboardData({
           elements: [],
           appState: { viewBackgroundColor: '#ffffff' },
@@ -133,6 +136,7 @@ const WhiteboardPreview = ({ content, theme }) => {
 
 const CalendarView = ({ currentDate, onDateChange, onTodoSelect, selectedDate, onSelectedDateChange, refreshToken = 0, showCompleted = false, onShowCompletedChange, onTodoUpdated, viewMode = 'todos' }) => {
   const { t } = useTranslation();
+  const { showError } = useError();
   const theme = useTheme();
   const notes = useStore((state) => state.notes);
   const setSelectedNoteId = useStore((state) => state.setSelectedNoteId);
@@ -175,7 +179,7 @@ const CalendarView = ({ currentDate, onDateChange, onTodoSelect, selectedDate, o
   };
 
   // 处理点击专注框，展示当天详情
-  const handleFocusBoxClick = (date, itemsData) => {
+  const handleFocusBoxClick = useCallback((date, itemsData) => {
     // 获取当天的笔记和待办详情
     const dateStr = date.toDateString();
     const dayNotes = notes.filter(note => {
@@ -198,7 +202,7 @@ const CalendarView = ({ currentDate, onDateChange, onTodoSelect, selectedDate, o
       todosCompleted: itemsData.todosCompleted || 0
     });
     setDayDetailsOpen(true);
-  };
+  }, [notes, todos]);
   const [celebratingTodos, setCelebratingTodos] = useState(new Set());
   const [previewNote, setPreviewNote] = useState(null); // 预览的笔记
   const [dayDetailsOpen, setDayDetailsOpen] = useState(false); // 控制日详情对话框
@@ -238,6 +242,7 @@ const CalendarView = ({ currentDate, onDateChange, onTodoSelect, selectedDate, o
       setTodos(normalizedTodos);
     } catch (error) {
       console.error('获取Todo失败:', error);
+      showError(error, '加载待办事项失败');
     }
   };
 
@@ -256,7 +261,7 @@ const CalendarView = ({ currentDate, onDateChange, onTodoSelect, selectedDate, o
   };
 
   // 处理todo完成状态切换
-  const handleToggleComplete = async (todo) => {
+  const handleToggleComplete = useCallback(async (todo) => {
     // 已完成的任务直接切换状态
     if (todo.completed) {
       try {
@@ -268,6 +273,7 @@ const CalendarView = ({ currentDate, onDateChange, onTodoSelect, selectedDate, o
         }
       } catch (error) {
         console.error('更新待办事项失败:', error);
+        showError(error, '更新待办事项失败');
       }
       return;
     }
@@ -306,6 +312,7 @@ const CalendarView = ({ currentDate, onDateChange, onTodoSelect, selectedDate, o
         });
       } catch (error) {
         console.error('更新待办事项失败:', error);
+        showError(error, '更新待办事项失败');
       }
     } else {
       // 第一次点击，标记为待完成
@@ -320,7 +327,7 @@ const CalendarView = ({ currentDate, onDateChange, onTodoSelect, selectedDate, o
         });
       }, 3000);
     }
-  };
+  }, [onTodoUpdated, showError]);
 
   useEffect(() => {
     loadData();
@@ -689,16 +696,7 @@ const CalendarView = ({ currentDate, onDateChange, onTodoSelect, selectedDate, o
                         gap: 0.5,
                         maxHeight: '72px', // 3行 * 24px高度
                         pr: 0.5,
-                        '&::-webkit-scrollbar': {
-                          width: '4px',
-                        },
-                        '&::-webkit-scrollbar-track': {
-                          background: 'transparent',
-                        },
-                        '&::-webkit-scrollbar-thumb': {
-                          background: theme.palette.divider,
-                          borderRadius: '2px',
-                        },
+                        ...scrollbar.auto,
                       }}
                     >
                       {/* 待办视图 */}

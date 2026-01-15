@@ -220,11 +220,11 @@ const Toolbar = ({
       case 'notes':
         return {
           title: 'FlashNote',
-          createButtonText: t('common.new'),
+          createButtonText: showDeleted ? null : t('common.new'),
           createAction: handleCreateNote,
           showDeletedButton: true,
           showSidebarToggle: true,
-          quickInputButton: true  // 启用快速输入按钮
+          quickInputButton: !showDeleted // 启用快速输入按钮（回收站中隐藏）
         };
       case 'todo':
         return {
@@ -777,7 +777,7 @@ const Toolbar = ({
 
         {/* 回收站按钮 - 仅在笔记视图显示 */}
         {viewConfig.showDeletedButton && (
-          <Tooltip title={showDeleted ? t('common.restore') : t('common.delete')}>
+          <Tooltip title={showDeleted ? t('common.restore') : t('sidebar.trash')}>
             <IconButton onClick={onToggleDeleted}>
               <Badge badgeContent={deletedNotesCount} color="error">
                 {showDeleted ? <RestoreIcon /> : <DeleteIcon />}

@@ -3,9 +3,11 @@ import { Box, Typography, Modal, IconButton } from '@mui/material'
 import CloseIcon from '@mui/icons-material/Close'
 import ZoomInIcon from '@mui/icons-material/ZoomIn'
 import ZoomOutIcon from '@mui/icons-material/ZoomOut'
+import { scrollbar } from '../styles/commonStyles'
 import { imageAPI } from '../api/imageAPI'
 import { getImageResolver } from '../utils/ImageProtocolResolver'
 import { createMarkdownRenderer } from '../markdown/index.js'
+import { useError } from './ErrorProvider'
 import '../markdown/markdown.css'
 import 'highlight.js/styles/github.css'
 
@@ -95,6 +97,7 @@ const CustomImage = ({ src, alt, ...props }) => {
 }
 
 const MarkdownPreview = ({ content, sx, onWikiLinkClick, onTagClick }) => {
+  const { showSuccess, showError } = useError()
   const [renderedHTML, setRenderedHTML] = useState('')
   // 图片预览状态
   const [previewImage, setPreviewImage] = useState(null)
@@ -250,6 +253,78 @@ const MarkdownPreview = ({ content, sx, onWikiLinkClick, onTagClick }) => {
       loadImages()
     }
   }, [renderedHTML])
+
+  // 处理图片右键复制
+  useEffect(() => {
+    const handleImageContextMenu = async (e) => {
+      const target = e.target
+      if (target.tagName === 'IMG' && target.src) {
+        e.preventDefault()
+        e.stopPropagation()
+
+        try {
+          // 如果是 data: URL，直接使用
+          if (target.src.startsWith('data:')) {
+            await navigator.clipboard.write([
+              new ClipboardItem({
+                'image/png': fetch(target.src).then(r => r.blob())
+              })
+            ])
+            showSuccess('图片已复制到剪贴板')
+            return
+          }
+
+          // 如果是 blob: 或其他协议，需要先转换
+          const response = await fetch(target.src)
+          const blob = await response.blob()
+          await navigator.clipboard.write([
+            new ClipboardItem({
+              [blob.type]: blob
+            })
+          ])
+          showSuccess('图片已复制到剪贴板')
+        } catch (error) {
+          console.error('复制图片失败:', error)
+          // 尝试使用旧的方法（创建临时 canvas）
+          try {
+            const img = new Image()
+            img.crossOrigin = 'anonymous'
+            img.src = target.src
+            await new Promise((resolve, reject) => {
+              img.onload = resolve
+              img.onerror = reject
+            })
+            
+            const canvas = document.createElement('canvas')
+            canvas.width = img.naturalWidth
+            canvas.height = img.naturalHeight
+            const ctx = canvas.getContext('2d')
+            ctx.drawImage(img, 0, 0)
+            
+            canvas.toBlob(async (blob) => {
+              await navigator.clipboard.write([
+                new ClipboardItem({
+                  'image/png': blob
+                })
+              ])
+              showSuccess('图片已复制到剪贴板')
+            })
+          } catch (fallbackError) {
+            console.error('备用复制方法也失败:', fallbackError)
+            showError(fallbackError, '复制图片失败')
+          }
+        }
+      }
+    }
+
+    const previewElement = document.querySelector('.markdown-preview-content')
+    if (previewElement) {
+      previewElement.addEventListener('contextmenu', handleImageContextMenu)
+      return () => {
+        previewElement.removeEventListener('contextmenu', handleImageContextMenu)
+      }
+    }
+  }, [renderedHTML, showSuccess, showError])
 
   // 处理图片双击预览
   useEffect(() => {
@@ -471,7 +546,8 @@ const MarkdownPreview = ({ content, sx, onWikiLinkClick, onTagClick }) => {
           tableLayout: 'auto',
           overflowX: 'auto',
           display: 'block',
-          whiteSpace: 'nowrap'
+          whiteSpace: 'nowrap',
+          ...scrollbar.auto
         },
         '& th, & td': {
           border: '1px solid',

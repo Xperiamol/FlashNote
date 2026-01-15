@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react'
+import React, { useEffect, useState, lazy, Suspense, useCallback } from 'react'
 import ReactDOM from 'react-dom/client'
 import * as MaterialUI from '@mui/material'
 import * as MaterialIcons from '@mui/icons-material'
@@ -14,7 +14,8 @@ import {
   Dialog,
   DialogTitle,
   DialogContent,
-  IconButton
+  IconButton,
+  CircularProgress
 } from '@mui/material'
 import {
   Restore as RestoreIcon,
@@ -30,20 +31,30 @@ import NoteList from './components/NoteList'
 import NoteEditor from './components/NoteEditor'
 import TitleBar from './components/TitleBar'
 import Sidebar from './components/Sidebar'
-import TodoView from './components/TodoView'
-import CalendarView from './components/CalendarView'
-import Settings from './components/Settings'
-import PluginStore from './components/PluginStore'
-import SecondarySidebar from './components/SecondarySidebar'
 import MultiSelectToolbar from './components/MultiSelectToolbar'
 import TagSelectionDialog from './components/TagSelectionDialog'
 import DragAnimationProvider from './components/DragAnimationProvider'
 import TodoEditDialog from './components/TodoEditDialog'
 import CreateTodoModal from './components/CreateTodoModal'
-import Profile from './components/Profile'
 import CommandPalette from './components/CommandPalette'
-import ConflictResolutionDialog from './components/ConflictResolutionDialog'
-import ChristmasDecorations from './components/ChristmasSnow'
+import { ErrorProvider, useError } from './components/ErrorProvider'
+
+// 懒加载非首屏组件，减少初始bundle大小
+const TodoView = lazy(() => import('./components/TodoView'))
+const CalendarView = lazy(() => import('./components/CalendarView'))
+const Settings = lazy(() => import('./components/Settings'))
+const PluginStore = lazy(() => import('./components/PluginStore'))
+const SecondarySidebar = lazy(() => import('./components/SecondarySidebar'))
+const Profile = lazy(() => import('./components/Profile'))
+const ConflictResolutionDialog = lazy(() => import('./components/ConflictResolutionDialog'))
+const ChristmasDecorations = lazy(() => import('./components/ChristmasSnow'))
+
+// 加载指示器组件
+const LoadingFallback = () => (
+  <Box display="flex" justifyContent="center" alignItems="center" height="100%">
+    <CircularProgress />
+  </Box>
+)
 
 function rewriteCssUrls(cssText, sheetHref) {
   if (!cssText || !sheetHref) {
@@ -147,6 +158,7 @@ import TimeZoneUtils from './utils/timeZoneUtils'
 import { subscribePluginEvents, subscribePluginUiRequests, subscribePluginWindowRequests, loadPluginFile, executePluginCommand } from './api/pluginAPI'
 import { injectUIBridge } from './utils/pluginUIBridge'
 import themeManager from './utils/pluginThemeManager'
+import { PluginNotificationListener } from './utils/PluginNotificationListener'
 
 function App() {
   const { theme, setTheme, primaryColor, loadNotes, currentView, initializeSettings, setCurrentView, createNote, batchDeleteNotes, batchDeleteTodos, batchCompleteTodos, batchRestoreNotes, batchPermanentDeleteNotes, getAllTags, batchSetTags, selectedNoteId, setSelectedNoteId, updateNoteInList, maskOpacity, christmasMode } = useStore()
@@ -189,10 +201,10 @@ function App() {
   const [calendarViewMode, setCalendarViewMode] = useState('todos') // 'todos', 'notes', 'focus'
 
   // 日历视图模式变化处理（带调试）
-  const handleCalendarViewModeChange = (mode) => {
+  const handleCalendarViewModeChange = useCallback((mode) => {
     console.log('Calendar view mode changing from', calendarViewMode, 'to', mode);
     setCalendarViewMode(mode);
-  }
+  }, [calendarViewMode])
 
   // 多选状态管理
   const [multiSelectState, setMultiSelectState] = useState({
@@ -566,8 +578,8 @@ function App() {
 
     initApp()
 
-    // 加载笔记数据
-    loadNotes()
+    // 🟡优化：初始只加载首屏笔记(20条)，后续按需分页加载
+    loadNotes({ limit: 20, page: 1 })
 
     // 监听来自托盘菜单的事件
     const handleTrayEvents = () => {
@@ -750,7 +762,7 @@ function App() {
             iframeCache = null
           }
 
-          // 暴露 React 和 Material-UI 依赖
+          // 暴露基本依赖（MUI为插件提供）
           iframe.contentWindow.React = React
           iframe.contentWindow.ReactDOM = ReactDOM
           iframe.contentWindow.MaterialUI = MaterialUI
@@ -759,17 +771,16 @@ function App() {
 
           // 只有在cache有效时才暴露
           if (iframeCache) {
-            iframe.contentWindow.emotionCache = iframeCache  // 提供给插件使用
-            iframe.contentWindow.CacheProvider = CacheProvider  // 提供 CacheProvider
+            iframe.contentWindow.emotionCache = iframeCache
+            iframe.contentWindow.CacheProvider = CacheProvider
           } else {
-            // 提供空的fallback，允许插件降级运行
             iframe.contentWindow.emotionCache = null
             iframe.contentWindow.CacheProvider = null
           }
 
           injected = true
           console.log('[UI Bridge] 已注入插件窗口:', pluginWindow.title)
-          console.log('[Dependencies] 已暴露: React, ReactDOM, MaterialUI, MaterialIcons, appTheme, emotionCache, CacheProvider')
+          console.log('[Dependencies] 已暴露: React, ReactDOM, MaterialUI, MaterialIcons, appTheme, emotionCache')
           console.log('[UI Bridge] ✅ Emotion cache 已配置，样式将自动注入到 iframe')
 
           return true
@@ -825,9 +836,11 @@ function App() {
   }, [isMobile])
 
   return (
-    <ThemeProvider theme={appTheme}>
-      <CssBaseline />
-      <DragAnimationProvider>
+    <ErrorProvider>
+      <PluginNotificationListener />
+      <ThemeProvider theme={appTheme}>
+        <CssBaseline />
+        <DragAnimationProvider>
         <Box sx={{ display: 'flex', flexDirection: 'column', height: '100vh' }}>
           {/* 自定义标题栏 */}
           <TitleBar />
@@ -1030,24 +1043,26 @@ function App() {
               {/* 内容区域 */}
               <Box sx={{ display: 'flex', flex: 1, minHeight: 0, overflow: 'hidden' }}>
                 {/* 二级侧边栏 - 始终渲染以支持动画 */}
-                <SecondarySidebar
-                  open={secondarySidebarOpen}
-                  onClose={() => setSecondarySidebarOpen(false)}
-                  onTodoSelect={setSelectedTodo}
-                  onViewModeChange={setTodoViewMode}
-                  onShowCompletedChange={setTodoShowCompleted}
-                  viewMode={todoViewMode}
-                  showCompleted={todoShowCompleted}
-                  onMultiSelectChange={setMultiSelectState}
-                  onMultiSelectRefChange={setCurrentMultiSelectRef}
-                  todoRefreshTrigger={todoRefreshTrigger}
-                  todoSortBy={todoSortBy}
-                  onTodoSortByChange={setTodoSortBy}
-                  showDeleted={showDeleted}
-                  selectedDate={selectedDate}
-                  calendarRefreshTrigger={calendarRefreshTrigger}
-                  onTodoUpdated={handleTodoUpdated}
-                />
+                <Suspense fallback={<LoadingFallback />}>
+                  <SecondarySidebar
+                    open={secondarySidebarOpen}
+                    onClose={() => setSecondarySidebarOpen(false)}
+                    onTodoSelect={setSelectedTodo}
+                    onViewModeChange={setTodoViewMode}
+                    onShowCompletedChange={setTodoShowCompleted}
+                    viewMode={todoViewMode}
+                    showCompleted={todoShowCompleted}
+                    onMultiSelectChange={setMultiSelectState}
+                    onMultiSelectRefChange={setCurrentMultiSelectRef}
+                    todoRefreshTrigger={todoRefreshTrigger}
+                    todoSortBy={todoSortBy}
+                    onTodoSortByChange={setTodoSortBy}
+                    showDeleted={showDeleted}
+                    selectedDate={selectedDate}
+                    calendarRefreshTrigger={calendarRefreshTrigger}
+                    onTodoUpdated={handleTodoUpdated}
+                  />
+                </Suspense>
 
                 {/* 主内容区域 */}
                 <Box sx={(theme) => {
@@ -1063,24 +1078,26 @@ function App() {
                   }
                 }}>
                   {currentView === 'notes' && <NoteEditor />}
-                  {currentView === 'todo' && (
-                    <TodoView
-                      viewMode={todoViewMode}
-                      showCompleted={todoShowCompleted}
-                      onViewModeChange={setTodoViewMode}
-                      onShowCompletedChange={setTodoShowCompleted}
-                      onRefresh={() => setTodoRefreshTrigger(prev => prev + 1)}
-                      onTodoSelect={setSelectedTodo}
-                    />
-                  )}
-                  {currentView === 'calendar' && <CalendarView currentDate={calendarCurrentDate} onDateChange={setCalendarCurrentDate} onTodoSelect={setSelectedTodo} selectedDate={selectedDate} onSelectedDateChange={setSelectedDate} refreshToken={calendarRefreshTrigger} showCompleted={calendarShowCompleted} onShowCompletedChange={setCalendarShowCompleted} onTodoUpdated={handleTodoUpdated} viewMode={calendarViewMode} />}
-                  {currentView === 'settings' && <Settings />}
-                  {currentView === 'plugins' && (
-                    <Box sx={{ p: 3, height: '100%', boxSizing: 'border-box' }}>
-                      <PluginStore />
-                    </Box>
-                  )}
-                  {currentView === 'profile' && <Profile />}
+                  <Suspense fallback={<LoadingFallback />}>
+                    {currentView === 'todo' && (
+                      <TodoView
+                        viewMode={todoViewMode}
+                        showCompleted={todoShowCompleted}
+                        onViewModeChange={setTodoViewMode}
+                        onShowCompletedChange={setTodoShowCompleted}
+                        onRefresh={() => setTodoRefreshTrigger(prev => prev + 1)}
+                        onTodoSelect={setSelectedTodo}
+                      />
+                    )}
+                    {currentView === 'calendar' && <CalendarView currentDate={calendarCurrentDate} onDateChange={setCalendarCurrentDate} onTodoSelect={setSelectedTodo} selectedDate={selectedDate} onSelectedDateChange={setSelectedDate} refreshToken={calendarRefreshTrigger} showCompleted={calendarShowCompleted} onShowCompletedChange={setCalendarShowCompleted} onTodoUpdated={handleTodoUpdated} viewMode={calendarViewMode} />}
+                    {currentView === 'settings' && <Settings />}
+                    {currentView === 'plugins' && (
+                      <Box sx={{ p: 3, height: '100%', boxSizing: 'border-box' }}>
+                        <PluginStore />
+                      </Box>
+                    )}
+                    {currentView === 'profile' && <Profile />}
+                  </Suspense>
                 </Box>
               </Box>
             </Box>
@@ -1117,12 +1134,14 @@ function App() {
         />
 
         {/* 同步冲突解决对话框 */}
-        <ConflictResolutionDialog
-          open={conflictDialogOpen}
-          conflict={currentConflict}
-          onResolve={handleConflictResolve}
-          onCancel={handleConflictCancel}
-        />
+        <Suspense fallback={null}>
+          <ConflictResolutionDialog
+            open={conflictDialogOpen}
+            conflict={currentConflict}
+            onResolve={handleConflictResolve}
+            onCancel={handleConflictCancel}
+          />
+        </Suspense>
 
         {/* 插件窗口对话框 */}
         {pluginWindow && pluginWindow.htmlContent && (
@@ -1200,7 +1219,7 @@ function App() {
                       iframe.contentWindow.emotionCache = iframeCache
                       iframe.contentWindow.CacheProvider = CacheProvider
 
-                      console.log('[Plugin Window] ✅ 依赖注入完成')
+                      console.log('[Plugin Window] ✅ UI Bridge和依赖注入完成')
                     } catch (error) {
                       console.error('[Plugin Window] ❌ 依赖注入失败:', error)
                     }
@@ -1216,9 +1235,12 @@ function App() {
           onClose={() => setCommandPaletteOpen(false)}
         />
 
-        {christmasMode && <ChristmasDecorations />}
+        <Suspense fallback={null}>
+          {christmasMode && <ChristmasDecorations />}
+        </Suspense>
       </DragAnimationProvider>
     </ThemeProvider>
+    </ErrorProvider>
   )
 }
 

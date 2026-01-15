@@ -3,11 +3,25 @@ const fs = require('fs').promises;
 const path = require('path');
 const { dialog, app } = require('electron');
 
+// 导入新的导入导出器
+const ObsidianImporter = require('./importers/ObsidianImporter');
+const ObsidianExporter = require('./exporters/ObsidianExporter');
+
 class DataImportService extends EventEmitter {
-  constructor(noteService, settingsService) {
+  constructor(noteService, settingsService, imageStorageService) {
     super();
     this.noteService = noteService;
     this.settingsService = settingsService;
+    this.imageStorageService = imageStorageService;
+    
+    // 初始化导入导出器
+    this.importers = {
+      obsidian: new ObsidianImporter(noteService, imageStorageService)
+    };
+    
+    this.exporters = {
+      obsidian: new ObsidianExporter(noteService, imageStorageService)
+    };
     this.supportedFormats = {
       json: {
         name: 'JSON',
@@ -844,6 +858,121 @@ class DataImportService extends EventEmitter {
     return {
       supportedFormats: Object.keys(this.supportedFormats).length,
       formats: this.supportedFormats
+    };
+  }
+
+  /**
+   * 转发处理器事件到服务事件
+   */
+  forwardEvents(processor, prefix) {
+    // 导入事件
+    processor.on('import-started', (data) => this.emit(`${prefix}-started`, data));
+    processor.on('file-processing', (data) => this.emit(`${prefix}-file-processing`, data));
+    processor.on('phase-changed', (data) => this.emit(`${prefix}-phase-changed`, data));
+    processor.on('import-completed', (data) => this.emit(`${prefix}-completed`, data));
+    processor.on('import-error', (data) => this.emit(`${prefix}-error`, data));
+    
+    // 导出事件
+    processor.on('export-started', (data) => this.emit(`${prefix}-started`, data));
+    processor.on('note-processing', (data) => this.emit(`${prefix}-note-processing`, data));
+    processor.on('export-completed', (data) => this.emit(`${prefix}-completed`, data));
+    processor.on('export-error', (data) => this.emit(`${prefix}-error`, data));
+    
+    // 通用事件
+    processor.on('error', (data) => this.emit(`${prefix}-error`, data));
+    processor.on('warning', (data) => this.emit(`${prefix}-warning`, data));
+  }
+
+  async importObsidianVault(options = {}) {
+    const { folderPath = null, ...importOptions } = options;
+
+    let vaultPath = folderPath;
+    if (!vaultPath) {
+      const result = await dialog.showOpenDialog({
+        title: '选择 Obsidian Vault 文件夹',
+        properties: ['openDirectory']
+      });
+
+      if (result.canceled || result.filePaths.length === 0) {
+        return { success: false, error: '用户取消导入' };
+      }
+
+      vaultPath = result.filePaths[0];
+    }
+
+    const importer = this.importers.obsidian;
+    this.forwardEvents(importer, 'obsidian-import');
+
+    return importer.import({ folderPath: vaultPath, ...importOptions });
+  }
+
+  async exportToObsidian(options = {}) {
+    const { exportPath = null, ...exportOptions } = options;
+
+    let outputPath = exportPath;
+    if (!outputPath) {
+      const result = await dialog.showOpenDialog({
+        title: '选择导出文件夹',
+        properties: ['openDirectory', 'createDirectory']
+      });
+
+      if (result.canceled || result.filePaths.length === 0) {
+        return { success: false, error: '用户取消导出' };
+      }
+
+      outputPath = result.filePaths[0];
+    }
+
+    const exporter = this.exporters.obsidian;
+    this.forwardEvents(exporter, 'obsidian-export');
+
+    return exporter.export({ exportPath: outputPath, ...exportOptions });
+  }
+
+  /**
+   * 获取导入器配置
+   * @param {string} importerName - 导入器名称
+   * @returns {object} 配置对象
+   */
+  getImporterConfig(importerName) {
+    return this.importers[importerName]?.getConfig?.() || null;
+  }
+
+  updateImporterConfig(importerName, config) {
+    const importer = this.importers[importerName];
+    if (importer?.updateConfig) {
+      importer.updateConfig(config);
+      return true;
+    }
+    return false;
+  }
+
+  getExporterConfig(exporterName) {
+    return this.exporters[exporterName]?.getConfig?.() || null;
+  }
+
+  updateExporterConfig(exporterName, config) {
+    const exporter = this.exporters[exporterName];
+    if (exporter?.updateConfig) {
+      exporter.updateConfig(config);
+      return true;
+    }
+    return false;
+  }
+
+  getAvailableImportersAndExporters() {
+    const map = (obj, type) => Object.entries(obj).map(([name, item]) => ({
+      name,
+      displayName: item.getName(),
+      description: item.getDescription(),
+      ...(type === 'importer' 
+        ? { supportedExtensions: item.getSupportedExtensions() }
+        : { supportedFormat: item.getSupportedFormat() })
+    }));
+
+    return {
+      importers: map(this.importers, 'importer'),
+      exporters: map(this.exporters, 'exporter')
     };
   }
 }

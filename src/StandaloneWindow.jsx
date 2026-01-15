@@ -13,6 +13,7 @@ import NoteEditor from './components/NoteEditor'
 import TodoList from './components/TodoList'
 import StandaloneProvider, { useStandaloneContext } from './components/StandaloneProvider'
 import { useStandaloneStore } from './store/useStandaloneStore'
+import { ErrorProvider } from './components/ErrorProvider'
 
 /**
  * 独立窗口内容组件
@@ -257,11 +258,12 @@ function StandaloneWindow() {
   }
 
   return (
-    <ThemeProvider theme={appTheme}>
-      <CssBaseline />
-      <Box sx={{ height: '100vh', display: 'flex', flexDirection: 'column' }}>
-        {/* 使用主应用的TitleBar组件 */}
-        <TitleBar 
+    <ErrorProvider>
+      <ThemeProvider theme={appTheme}>
+        <CssBaseline />
+        <Box sx={{ height: '100vh', display: 'flex', flexDirection: 'column' }}>
+          {/* 使用主应用的TitleBar组件 */}
+          <TitleBar 
           isStandalone={true} 
           isMinibarMode={store.minibarMode}
           onMinibarClick={async () => {
@@ -316,6 +318,7 @@ function StandaloneWindow() {
         )}
       </Box>
     </ThemeProvider>
+    </ErrorProvider>
   )
 }
 

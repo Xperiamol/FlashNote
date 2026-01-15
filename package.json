@@ -1,7 +1,7 @@
 {
   "name": "flashnote",
-  "version": "2.3.0",
-  "description": "FlashNote 2.3.0 Xmas Update - 现代化本地笔记应用",
+  "version": "2.3.1",
+  "description": "FlashNote 2.3.1 - 简洁高效的记录应用",
   "main": "electron/main.js",
   "homepage": "./",
   "scripts": {
@@ -9,11 +9,15 @@
     "build": "vite build",
     "preview": "vite preview",
     "electron": "electron .",
-    "electron-dev": "concurrently \"npm run dev\" \"wait-on http://localhost:5174 && cross-env NODE_ENV=development electron .\"",
+    "electron-dev": "node scripts/manage-sqlite.js electron && concurrently \"npm run dev\" \"wait-on http://localhost:5174 && cross-env NODE_ENV=development electron .\"",
     "pre-build": "node scripts/pre-download-models.js",
-    "electron-build": "npm run pre-build && npm run build && electron-builder",
+    "prepare-mcp": "node scripts/prepare-mcp-resources.js && cd mcp-build && npm install --production --no-optional",
+    "package-mcp": "npm run prepare-mcp && node scripts/package-mcp-server.js",
+    "electron-build": "node scripts/manage-sqlite.js electron && npm run pre-build && npm run build && electron-builder",
     "repair-db": "node scripts/fix-corrupted-db.js",
-    "check-db": "node scripts/check-database.js",
+    "mcp:server": "node scripts/manage-sqlite.js node && node electron/mcp-server.js",
+    "sqlite:electron": "node scripts/manage-sqlite.js electron",
+    "sqlite:node": "node scripts/manage-sqlite.js node",
     "test": "echo \"Error: no test specified\" && exit 1"
   },
   "keywords": [
@@ -28,6 +32,7 @@
     "@emotion/react": "^11.14.0",
     "@emotion/styled": "^11.14.1",
     "@excalidraw/excalidraw": "^0.18.0",
+    "@modelcontextprotocol/sdk": "^1.25.2",
     "@mui/icons-material": "^7.3.1",
     "@mui/material": "^7.3.1",
     "@tiptap/extension-highlight": "^3.10.7",
@@ -36,11 +41,13 @@
     "@tiptap/starter-kit": "^3.10.7",
     "@vitejs/plugin-react": "^4.7.0",
     "@xenova/transformers": "^2.17.2",
+    "adm-zip": "^0.5.16",
     "axios": "^1.12.2",
-    "better-sqlite3": "^12.4.1",
+    "better-sqlite3": "^12.6.0",
     "compute-cosine-similarity": "^1.1.0",
     "date-fns": "^4.1.0",
     "dotenv": "^17.2.3",
+    "form-data": "^4.0.0",
     "googleapis": "^165.0.0",
     "https-proxy-agent": "^7.0.6",
     "i18next": "^25.6.3",
@@ -65,14 +72,10 @@
     "zustand": "^5.0.8"
   },
   "devDependencies": {
-    "@electron/rebuild": "^3.7.2",
     "concurrently": "^9.2.1",
-    "cross-env": "^10.0.0",
-    "electron": "^37.4.0",
-    "electron-builder": "^26.0.12",
-    "electron-rebuild": "^3.2.9",
-    "eslint": "^9.34.0",
-    "prettier": "^3.6.2",
+    "cross-env": "^10.1.0",
+    "electron": "^39.2.7",
+    "electron-builder": "^26.4.0",
     "wait-on": "^8.0.4"
   },
   "build": {
@@ -84,61 +87,45 @@
     "files": [
       "dist/**/*",
       "electron/**/*",
-      "assets/**/*",
-      "node_modules/**/*"
+      "models/**/*",
+      ".env",
+      "package.json",
+      "node_modules/**/*",
+      "!node_modules/.cache"
+    ],
+    "asarUnpack": [
+      "node_modules/better-sqlite3/**/*",
+      "node_modules/sharp/**/*",
+      "models/**/*"
     ],
     "extraResources": [
-      {
-        "from": ".env",
-        "to": ".env",
-        "filter": "**/*"
-      },
       {
         "from": "logo.png",
         "to": "logo.png"
       },
       {
-        "from": "assets/",
-        "to": "assets/"
+        "from": "build/logo.ico",
+        "to": "build/logo.ico"
       },
       {
-        "from": "plugins/examples",
-        "to": "plugins/examples",
-        "filter": [
-          "**/*"
-        ]
-      },
-      {
-        "from": "plugins/registry.json",
-        "to": "plugins/registry.json"
-      },
-      {
-        "from": "models/",
-        "to": "models/",
-        "filter": [
-          "**/*"
-        ]
+        "from": "plugins",
+        "to": "plugins",
+        "filter": ["**/*"]
       }
     ],
+    "npmRebuild": false,
+    "buildDependenciesFromSource": false,
+    "nodeGypRebuild": false,
+    "electronDist": "node_modules/electron/dist",
     "win": {
-      "icon": "logo.png",
+      "icon": "build\\logo.ico",
       "target": [
-        {
-          "target": "nsis",
-          "arch": [
-            "x64"
-          ]
-        }
+        "nsis"
       ]
     },
     "nsis": {
       "oneClick": false,
-      "allowToChangeInstallationDirectory": true,
-      "createDesktopShortcut": true,
-      "createStartMenuShortcut": true,
-      "deleteAppDataOnUninstall": false,
-      "uninstallDisplayName": "FlashNote 2.3.0",
-      "include": "build/installer.nsh"
+      "allowToChangeInstallationDirectory": true
     }
   }
 }

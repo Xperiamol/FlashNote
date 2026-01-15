@@ -21,6 +21,7 @@ import {
   Chip,
 } from '@mui/material';
 import { Sync, CheckCircle, CloudSync, Google as GoogleIcon, LinkOff } from '@mui/icons-material';
+import { spacing, flex, combo } from '../styles/commonStyles';
 
 const GoogleCalendarSettings = () => {
   const { t } = useTranslation();
@@ -205,34 +206,175 @@ const GoogleCalendarSettings = () => {
 
   return (
     <Box>
+      <Typography variant="h6" sx={spacing.mb2}>
+        Google Calendar 设置
+      </Typography>
+
       {message && (
-        <Alert severity={message.type} sx={{ mb: 2 }} onClose={() => setMessage(null)}>
+        <Alert severity={message.type} sx={spacing.mb2} onClose={() => setMessage(null)}>
           {message.text}
         </Alert>
       )}
 
-      <List>
-        {/* 同步开关 - 移到最上面 */}
-        <ListItem disabled={!config.connected}>
-          <ListItemText
-            primary={t('googleCalendar.enableSync')}
-            secondary={
-              !config.connected
-                ? t('googleCalendar.needConnectFirst')
-                : (status && config.enabled && lastSync
-                    ? t('googleCalendar.lastSync', { time: new Date(lastSync).toLocaleString('zh-CN') })
-                    : t('googleCalendar.enableSyncDesc'))
-            }
-          />
-          <ListItemSecondaryAction>
-            <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-              {status && config.enabled && status.syncing && <CircularProgress size={20} />}
+      <Box sx={combo.section}>
+        {/* 账号连接 */}
+        <Typography variant="subtitle2" sx={spacing.mb1}>
+          账号连接
+        </Typography>
+        
+        {!config.connected ? (
+          <Box sx={{ textAlign: 'center', py: 2 }}>
+            <Typography variant="body2" color="text.secondary" sx={spacing.mb2}>
+              使用 OAuth 2.0 安全授权
+            </Typography>
+            
+            {authorizing ? (
+              <Box sx={{ ...flex.column, alignItems: 'center' }}>
+                <CircularProgress size={24} sx={spacing.mb1} />
+                <Typography variant="caption" color="text.secondary">
+                  授权中，请在浏览器中完成...
+                </Typography>
+              </Box>
+            ) : (
+              <Button
+                variant="contained"
+                size="small"
+                startIcon={<GoogleIcon />}
+                onClick={handleStartAuth}
+              >
+                连接 Google 账号
+              </Button>
+            )}
+          </Box>
+        ) : (
+          <Box sx={{ ...flex.spaceBetween, p: 2, border: '1px solid', borderColor: 'divider', borderRadius: 1 }}>
+            <Box sx={{ ...flex.row }}>
+              <CheckCircle color="success" sx={{ mr: 1 }} />
+              <Typography variant="body2">已连接</Typography>
+            </Box>
+            <Button
+              variant="outlined"
+              size="small"
+              color="error"
+              startIcon={<LinkOff />}
+              onClick={handleDisconnect}
+            >
+              断开连接
+            </Button>
+          </Box>
+        )}
+      </Box>
+
+
+      {/* 日历选择 */}
+      {config.connected && calendars.length > 0 && (
+        <Box sx={combo.section}>
+          <Typography variant="subtitle2" sx={spacing.mb1}>
+            选择日历
+          </Typography>
+          <List disablePadding>
+            {calendars.map((cal) => (
+              <ListItem
+                key={cal.id}
+                disablePadding
+                sx={spacing.mb1}
+              >
+                <ListItemButton
+                  selected={config.calendarId === cal.id}
+                  onClick={() => handleSelectCalendar(cal.id)}
+                  sx={{
+                    border: '1px solid',
+                    borderColor: config.calendarId === cal.id ? 'primary.main' : 'divider',
+                    borderRadius: 1,
+                  }}
+                >
+                  <ListItemText
+                    primary={
+                      <Box sx={{ ...flex.rowGap1 }}>
+                        {cal.displayName}
+                        {cal.primary && <Chip label="主日历" size="small" color="primary" />}
+                      </Box>
+                    }
+                    primaryTypographyProps={{ component: 'div' }}
+                    secondary={cal.description || `访问权限: ${cal.accessRole}`}
+                  />
+                  {config.calendarId === cal.id && <CheckCircle color="primary" />}
+                </ListItemButton>
+              </ListItem>
+            ))}
+          </List>
+        </Box>
+      )}
+
+      {/* 同步选项 */}
+      {config.connected && (
+        <Box sx={combo.section}>
+          <Typography variant="subtitle2" sx={spacing.mb1}>
+            同步选项
+          </Typography>
+          <FormControl fullWidth sx={spacing.mb2} size="small">
+            <InputLabel>同步方向</InputLabel>
+            <Select
+              value={config.syncDirection}
+              label="同步方向"
+              onChange={async (e) => {
+                const newDirection = e.target.value;
+                setConfig({ ...config, syncDirection: newDirection });
+                try {
+                  const result = await window.electronAPI.invoke('google-calendar:save-config', {
+                    ...config,
+                    syncDirection: newDirection
+                  });
+                  if (result.success) {
+                    await loadStatus();
+                  }
+                } catch (error) {
+                  console.error('保存配置失败:', error);
+                }
+              }}
+            >
+              <MenuItem value="bidirectional">双向同步</MenuItem>
+              <MenuItem value="upload">仅上传</MenuItem>
+              <MenuItem value="download">仅下载</MenuItem>
+            </Select>
+          </FormControl>
+
+          <FormControl fullWidth sx={{ mb: 2 }} size="small">
+            <InputLabel>同步间隔</InputLabel>
+            <Select
+              value={config.syncInterval}
+              label="同步间隔"
+              onChange={async (e) => {
+                const newInterval = e.target.value;
+                setConfig({ ...config, syncInterval: newInterval });
+                try {
+                  const result = await window.electronAPI.invoke('google-calendar:save-config', {
+                    ...config,
+                    syncInterval: newInterval
+                  });
+                  if (result.success) {
+                    await loadStatus();
+                  }
+                } catch (error) {
+                  console.error('保存配置失败:', error);
+                }
+              }}
+            >
+              <MenuItem value="15">15 分钟</MenuItem>
+              <MenuItem value="30">30 分钟</MenuItem>
+              <MenuItem value="60">1 小时</MenuItem>
+              <MenuItem value="180">3 小时</MenuItem>
+              <MenuItem value="360">6 小时</MenuItem>
+            </Select>
+          </FormControl>
+
+          <FormControlLabel
+            control={
               <Switch
                 checked={config.enabled}
                 onChange={async (e) => {
                   const newEnabled = e.target.checked;
                   setConfig({ ...config, enabled: newEnabled });
-                  // 立即保存以保持与 SyncStatusIndicator 同步
                   try {
                     const result = await window.electronAPI.invoke('google-calendar:save-config', {
                       ...config,
@@ -245,282 +387,36 @@ const GoogleCalendarSettings = () => {
                     console.error('保存配置失败:', error);
                   }
                 }}
-                disabled={!config.connected}
               />
-            </Box>
-          </ListItemSecondaryAction>
-        </ListItem>
+            }
+            label="启用同步"
+          />
+        </Box>
+      )}
 
-        <Divider />
+      {/* 操作按钮 */}
+      {config.connected && (
+        <Box sx={{ display: 'flex', gap: 2 }}>
+          <Button
+            variant="contained"
+            size="small"
+            startIcon={<CheckCircle />}
+            onClick={handleSave}
+          >
+            保存配置
+          </Button>
 
-        {/* 账号连接 */}
-        <ListItem>
-          <Box sx={{ width: '100%' }}>
-            <Typography variant="subtitle2" sx={{ mb: 1 }}>
-              {t('googleCalendar.accountConnection')}
-            </Typography>
-            
-            {!config.connected ? (
-              <Box
-                sx={{
-                  textAlign: 'center',
-                  py: 2,
-                  px: 2,
-                }}
-              >
-                <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
-                  {t('googleCalendar.oauthHint')}
-                </Typography>
-                
-                {authorizing ? (
-                  <Box sx={{ display: 'flex', flexDirection: 'column', alignItems: 'center' }}>
-                    <CircularProgress size={24} sx={{ mb: 1 }} />
-                    <Typography variant="caption" color="text.secondary">
-                      {t('googleCalendar.authorizing')}
-                    </Typography>
-                  </Box>
-                ) : (
-                  <Button
-                    variant="contained"
-                    size="small"
-                    startIcon={<GoogleIcon />}
-                    onClick={handleStartAuth}
-                  >
-                    {t('googleCalendar.connectAccount')}
-                  </Button>
-                )}
-              </Box>
-            ) : (
-              <Box
-                sx={{
-                  display: 'flex',
-                  alignItems: 'center',
-                  justifyContent: 'space-between',
-                  p: 2,
-                }}
-              >
-                <Box sx={{ display: 'flex', alignItems: 'center' }}>
-                  <CheckCircle color="success" sx={{ mr: 1 }} />
-                  <Typography variant="body2">
-                    {t('googleCalendar.connected')}
-                  </Typography>
-                </Box>
-                <Button
-                  variant="outlined"
-                  size="small"
-                  color="error"
-                  startIcon={<LinkOff />}
-                  onClick={handleDisconnect}
-                >
-                  {t('googleCalendar.disconnect')}
-                </Button>
-              </Box>
-            )}
-          </Box>
-        </ListItem>
-
-        <Divider />
-
-
-
-        {/* 日历选择 */}
-        {config.connected && calendars.length > 0 && (
-          <>
-            <Divider />
-            <ListItem>
-              <Box sx={{ width: '100%' }}>
-                <Typography variant="subtitle2" sx={{ mb: 1 }}>
-                  {t('googleCalendar.selectCalendar')}
-                </Typography>
-                <List disablePadding>
-                  {calendars.map((cal) => (
-                    <ListItem
-                      key={cal.id}
-                      disablePadding
-                      sx={{ mb: 1 }}
-                    >
-                      <ListItemButton
-                        selected={config.calendarId === cal.id}
-                        onClick={() => handleSelectCalendar(cal.id)}
-                        sx={{
-                          border: '1px solid',
-                          borderColor: config.calendarId === cal.id ? 'primary.main' : 'divider',
-                          borderRadius: 1,
-                        }}
-                      >
-                        <ListItemText
-                          primary={
-                            <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-                              {cal.displayName}
-                              {cal.primary && <Chip label={t('googleCalendar.primaryCalendar')} size="small" color="primary" />}
-                            </Box>
-                          }
-                          primaryTypographyProps={{ component: 'div' }}
-                          secondary={cal.description || `访问权限: ${cal.accessRole}`}
-                        />
-                        {config.calendarId === cal.id && <CheckCircle color="primary" />}
-                      </ListItemButton>
-                    </ListItem>
-                  ))}
-                </List>
-              </Box>
-            </ListItem>
-          </>
-        )}
-
-        {/* 同步选项 */}
-        {config.connected && (
-          <>
-            <Divider />
-            <ListItem>
-              <Box sx={{ width: '100%' }}>
-                <Typography variant="subtitle2" sx={{ mb: 1 }}>
-                  {t('googleCalendar.syncOptions')}
-                </Typography>
-                <FormControl fullWidth sx={{ mb: 2 }} size="small">
-                  <InputLabel>{t('googleCalendar.syncDirection')}</InputLabel>
-                  <Select
-                    value={config.syncDirection}
-                    label={t('googleCalendar.syncDirection')}
-                    onChange={async (e) => {
-                      const newDirection = e.target.value;
-                      setConfig({ ...config, syncDirection: newDirection });
-                      // 立即保存以保持与 SyncStatusIndicator 同步
-                      try {
-                        const result = await window.electronAPI.invoke('google-calendar:save-config', {
-                          ...config,
-                          syncDirection: newDirection
-                        });
-                        if (result.success) {
-                          await loadStatus();
-                        }
-                      } catch (error) {
-                        console.error('保存配置失败:', error);
-                      }
-                    }}
-                  >
-                    <MenuItem value="bidirectional">
-                      <Box>
-                        <Typography variant="body2" sx={{ fontWeight: 600 }}>
-                          {t('googleCalendar.directionBidirectionalTitle')}
-                        </Typography>
-                        <Typography variant="caption" color="text.secondary" sx={{ display: 'block' }}>
-                          {t('googleCalendar.directionBidirectionalDesc')}
-                        </Typography>
-                      </Box>
-                    </MenuItem>
-                    <MenuItem value="upload">
-                      <Box>
-                        <Typography variant="body2" sx={{ fontWeight: 600 }}>
-                          {t('googleCalendar.directionUploadTitle')}
-                        </Typography>
-                        <Typography variant="caption" color="text.secondary" sx={{ display: 'block' }}>
-                          {t('googleCalendar.directionUploadDesc')}
-                        </Typography>
-                      </Box>
-                    </MenuItem>
-                    <MenuItem value="download">
-                      <Box>
-                        <Typography variant="body2" sx={{ fontWeight: 600 }}>
-                          {t('googleCalendar.directionDownloadTitle')}
-                        </Typography>
-                        <Typography variant="caption" color="text.secondary" sx={{ display: 'block' }}>
-                          {t('googleCalendar.directionDownloadDesc')}
-                        </Typography>
-                      </Box>
-                    </MenuItem>
-                  </Select>
-                </FormControl>
-
-                <FormControl fullWidth size="small">
-                  <InputLabel>{t('googleCalendar.syncInterval')}</InputLabel>
-                  <Select
-                    value={config.syncInterval}
-                    label={t('googleCalendar.syncInterval')}
-                    onChange={async (e) => {
-                      const newInterval = e.target.value;
-                      setConfig({ ...config, syncInterval: newInterval });
-                      // 立即保存以保持与 SyncStatusIndicator 同步
-                      try {
-                        const result = await window.electronAPI.invoke('google-calendar:save-config', {
-                          ...config,
-                          syncInterval: newInterval
-                        });
-                        if (result.success) {
-                          await loadStatus();
-                        }
-                      } catch (error) {
-                        console.error('保存配置失败:', error);
-                      }
-                    }}
-                  >
-                    <MenuItem value="15">15 分钟</MenuItem>
-                    <MenuItem value="30">30 分钟</MenuItem>
-                    <MenuItem value="60">1 小时</MenuItem>
-                    <MenuItem value="180">3 小时</MenuItem>
-                    <MenuItem value="360">6 小时</MenuItem>
-                  </Select>
-                </FormControl>
-              </Box>
-            </ListItem>
-
-            <Divider />
-
-            {/* 操作按钮 */}
-            <ListItem>
-              <Box sx={{ display: 'flex', gap: 2, width: '100%' }}>
-                <Button
-                  variant="contained"
-                  size="small"
-                  startIcon={<CheckCircle />}
-                  onClick={handleSave}
-                >
-                  {t('googleCalendar.saveConfig')}
-                </Button>
-
-                <Button
-                  variant="outlined"
-                  size="small"
-                  startIcon={syncing ? <CircularProgress size={16} /> : <Sync />}
-                  onClick={handleSyncNow}
-                  disabled={!config.enabled || syncing || !config.calendarId}
-                >
-                  {t('googleCalendar.syncNow')}
-                </Button>
-              </Box>
-            </ListItem>
-          </>
-        )}
-
-        <Divider />
-
-        {/* 帮助信息 */}
-        <ListItem>
-          <Box>
-            <Typography variant="subtitle2" gutterBottom color="text.secondary">
-              特点
-            </Typography>
-            <Typography variant="body2" color="text.secondary">
-              • 使用 OAuth 2.0 安全授权,无需密码<br />
-              • 支持双向同步,在两端修改都会同步<br />
-              • 自动刷新授权,长期有效<br />
-              • 可选择同步到哪个日历<br />
-              • 一键授权,浏览器自动完成
-            </Typography>
-            
-            <Typography variant="subtitle2" gutterBottom color="text.secondary" sx={{ mt: 2 }}>
-              使用说明
-            </Typography>
-            <Typography variant="body2" color="text.secondary">
-              1. 点击"连接 Google 账号"按钮<br />
-              2. 浏览器会自动打开 Google 授权页面<br />
-              3. 登录并点击"允许"授予权限<br />
-              4. 授权成功后自动返回,无需手动操作<br />
-              5. 选择日历并配置同步选项
-            </Typography>
-          </Box>
-        </ListItem>
-      </List>
+          <Button
+            variant="outlined"
+            size="small"
+            startIcon={syncing ? <CircularProgress size={16} /> : <Sync />}
+            onClick={handleSyncNow}
+            disabled={!config.enabled || syncing || !config.calendarId}
+          >
+            立即同步
+          </Button>
+        </Box>
+      )}
     </Box>
   );
 };

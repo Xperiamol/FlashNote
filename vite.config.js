@@ -27,6 +27,13 @@ export default defineConfig({
       input: {
         main: resolve(__dirname, 'index.html'),
         standalone: resolve(__dirname, 'standalone.html')
+      },
+      output: {
+        manualChunks: {
+          markdown: ['markdown-it', 'markdown-it-container', 'markdown-it-highlightjs', 'markdown-it-mark', 'rehype-highlight', 'rehype-raw', 'remark-gfm', 'react-markdown'],
+          tiptap: ['@tiptap/react', '@tiptap/starter-kit', '@tiptap/extension-highlight', '@tiptap/extension-placeholder'],
+          excalidraw: ['@excalidraw/excalidraw']
+        }
       }
     }
   },

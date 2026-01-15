@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import {
   Box,
   Typography,
@@ -27,15 +27,18 @@ import {
   CalendarMonth as CalendarMonthIcon,
   Tag as TagIcon
 } from '@mui/icons-material';
+import { scrollbar } from '../styles/commonStyles';
 import { useStore } from '../store/useStore';
 import { fetchTodoStats } from '../api/todoAPI';
 import { fetchInstalledPlugins } from '../api/pluginAPI';
 import { createTransitionString, ANIMATIONS } from '../utils/animationConfig';
 import { useTranslation } from '../utils/i18n';
 import TimeZoneUtils from '../utils/timeZoneUtils';
+import { useError } from './ErrorProvider';
 
 const Profile = () => {
   const { t } = useTranslation();
+  const { showError } = useError();
   const { notes, userAvatar, theme, primaryColor, setCurrentView, userName, christmasMode } = useStore();
   const [todoStats, setTodoStats] = useState(null);
   const [installedPlugins, setInstalledPlugins] = useState([]);
@@ -85,6 +88,7 @@ const Profile = () => {
 
       } catch (err) {
         console.error('[Profile] 加载统计数据失败:', err);
+        showError(err, '加载统计数据失败');
         setError('加载统计数据失败: ' + err.message);
       } finally {
         setLoading(false);
@@ -94,16 +98,16 @@ const Profile = () => {
     loadStats();
   }, []);
 
-  // 计算笔记统计
-  const noteStats = {
+  // 计算笔记统计 - 使用 useMemo 避免重复计算
+  const noteStats = useMemo(() => ({
     total: notes.length,
     deleted: notes.filter(note => note.is_deleted).length,
     pinned: notes.filter(note => note.is_pinned && !note.is_deleted).length,
     active: notes.filter(note => !note.is_deleted).length
-  };
+  }), [notes]);
 
-  // 计算待办事项统计
-  const todoStatsDisplay = todoStats || {
+  // 计算待办事项统计 - 使用 useMemo 避免重复计算
+  const todoStatsDisplay = useMemo(() => todoStats || {
     total: 0,
     completed: 0,
     pending: 0,
@@ -111,11 +115,11 @@ const Profile = () => {
     dueToday: 0,
     completedOnTime: 0,
     onTimeRate: 0
-  };
+  }, [todoStats]);
 
-  const completionRate = todoStatsDisplay.total > 0
+  const completionRate = useMemo(() => todoStatsDisplay.total > 0
     ? Math.round((todoStatsDisplay.completed / todoStatsDisplay.total) * 100)
-    : 0;
+    : 0, [todoStatsDisplay.total, todoStatsDisplay.completed]);
 
   // 处理编辑资料按钮点击
   const handleEditProfile = () => {
@@ -868,14 +872,9 @@ const Profile = () => {
                 flexDirection: 'column',
                 gap: 0.5,
                 overflowX: 'auto',
+                overflowY: 'hidden',
                 pb: 1,
-                '&::-webkit-scrollbar': {
-                  height: '4px',
-                },
-                '&::-webkit-scrollbar-thumb': {
-                  backgroundColor: 'rgba(0,0,0,0.2)',
-                  borderRadius: '4px',
-                }
+                ...scrollbar.auto
               }}>
                 {weeks.map((week, weekIndex) => (
                   <Box key={weekIndex} sx={{ display: 'flex', gap: 0.5 }}>

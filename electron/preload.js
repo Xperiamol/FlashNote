@@ -456,6 +456,12 @@ contextBridge.exposeInMainWorld('electronAPI', {
       const handler = (event, data) => callback?.(data)
       ipcRenderer.on(channel, handler)
       return () => ipcRenderer.removeListener(channel, handler)
+    },
+    onNotification: (callback) => {
+      const channel = 'plugin:notification'
+      const handler = (event, data) => callback?.(data)
+      ipcRenderer.on(channel, handler)
+      return () => ipcRenderer.removeListener(channel, handler)
     }
   },
 
@@ -506,6 +512,10 @@ contextBridge.exposeInMainWorld('electronAPI', {
 
     // 禁用同步
     disable: () => ipcRenderer.invoke('sync:disable'),
+
+    // 启用/禁用特定类别的同步
+    enableCategory: (category) => ipcRenderer.invoke('sync:enable-category', category),
+    disableCategory: (category) => ipcRenderer.invoke('sync:disable-category', category),
 
     // 手动同步
     manualSync: () => ipcRenderer.invoke('sync:manual-sync'),
@@ -564,10 +574,33 @@ contextBridge.exposeInMainWorld('electronAPI', {
     }
   },
 
+  // MCP 相关 API
+  mcp: {
+    checkInstalled: () => ipcRenderer.invoke('mcp:isInstalled'),
+    getInstallInfo: () => ipcRenderer.invoke('mcp:getInstallInfo'),
+    install: () => ipcRenderer.invoke('mcp:install'),
+    uninstall: () => ipcRenderer.invoke('mcp:uninstall'),
+    getConfigPath: () => ipcRenderer.invoke('mcp:getConfigPath'),
+    onProgress: (callback) => {
+      const handler = (event, data) => callback(data);
+      ipcRenderer.on('mcp:install-progress', handler);
+      return () => ipcRenderer.removeListener('mcp:install-progress', handler);
+    }
+  },
+
   // 通用 invoke 方法
   invoke: (channel, ...args) => ipcRenderer.invoke(channel, ...args),
 
-  // 暴露 ipcRenderer 用于事件监听
+  // 事件监听方法
+  on: (channel, callback) => {
+    ipcRenderer.on(channel, callback);
+  },
+  
+  removeListener: (channel, callback) => {
+    ipcRenderer.removeListener(channel, callback);
+  },
+
+  // 暴露 ipcRenderer 用于特定事件监听（兼容旧代码）
   ipcRenderer: {
     on: (channel, callback) => {
       // 只允许特定的频道
@@ -582,10 +615,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
         ipcRenderer.removeAllListeners(channel)
       }
     }
-  },
-
-  // 通用 invoke 接口（用于支持动态 IPC 调用）
-  invoke: (channel, ...args) => ipcRenderer.invoke(channel, ...args)
+  }
 })
 
 // 监听来自主进程的消息（如果需要的话）

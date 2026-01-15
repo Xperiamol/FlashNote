@@ -1,7 +1,7 @@
 /* 字体定义 */
 @font-face {
   font-family: 'OPPOSans';
-  src: url('../../OPPOSans R.ttf') format('truetype');
+  src: url('../../OPPOSans R.woff2') format('woff2');
   font-weight: normal;
   font-style: normal;
 }

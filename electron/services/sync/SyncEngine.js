@@ -7,7 +7,25 @@
 const { EventEmitter } = require('events');
 const path = require('path');
 const fs = require('fs');
-const { app } = require('electron');
+
+// 尝试加载 Electron，如果失败则使用 null（独立运行模式）
+let app = null;
+try {
+  const electron = require('electron');
+  app = electron.app;
+} catch (e) {
+  // 独立运行模式
+}
+
+const getUserDataPath = () => {
+  if (app) return app.getPath('userData');
+  const platform = process.platform;
+  const homeDir = process.env.HOME || process.env.USERPROFILE;
+  if (platform === 'win32') return path.join(process.env.APPDATA || homeDir, 'flashnote');
+  if (platform === 'darwin') return path.join(homeDir, 'Library', 'Application Support', 'flashnote');
+  return path.join(homeDir, '.config', 'flashnote');
+};
+
 const WebDAVClient = require('./webdavClient');
 const StorageAdapter = require('./StorageAdapter');
 const { getInstance: getDeviceIdManager } = require('../../utils/DeviceIdManager');
@@ -35,6 +53,7 @@ class SyncEngine extends EventEmitter {
       retryAttempts: config.retryAttempts || 3,
       conflictStrategy: config.conflictStrategy || 'ask',
       enableDebugLog: config.enableDebugLog || false,
+      syncCategories: config.syncCategories || ['notes', 'images', 'settings', 'todos'], // 启用的同步类别
     };
 
     // WebDAV 客户端
@@ -53,7 +72,7 @@ class SyncEngine extends EventEmitter {
     this.deviceId = getDeviceIdManager().getDeviceId();
 
     // 本地缓存的 manifest 路径
-    this.localManifestPath = path.join(app.getPath('userData'), 'sync-manifest.json');
+    this.localManifestPath = path.join(getUserDataPath(), 'sync-manifest.json');
 
     // 同步状态
     this.isSyncing = false;
@@ -63,7 +82,7 @@ class SyncEngine extends EventEmitter {
     this.syncIPCHandler = config.syncIPCHandler || null;
 
     // 调试日志
-    this.logFile = path.join(app.getPath('userData'), 'sync-v3-debug.log');
+    this.logFile = path.join(getUserDataPath(), 'sync-v3-debug.log');
     this.clearLogFile();
   }
 
@@ -260,33 +279,39 @@ class SyncEngine extends EventEmitter {
     uploadCount += 2;
     this.log('[Init] 初始空文件上传完成');
 
-    // 3. 获取本地数据
-    const localNotes = await this.storage.getAllNotes(false); // 不包含已删除
-    const localTodos = await this.storage.getAllTodos(false);
-    const localSettings = await this.storage.getAllSettings();
+    // 3. 获取本地数据（根据启用的类别过滤）
+    const enabledCategories = this.config.syncCategories || [];
+    const localNotes = enabledCategories.includes('notes') ? await this.storage.getAllNotes(false) : {}; // 不包含已删除
+    const localTodos = enabledCategories.includes('todos') ? await this.storage.getAllTodos(false) : {};
+    const localSettings = enabledCategories.includes('settings') ? await this.storage.getAllSettings() : {};
 
-    this.log(`[Init] 本地数据: ${Object.keys(localNotes).length} 笔记, ${Object.keys(localTodos).length} 待办`);
+    this.log(`[Init] 本地数据 (已启用类别: ${enabledCategories.join(', ')}): ${Object.keys(localNotes).length} 笔记, ${Object.keys(localTodos).length} 待办`);
 
-    // 4. 上传本地笔记和白板
-    const noteUploads = Object.values(localNotes).map(note => this.uploadNote(note));
+    // 4. 上传本地笔记和白板（如果启用）
+    const noteUploads = enabledCategories.includes('notes') ? Object.values(localNotes).map(note => this.uploadNote(note)) : [];
     await Promise.all(noteUploads);
     uploadCount += noteUploads.length;
-    this.log(`[Init] ${noteUploads.length} 个笔记/白板上传完成`);
+    if (noteUploads.length > 0) {
+      this.log(`[Init] ${noteUploads.length} 个笔记/白板上传完成`);
+    }
 
-    // 5. 上传笔记中引用的图片
-    const imageCount = await this.uploadAllNoteImages(localNotes);
+    // 5. 上传笔记中引用的图片（如果启用images类别）
+    const imageCount = enabledCategories.includes('images') ? await this.uploadAllNoteImages(localNotes) : 0;
     uploadCount += imageCount;
-    this.log(`[Init] ${imageCount} 个图片上传完成`);
+    if (imageCount > 0) {
+      this.log(`[Init] ${imageCount} 个图片上传完成`);
+    }
 
-    // 6. 上传 todos 和 settings（如果有数据，覆盖空文件）
+    // 6. 上传 todos 和 settings（如果有数据且类别已启用，覆盖空文件）
     const todosArray = Object.values(localTodos);
-    if (todosArray.length > 0) {
+    if (enabledCategories.includes('todos') && todosArray.length > 0) {
       await this.client.uploadJson(this.config.rootPath + 'todos.json', todosArray);
+      this.log('[Init] todos 上传完成');
     }
-    if (Object.keys(localSettings).length > 0) {
+    if (enabledCategories.includes('settings') && Object.keys(localSettings).length > 0) {
       await this.client.uploadJson(this.config.rootPath + 'settings.json', localSettings);
+      this.log('[Init] settings 上传完成');
     }
-    this.log('[Init] todos 和 settings 上传完成');
 
     // 7. 生成初始 manifest
     const manifest = await this.generateManifest(localNotes, localTodos, localSettings);
@@ -324,7 +349,7 @@ class SyncEngine extends EventEmitter {
     let uploadedCount = 0;
     for (const relativePath of allImageRefs) {
       try {
-        const localPath = path.join(app.getPath('userData'), relativePath);
+        const localPath = path.join(getUserDataPath(), relativePath);
         if (!fs.existsSync(localPath)) {
           this.log(`[Init Images] 本地图片不存在，跳过: ${relativePath}`);
           continue;
@@ -467,10 +492,11 @@ class SyncEngine extends EventEmitter {
     // 2. 加载本地缓存 manifest
     const cachedManifest = this.loadLocalManifest();
 
-    // 3. 扫描本地实时数据
-    const localNotes = await this.storage.getAllNotes(true);
-    const localTodos = await this.storage.getAllTodos(true);
-    const localSettings = await this.storage.getAllSettings();
+    // 3. 扫描本地实时数据（根据启用的类别过滤）
+    const enabledCategories = this.config.syncCategories || [];
+    const localNotes = enabledCategories.includes('notes') ? await this.storage.getAllNotes(true) : {};
+    const localTodos = enabledCategories.includes('todos') ? await this.storage.getAllTodos(true) : {};
+    const localSettings = enabledCategories.includes('settings') ? await this.storage.getAllSettings() : {};
 
     // 4. 生成本地实时 manifest
     const localManifest = await this.generateManifest(localNotes, localTodos, localSettings);
@@ -868,7 +894,7 @@ class SyncEngine extends EventEmitter {
     const failedImages = [];
 
     for (const relativePath of imageRefs) {
-      const localPath = path.join(app.getPath('userData'), relativePath);
+      const localPath = path.join(getUserDataPath(), relativePath);
       if (!fs.existsSync(localPath)) {
         this.log(`[Upload Images] 本地图片不存在，跳过: ${relativePath}`);
         continue;
@@ -1016,7 +1042,7 @@ class SyncEngine extends EventEmitter {
 
     for (const relativePath of imageRefs) {
       // 检查本地是否已存在
-      const localPath = path.join(app.getPath('userData'), relativePath);
+      const localPath = path.join(getUserDataPath(), relativePath);
       if (fs.existsSync(localPath)) {
         this.log(`[Download Images] 图片已存在，跳过: ${relativePath}`);
         continue;

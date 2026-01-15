@@ -9,6 +9,7 @@ dist/
 dist-electron/
 build/
 build-output/
+mcp-build/
 
 # Environment variables
 .env

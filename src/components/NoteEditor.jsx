@@ -48,8 +48,10 @@ import WYSIWYGEditor from './WYSIWYGEditor'
 import { useDebouncedSave } from '../hooks/useDebouncedSave'
 import { imageAPI } from '../api/imageAPI'
 import { convertMarkdownToWhiteboard, convertWhiteboardToMarkdown, extractImageUrls } from '../utils/markdownToWhiteboardConverter'
+import { useError } from './ErrorProvider'
 import { useTranslation } from '../utils/i18n'
 import { saveQueue } from '../utils/SaveQueue'
+import { scrollbar } from '../styles/commonStyles'
 
 const NoteEditor = () => {
   // 检测是否在独立窗口模式下运行
@@ -69,6 +71,7 @@ const NoteEditor = () => {
   const maskOpacity = useStore((state) => state.maskOpacity)
 
   const { t } = useTranslation()
+  const { showError, showSuccess, showWarning } = useError()
 
   const {
     selectedNoteId,
@@ -145,6 +148,7 @@ const NoteEditor = () => {
             setShowSaveError(true)
             setSaveErrorMessage(error.message || '保存失败，请重试')
             console.error('[NoteEditor] 保存失败，已达最大重试次数')
+            showError(error, '自动保存失败，请稍后重试')
             setIsAutoSaving(false)
             throw error; // 抛出错误让队列知道保存失败
           } else {
@@ -281,6 +285,7 @@ const NoteEditor = () => {
         }
       } catch (error) {
         console.error('检查独立窗口状态失败:', error)
+        showError(error, '检查窗口状态失败')
       }
     }
 
@@ -440,6 +445,7 @@ const NoteEditor = () => {
           window.dispatchEvent(new CustomEvent('standalone-save-complete'))
         } catch (error) {
           console.error('独立窗口关闭前保存失败:', error)
+          showError(error, '保存失败')
           // 即使失败也通知，避免主进程一直等待
           window.dispatchEvent(new CustomEvent('standalone-save-complete'))
         }
@@ -505,6 +511,9 @@ const NoteEditor = () => {
       setShowSaveSuccess(true)
     } catch (error) {
       console.error('保存失败:', error)
+      showError(error, '保存失败')
+      setShowSaveError(true)
+      setSaveErrorMessage(error.message || '保存失败')
     }
   }
 
@@ -561,6 +570,7 @@ const NoteEditor = () => {
       await window.electronAPI.createNoteWindow(selectedNoteId)
     } catch (error) {
       console.error('打开独立窗口失败:', error)
+      showError(error, '打开独立窗口失败')
     }
   }
 
@@ -598,6 +608,7 @@ const NoteEditor = () => {
       }
     } catch (error) {
       console.error('笔记类型转换失败:', error)
+      showError(error, '笔记类型转换失败')
       // 显示错误提示
       setShowSaveSuccess(false)
     } finally {
@@ -712,6 +723,7 @@ const NoteEditor = () => {
       console.log('Markdown 转白板成功，处理了', imageUrls.length, '张图片')
     } catch (error) {
       console.error('Markdown 转白板失败:', error)
+      showError(error, 'Markdown 转白板失败')
       throw error
     }
   }
@@ -819,6 +831,7 @@ const NoteEditor = () => {
       console.log('白板转 Markdown 成功，提取了', Object.keys(imageMap).length, '张图片')
     } catch (error) {
       console.error('白板转 Markdown 失败:', error)
+      showError(error, '白板转 Markdown 失败')
       throw error
     }
   }
@@ -1063,6 +1076,7 @@ const NoteEditor = () => {
           }
         } catch (error) {
           console.error('粘贴图片失败:', error)
+          showError(error, '粘贴图片失败')
         }
         break
       }
@@ -1173,6 +1187,7 @@ const NoteEditor = () => {
       }, 0)
     } catch (error) {
       console.error('拖拽失败:', error)
+      showError(error, '拖拽失败')
     }
   }
 
@@ -1576,13 +1591,13 @@ const NoteEditor = () => {
                   sx={{
                     flex: viewMode === 'split' ? 1 : 'auto',
                     p: 0,
-                    overflow: 'auto',
                     borderRight: viewMode === 'split' ? 1 : 0,
                     borderColor: 'divider',
                     minHeight: 0,
                     display: 'flex',
                     flexDirection: 'column',
-                    position: 'relative'
+                    position: 'relative',
+                    overflow: 'hidden'
                   }}
                   onDragOver={editorMode === 'markdown' ? handleDragOver : undefined}
                   onDrop={editorMode === 'markdown' ? handleDrop : undefined}
@@ -1606,16 +1621,18 @@ const NoteEditor = () => {
                         flex: 1,
                         '& .MuiInput-root': {
                           height: '100%',
-                          padding: '16px'
+                          padding: 0
                         },
                         '& .MuiInput-input': {
                           fontSize: '1rem',
                           lineHeight: 1.6,
                           fontFamily: '"OPPOSans R", "OPPOSans", system-ui, -apple-system, sans-serif',
                           height: '100% !important',
-                          overflow: 'auto !important'
+                          overflow: 'auto !important',
+                          padding: '16px',
+                          boxSizing: 'border-box',
+                          ...scrollbar.default,
                         },
-
                       }}
                     />
                   ) : (
@@ -1642,7 +1659,7 @@ const NoteEditor = () => {
                   overflow: 'hidden',
                   display: 'flex',
                   flexDirection: 'column',
-                  minHeight: 0
+                  minHeight: 0,
                 }}>
                   <MarkdownPreview
                     content={content}
@@ -1650,11 +1667,11 @@ const NoteEditor = () => {
                     onTagClick={handleTagClick}
                     sx={{
                       flex: 1,
-                      overflow: 'auto',
                       minHeight: 0,
                       maxWidth: '100%',
                       width: '100%',
-                      boxSizing: 'border-box'
+                      boxSizing: 'border-box',
+                      ...scrollbar.default,
                     }}
                   />
                 </Box>

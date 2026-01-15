@@ -80,62 +80,34 @@ class CalDAVSyncService {
   }
 
   /**
+   * 创建统一的 IPC handler（带错误处理）
+   */
+  createHandler(methodName, errorMsg, wrapData = true) {
+    return async (event, ...args) => {
+      try {
+        const result = await this[methodName](...args);
+        return wrapData && result !== undefined ? { success: true, data: result } : { success: true };
+      } catch (error) {
+        console.error(`[CalDAV] ${errorMsg}:`, error);
+        return { success: false, error: error.message };
+      }
+    };
+  }
+
+  /**
    * 设置 IPC 处理器
    */
   setupIpcHandlers() {
-    // 测试连接
-    ipcMain.handle('caldav:test-connection', async (event, config) => {
-      try {
-        const result = await this.testConnection(config);
-        return { success: true, data: result };
-      } catch (error) {
-        console.error('[CalDAV] 连接测试失败:', error);
-        return { success: false, error: error.message };
-      }
-    });
+    const handlers = [
+      ['caldav:test-connection', 'testConnection', '连接测试失败'],
+      ['caldav:save-config', 'saveConfig', '保存配置失败', false],
+      ['caldav:get-config', 'getConfig', '获取配置失败'],
+      ['caldav:sync', 'syncNow', '同步失败'],
+      ['caldav:get-status', 'getSyncStatus', '获取状态失败']
+    ];
 
-    // 保存配置
-    ipcMain.handle('caldav:save-config', async (event, config) => {
-      try {
-        await this.saveConfig(config);
-        return { success: true };
-      } catch (error) {
-        console.error('[CalDAV] 保存配置失败:', error);
-        return { success: false, error: error.message };
-      }
-    });
-
-    // 获取配置
-    ipcMain.handle('caldav:get-config', async () => {
-      try {
-        const config = await this.getConfig();
-        return { success: true, data: config };
-      } catch (error) {
-        console.error('[CalDAV] 获取配置失败:', error);
-        return { success: false, error: error.message };
-      }
-    });
-
-    // 手动同步
-    ipcMain.handle('caldav:sync', async () => {
-      try {
-        const result = await this.syncNow();
-        return { success: true, data: result };
-      } catch (error) {
-        console.error('[CalDAV] 同步失败:', error);
-        return { success: false, error: error.message };
-      }
-    });
-
-    // 获取同步状态
-    ipcMain.handle('caldav:get-status', async () => {
-      try {
-        const status = await this.getSyncStatus();
-        return { success: true, data: status };
-      } catch (error) {
-        console.error('[CalDAV] 获取状态失败:', error);
-        return { success: false, error: error.message };
-      }
+    handlers.forEach(([channel, method, errorMsg, wrapData = true]) => {
+      ipcMain.handle(channel, this.createHandler(method, errorMsg, wrapData));
     });
   }
 
