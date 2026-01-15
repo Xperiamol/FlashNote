@@ -25,6 +25,10 @@ mcp-build/
 *.swo
 *~
 
+# Local data and configs
+.claude/
+.esdata/
+
 # OS
 .DS_Store
 .DS_Store?
