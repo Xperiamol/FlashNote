@@ -2,6 +2,12 @@
 
 本项目遵循 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/) 规范。
 
+## [4.3.1] - 2026-10-12
+
+### Changed / 更新内容
+- fix(sync): sync works again with self-hosted WebDAV servers that don't return a strong ETag (such as dufs behind nginx), and changes made by another device during a sync are still never overwritten
+
+
 ## [4.3.0] - 2026-10-11
 
 ### Changed / 更新内容
