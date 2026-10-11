@@ -1,3 +1,5 @@
+const { writeFileAtomic } = require('../utils/atomicFile');
+const { getUserDataPath } = require('../utils/userDataPath');
 const fs = require('fs').promises;
 const path = require('path');
 const crypto = require('crypto');
@@ -14,32 +16,6 @@ const IMAGE_MIME_TYPES = {
 const IMAGE_EXTENSIONS = Object.fromEntries(
   Object.entries(IMAGE_MIME_TYPES).map(([extension, mimeType]) => [mimeType, extension])
 );
-
-// 尝试加载 Electron，如果失败则使用 null（独立运行模式）
-let app = null;
-try {
-  const electron = require('electron');
-  app = electron.app;
-} catch (e) {
-  // 独立运行模式（如 MCP Server），不依赖 Electron
-}
-
-// 获取用户数据目录
-const getUserDataPath = () => {
-  if (app) {
-    return app.getPath('userData');
-  }
-  // 独立运行模式：使用标准路径
-  const platform = process.platform;
-  const homeDir = process.env.HOME || process.env.USERPROFILE;
-  if (platform === 'win32') {
-    return path.join(process.env.APPDATA || homeDir, 'Flota');
-  } else if (platform === 'darwin') {
-    return path.join(homeDir, 'Library', 'Application Support', 'Flota');
-  } else {
-    return path.join(homeDir, '.config', 'Flota');
-  }
-};
 
 /**
  * 图片存储服务
@@ -110,21 +86,19 @@ class ImageStorageService {
       const fileName = this.generateFileName(base64Data);
       const filePath = path.join(this.whiteboardDir, fileName);
 
-      // 检查文件是否已存在（去重）
-      try {
-        await fs.access(filePath);
-        console.log(`图片已存在，跳过保存: ${fileName}`);
-        return fileName; // 返回相对路径
-      } catch (error) {
-        // 文件不存在，继续保存
-      }
-
-      // 从base64中提取数据
       const base64Content = base64Data.split(',')[1] || base64Data;
       const buffer = Buffer.from(base64Content, 'base64');
+      if (!buffer.length) throw new Error('画布图片内容为空');
+      // 内容寻址文件必须字节一致才能复用，旧版留下的半文件重新写入。
+      try {
+        const existing = await fs.readFile(filePath);
+        if (existing.equals(buffer)) return fileName;
+      } catch (error) {
+        if (error.code !== 'ENOENT') throw error;
+      }
 
       // 保存到文件系统
-      await fs.writeFile(filePath, buffer);
+      await writeFileAtomic(filePath, buffer);
       
       console.log(`画布图片已保存: ${fileName} (${(buffer.length / 1024).toFixed(2)} KB)`);
       
@@ -145,6 +119,7 @@ class ImageStorageService {
 
     const fileMap = {};
     const promises = [];
+    const failures = [];
 
     for (const [fileId, fileData] of Object.entries(files)) {
       if (fileData.dataURL) {
@@ -158,13 +133,16 @@ class ImageStorageService {
           })
           .catch(error => {
             console.error(`保存图片失败 (${fileId}):`, error);
-            // 继续处理其他图片
+            failures.push(`${fileId}: ${error.message}`);
           });
         promises.push(promise);
       }
     }
 
     await Promise.all(promises);
+    if (failures.length) {
+      throw new Error(`画布图片保存失败（${failures.length} 个）：${failures.join('；')}`);
+    }
     
     console.log(`批量保存完成: ${Object.keys(fileMap).length} 个图片`);
     

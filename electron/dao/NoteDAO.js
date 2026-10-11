@@ -7,7 +7,9 @@ const crypto = require('crypto');
 const serializeMeta = (meta) => {
   if (meta === null) return null;
   if (typeof meta === 'string') return meta;
-  try { return JSON.stringify(meta); } catch { return null; }
+  const serialized = JSON.stringify(meta);
+  if (serialized === undefined) throw new TypeError('笔记元数据无法序列化');
+  return serialized;
 };
 
 class NoteDAO {
@@ -44,6 +46,10 @@ class NoteDAO {
    * @param {boolean} options.skipChangeLog - 是否跳过变更日志（同步时使用，防止无限循环）
    */
   create(noteData, options = {}) {
+    return this.getDB().transaction(() => this.createInTransaction(noteData, options))();
+  }
+
+  createInTransaction(noteData, options = {}) {
     const { skipChangeLog = false } = options;
     const db = this.getDB();
     const { 
@@ -61,6 +67,8 @@ class NoteDAO {
     // 自动生成 sync_id（如果未提供）
     const finalSyncId = sync_id || crypto.randomUUID();
     
+    // 在任何数据库写入之前验证序列化，失败时不能留下半条笔记。
+    const serializedMeta = noteData.meta === undefined ? undefined : serializeMeta(noteData.meta);
     let result;
     if (id) {
       // 如果指定了 ID（从远程同步），使用 INSERT OR REPLACE
@@ -80,10 +88,14 @@ class NoteDAO {
       result = stmt.run(finalSyncId, title, content, tags, category, note_type, created_at, updated_at);
     }
     
+    if (noteData.is_pinned !== undefined || noteData.is_favorite !== undefined) {
+      db.prepare('UPDATE notes SET is_pinned = ?, is_favorite = ? WHERE id = ?')
+        .run(noteData.is_pinned ? 1 : 0, noteData.is_favorite ? 1 : 0, result.lastInsertRowid);
+    }
     if (tags) this.syncTagUsage();
 
     if (noteData.meta !== undefined && noteData.meta !== null) {
-      db.prepare('UPDATE notes SET meta = ? WHERE id = ?').run(serializeMeta(noteData.meta), result.lastInsertRowid);
+      db.prepare('UPDATE notes SET meta = ? WHERE id = ?').run(serializedMeta, result.lastInsertRowid);
     }
     
     const note = this.findById(result.lastInsertRowid) || this.findByIdIncludeDeleted(result.lastInsertRowid);
@@ -149,9 +161,13 @@ class NoteDAO {
    * @param {boolean} options.skipChangeLog - 是否跳过变更日志（同步时使用，防止无限循环）
    */
   update(id, noteData, options = {}) {
+    return this.getDB().transaction(() => this.updateInTransaction(id, noteData, options))();
+  }
+
+  updateInTransaction(id, noteData, options = {}) {
     const { skipChangeLog = false } = options;
     const db = this.getDB();
-    const { title, content, tags, category, is_pinned, is_deleted, deleted_at, note_type, updated_at, created_at } = noteData;
+    const { title, content, tags, category, is_pinned, is_favorite, is_deleted, deleted_at, note_type, updated_at, created_at } = noteData;
 
     const updates = [];
     const values = [];
@@ -195,6 +211,11 @@ class NoteDAO {
     if (is_pinned !== undefined) {
       updates.push('is_pinned = ?');
       values.push(is_pinned ? 1 : 0);
+    }
+
+    if (is_favorite !== undefined) {
+      updates.push('is_favorite = ?');
+      values.push(is_favorite ? 1 : 0);
     }
 
     if (is_deleted !== undefined) {

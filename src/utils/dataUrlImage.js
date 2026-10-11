@@ -21,9 +21,7 @@ export const dataUrlToBuffer = (dataUrl) => {
     }
     // 极少见：非 base64 的 data URL
     const decoded = decodeURIComponent(payload)
-    const buf = new Uint8Array(decoded.length)
-    for (let i = 0; i < decoded.length; i += 1) buf[i] = decoded.charCodeAt(i)
-    return { buffer: buf, mime }
+    return { buffer: new TextEncoder().encode(decoded), mime }
   } catch (_) {
     return null
   }
@@ -52,7 +50,7 @@ const buildFileName = (mime) => {
  */
 export const replaceDataImagesInHtml = async (html) => {
   if (!html || typeof html !== 'string') return html || ''
-  if (!/data:image\//i.test(html)) return html
+  if (!/(?:data:image\/|blob:)/i.test(html)) return html
 
   let doc
   try {
@@ -66,14 +64,23 @@ export const replaceDataImagesInHtml = async (html) => {
   const imgs = Array.from(root.querySelectorAll('img'))
   for (const img of imgs) {
     const src = img.getAttribute('src') || ''
-    if (!/^data:image\//i.test(src)) continue
-    const parsed = dataUrlToBuffer(src)
-    if (!parsed) continue
+    if (!/^(?:data:image\/|blob:)/i.test(src)) continue
     try {
+      let parsed
+      if (src.startsWith('blob:')) {
+        const response = await fetch(src)
+        if (!response.ok) throw new Error('临时图片无法读取')
+        const blob = await response.blob()
+        if (!blob.type.startsWith('image/')) throw new Error('临时资源不是图片')
+        parsed = { buffer: new Uint8Array(await blob.arrayBuffer()), mime: blob.type }
+      } else parsed = dataUrlToBuffer(src)
+      if (!parsed) throw new Error('图片数据无法解析')
       const imagePath = await imageAPI.saveFromBuffer(parsed.buffer, buildFileName(parsed.mime))
-      if (imagePath) img.setAttribute('src', imagePath)
+      if (!imagePath) throw new Error('图片未保存到本地')
+      img.setAttribute('src', imagePath)
     } catch (error) {
       console.warn('[dataUrlImage] 保存粘贴的内联图片失败:', error)
+      throw error
     }
   }
 

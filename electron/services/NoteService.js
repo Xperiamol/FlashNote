@@ -1,8 +1,6 @@
 const NoteDAO = require('../dao/NoteDAO');
 const TagService = require('./TagService');
 const { EventEmitter } = require('events');
-const path = require('path');
-const fs = require('fs');
 const { toStoredTime } = require('../utils/fileTimes');
 
 class NoteService extends EventEmitter {

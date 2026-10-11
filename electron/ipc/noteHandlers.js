@@ -28,6 +28,8 @@ const NOTE_PASSTHROUGH = {
 
 const registerNoteHandlers = (services) => {
   registerIpcHandlers([
+    { channel: 'note:stage-draft', handler: async (_event, draft) => services.editorDraftService.stage(draft) },
+    { channel: 'note:clear-draft', handler: async (_event, draft) => services.editorDraftService.clear(draft) },
     ...Object.entries(NOTE_PASSTHROUGH).map(([channel, methodName]) => ({
       channel,
       handler: createServicePassthroughHandler(() => services.noteService, methodName)

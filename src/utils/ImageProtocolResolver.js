@@ -38,12 +38,7 @@ class ImageProtocolResolver {
       return await this.resolveAppProtocol(src);
     }
 
-    // 5. 处理相对路径（如 images/xxx.png）
-    if (src.startsWith('images/')) {
-      return await this.resolveLocalPath(src);
-    }
-
-    // 6. 其他情况，尝试作为本地路径处理
+    // 相对路径统一走本地加载和云端回退
     return await this.resolveLocalPath(src);
   }
 
@@ -54,31 +49,7 @@ class ImageProtocolResolver {
   async resolveAppProtocol(appUrl) {
     const [relativePath] = appUrl.replace('app://', '').split('?');
     
-    // 检查缓存
-    if (this.cache.has(relativePath)) {
-      return this.cache.get(relativePath);
-    }
-
-    // 检查是否有正在进行的请求
-    if (this.pendingRequests.has(relativePath)) {
-      return await this.pendingRequests.get(relativePath);
-    }
-
-    // 创建新的请求
-    const requestPromise = this.fetchImage(relativePath);
-    this.pendingRequests.set(relativePath, requestPromise);
-
-    try {
-      const base64Data = await requestPromise;
-      
-      if (!this.isPlaceholderImage(base64Data)) {
-        this.cache.set(relativePath, base64Data);
-      }
-      
-      return base64Data;
-    } finally {
-      this.pendingRequests.delete(relativePath);
-    }
+    return this.resolveLocalPath(relativePath);
   }
 
   /**

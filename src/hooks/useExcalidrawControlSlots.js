@@ -86,9 +86,10 @@ export default function useExcalidrawControlSlots(container, language = 'zh-CN',
         }
       }
       const next = {
-        toolbar: container.querySelector('.shapes-section'),
-        zoom: container.querySelector('.zoom-actions'),
-        properties: container.querySelector('.App-menu__left'),
+        toolbar: container.querySelector('.shapes-section')
+          || container.querySelector('.App-toolbar--mobile')?.closest('section'),
+        zoom: container.querySelector('.zoom-actions') || container.querySelector('.App-bottom-bar .App-toolbar-content'),
+        properties: container.querySelector('.App-menu__left, .App-mobile-menu'),
         contextMenu: contextMenuHost,
       }
       setSlots(previous => (

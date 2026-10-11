@@ -1,15 +1,16 @@
 /**
  * 保存队列管理器
  * 防止并发保存冲突，确保保存操作按顺序执行
- * 遵循SOLID原则中的单一职责原则
  */
 import logger from './logger';
+import { registerEditorSaver } from './editorSaveRegistry';
 
 class SaveQueue {
   constructor() {
     this.queue = [];
+    this.pending = new Set();
+    this.failures = new Map();
     this.isSaving = false;
-    this.saveInProgress = new Map(); // 记录正在保存的项目ID
   }
 
   /**
@@ -19,14 +20,7 @@ class SaveQueue {
    * @returns {Promise} 保存完成的Promise
    */
   async add(id, saveFunc) {
-    // 如果该ID已经在队列中，用最新快照替换旧任务，并释放旧 Promise。
-    this.queue = this.queue.filter(task => {
-      if (task.id === id) {
-        task.resolve({ cancelled: true });
-        return false;
-      }
-      return true;
-    });
+    // 保存屏障依赖每个请求的真实完成结果，不能把被替换的请求提前 resolve。
 
     // 创建新的保存任务
     const task = {
@@ -43,6 +37,8 @@ class SaveQueue {
       task.reject = reject;
     });
 
+    this.pending.add(task.promise);
+    task.promise.then(() => this.pending.delete(task.promise), () => this.pending.delete(task.promise));
     // 添加到队列
     this.queue.push(task);
 
@@ -67,94 +63,37 @@ class SaveQueue {
     while (this.queue.length > 0) {
       const task = this.queue.shift();
 
-      // 检查是否已经在保存中（防止重复保存）
-      if (this.saveInProgress.has(task.id)) {
-        logger.log(`[SaveQueue] 跳过重复保存: ${task.id}`);
-        task.resolve();
-        continue;
-      }
-
       try {
-        this.saveInProgress.set(task.id, true);
         logger.log(`[SaveQueue] 开始保存: ${task.id}`);
         
-        await task.saveFunc();
+        const result = await task.saveFunc();
+        if (result === false || result?.success === false || result?.cancelled) throw new Error(result?.error || '保存未完成');
+        this.failures.delete(task.id);
         
         logger.log(`[SaveQueue] 保存成功: ${task.id}`);
         task.resolve();
       } catch (error) {
         console.error(`[SaveQueue] 保存失败: ${task.id}`, error);
+        this.failures.set(task.id, error);
         task.reject(error);
-      } finally {
-        this.saveInProgress.delete(task.id);
       }
     }
 
     this.isSaving = false;
   }
 
-  /**
-   * 立即保存指定ID的项目
-   * @param {string} id - 项目ID
-   * @returns {Promise} 保存完成的Promise
-   */
-  async saveNow(id) {
-    // 查找队列中的任务
-    const taskIndex = this.queue.findIndex(task => task.id === id);
-    if (taskIndex === -1) {
-      return Promise.resolve(); // 没有待保存的任务
+  async flush() {
+    while (this.pending.size) {
+      await Promise.allSettled([...this.pending]);
     }
-
-    // 将任务移到队列前面
-    const task = this.queue.splice(taskIndex, 1)[0];
-    this.queue.unshift(task);
-
-    // 如果当前没有正在执行的保存，立即开始处理
-    if (!this.isSaving) {
-      this.processQueue();
-    }
-
-    return task.promise;
+    if (this.failures.size) throw new Error('仍有笔记保存失败，请返回该笔记重试保存后再同步或退出');
   }
 
-  /**
-   * 取消指定ID的保存任务
-   * @param {string} id - 项目ID
-   */
-  cancel(id) {
-    this.queue = this.queue.filter(task => {
-      if (task.id === id) {
-        task.resolve(); // 取消也算成功
-        return false;
-      }
-      return true;
-    });
-  }
 
-  /**
-   * 清空队列
-   */
-  clear() {
-    this.queue.forEach(task => task.resolve());
-    this.queue = [];
-  }
-
-  /**
-   * 获取队列长度
-   */
-  get length() {
-    return this.queue.length;
-  }
-
-  /**
-   * 检查是否有待保存的任务
-   */
-  hasPendingSave(id) {
-    return this.queue.some(task => task.id === id) || this.saveInProgress.has(id);
-  }
 }
 
 // 导出单例实例
 export const saveQueue = new SaveQueue();
+registerEditorSaver(() => saveQueue.flush(), 1);
 
 export default SaveQueue;

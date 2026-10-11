@@ -16,7 +16,8 @@ const waitFor = async (fn, label, timeout = 120000) => {
 }
 let server, browser, socket, profile
 ;(async () => {
-  const candidates = [process.env.CHROME_PATH, 'C:/Program Files/Google/Chrome/Application/chrome.exe', 'C:/Program Files (x86)/Microsoft/Edge/Application/msedge.exe', '/usr/bin/chromium', '/usr/bin/google-chrome', '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome'].filter(Boolean)
+  const electronEngine = process.env.EDITOR_ENGINE === 'electron'
+  const candidates = [electronEngine ? require('electron') : null, process.env.CHROME_PATH, 'C:/Program Files/Google/Chrome/Application/chrome.exe', 'C:/Program Files (x86)/Microsoft/Edge/Application/msedge.exe', '/usr/bin/chromium', '/usr/bin/google-chrome', '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome'].filter(Boolean)
   let executable
   for (const candidate of candidates) { if (await fs.access(candidate).then(() => true, () => false)) { executable = candidate; break } }
   if (!executable) throw new Error('Set CHROME_PATH to a local Chromium browser executable')
@@ -24,7 +25,10 @@ let server, browser, socket, profile
   await server.listen()
   const port = server.httpServer.address().port
   profile = await fs.mkdtemp(path.join(os.tmpdir(), 'flota-editor-test-'))
-  browser = spawn(executable, ['--headless=new', '--disable-gpu', '--no-first-run', '--no-default-browser-check', '--remote-debugging-port=0', `--user-data-dir=${profile}`, '--window-size=1280,850', 'about:blank'], { windowsHide: true, stdio: 'ignore' })
+  const browserEnv = { ...process.env }
+  delete browserEnv.ELECTRON_RUN_AS_NODE
+  const browserArgs = electronEngine ? [path.join(__dirname, 'editor-electron-host.cjs'), `--acceptance-profile=${profile}`] : ['--headless=new', '--disable-gpu', '--no-first-run', '--no-default-browser-check', '--remote-debugging-port=0', `--user-data-dir=${profile}`, '--window-size=1280,850', 'about:blank']
+  browser = spawn(executable, browserArgs, { windowsHide: true, stdio: 'ignore', env: browserEnv })
   browser.on('error', error => { console.error(error); process.exitCode = 1 })
   const debugPort = await waitFor(() => fs.readFile(path.join(profile, 'DevToolsActivePort'), 'utf8').then(value => value.split('\n')[0], () => null), 'Chrome startup', 20000)
   const tabs = await fetch(`http://127.0.0.1:${debugPort}/json`).then(response => response.json())
@@ -44,28 +48,101 @@ let server, browser, socket, profile
     }
     if (message.method === 'Runtime.exceptionThrown') errors.push(message.params.exceptionDetails.exception?.description || message.params.exceptionDetails.text)
   })
-  const call = (method, params = {}) => new Promise((resolve, reject) => { const id = ++sequence; pending.set(id, { resolve, reject }); socket.send(JSON.stringify({ id, method, params })) })
+  const call = (method, params = {}) => new Promise((resolve, reject) => {
+    const id = ++sequence
+    if (process.env.EDITOR_TRACE) console.log('CDP', method, params.expression?.slice(0, 90) || '')
+    const timer = setTimeout(() => { pending.delete(id); reject(new Error(`Browser command timed out: ${method}`)) }, method === 'Runtime.evaluate' ? 180000 : method === 'Page.captureScreenshot' ? 60000 : 20000)
+    pending.set(id, {
+      resolve: value => { clearTimeout(timer); resolve(value) },
+      reject: error => { clearTimeout(timer); reject(error) },
+    })
+    socket.send(JSON.stringify({ id, method, params }))
+  })
   const evaluate = async expression => {
-    const value = await call('Runtime.evaluate', { expression, awaitPromise: true, returnByValue: true })
+    let timer
+    const value = await Promise.race([
+      call('Runtime.evaluate', { expression, awaitPromise: true, returnByValue: true }),
+      new Promise((_, reject) => { timer = setTimeout(() => reject(new Error('Browser evaluation timed out: ' + expression.slice(0, 100))), 180000) }),
+    ]).finally(() => clearTimeout(timer))
     if (value.exceptionDetails) throw new Error(value.exceptionDetails.exception?.description || value.exceptionDetails.text)
     return value.result?.value
   }
   await call('Runtime.enable')
   await call('Page.enable')
-  await call('Page.navigate', { url: `http://127.0.0.1:${port}/scripts/tests/editor-regression.html` })
+  await call('Page.bringToFront')
+  const testPage = process.env.EDITOR_SURFACE === 'rows' ? 'row-actions-preview.html' : 'editor-regression.html'
+  await call('Page.navigate', { url: `http://127.0.0.1:${port}/scripts/tests/${testPage}` })
   await waitFor(async () => {
     if (errors.length) throw new Error(errors.join('\n'))
     return evaluate('window.testReady && typeof window.runEditorTests === "function" && document.readyState === "complete"')
   }, 'test harness')
   await sleep(1500)
   await waitFor(() => evaluate('window.testReady && typeof window.runEditorTests === "function"'), 'dependency reload')
-  const output = path.join(root, 'output/editor-regression')
+  const output = path.join(root, electronEngine ? 'output/electron-acceptance' : 'output/editor-regression')
   await fs.mkdir(output, { recursive: true })
-  const screenshot = async name => { const { data } = await call('Page.captureScreenshot', { format: 'png' }); await fs.writeFile(path.join(output, name), Buffer.from(data, 'base64')) }
-  console.log('Running editor browser regressions...')
+  const screenshotsEnabled = process.env.EDITOR_SCREENSHOTS !== '0'
+  const screenshot = async name => { if (!screenshotsEnabled) return; if (process.env.EDITOR_TRACE) console.log('Screenshot', name); const { data } = await call('Page.captureScreenshot', { format: 'png' }); await fs.writeFile(path.join(output, name), Buffer.from(data, 'base64')) }
+  console.log(`Running editor regressions in ${electronEngine ? 'Electron (isolated real storage)' : 'Chrome'}...`)
   if (process.env.EDITOR_FILTER) await evaluate(`window.testFilter = ${JSON.stringify(process.env.EDITOR_FILTER)}`)
   if (process.env.EDITOR_DEBUG) await evaluate(`window.debugSources = ${process.env.EDITOR_DEBUG}`)
+  if (process.env.EDITOR_LEGACY_SCENE) await evaluate(`window.legacyAcceptanceScene = ${await fs.readFile(process.env.EDITOR_LEGACY_SCENE, 'utf8')}`)
+  if (process.env.EDITOR_SURFACE === 'rows') {
+    const point = await evaluate('(() => { const r = document.querySelector(".note-menu-button").getBoundingClientRect(); return {x:r.x+r.width/2,y:r.y+r.height/2} })()')
+    await call('Input.dispatchMouseEvent', { type: 'mouseMoved', ...point })
+    await sleep(200)
+  }
   const noteResults = await evaluate('window.runEditorTests()')
+  if (process.env.EDITOR_SURFACE === 'rows') {
+    const point = await evaluate('(() => { const r = document.querySelector(".note-menu-button").getBoundingClientRect(); return {x:r.x+r.width/2,y:r.y+r.height/2} })()')
+    await call('Input.dispatchMouseEvent', { type: 'mousePressed', ...point, button: 'left', clickCount: 1 })
+    await sleep(200)
+    noteResults.push({ name: '按下时无填色及水波纹', ok: await evaluate('(() => { const b = document.querySelector(".note-menu-button"), ripple = b.querySelector(".MuiTouchRipple-root"); return b.matches(":active") && getComputedStyle(b).backgroundColor === "rgba(0, 0, 0, 0)" && (!ripple || getComputedStyle(ripple).display === "none") })()') })
+    await screenshot('row-actions-pressed.png')
+    await call('Input.dispatchMouseEvent', { type: 'mouseReleased', ...point, button: 'left', clickCount: 1 })
+    await evaluate('document.querySelector("[data-menu-open]").setAttribute("data-menu-open", "false")')
+    await call('Input.dispatchMouseEvent', { type: 'mouseMoved', x: 2, y: 2 })
+    await evaluate('document.activeElement.blur()')
+    await sleep(200)
+    noteResults.push({ name: '离开行后图标及模糊隐藏', ok: await evaluate('(() => { const b = document.querySelector(".note-menu-button"); return getComputedStyle(b, "::before").opacity === "0" && getComputedStyle(b).pointerEvents === "none" })()') })
+    await call('Input.dispatchMouseEvent', { type: 'mouseMoved', ...point })
+    await sleep(200)
+    noteResults.push({ name: '悬停重新显示模糊', ok: await evaluate('getComputedStyle(document.querySelector(".note-menu-button"), "::before").opacity === "1"') })
+    await call('Input.dispatchMouseEvent', { type: 'mouseMoved', x: 2, y: 2 })
+    await call('Input.dispatchKeyEvent', { type: 'keyDown', key: 'Tab', code: 'Tab', windowsVirtualKeyCode: 9 })
+    await call('Input.dispatchKeyEvent', { type: 'keyUp', key: 'Tab', code: 'Tab', windowsVirtualKeyCode: 9 })
+    await evaluate('document.querySelector(".note-menu-button").focus()')
+    await sleep(200)
+    noteResults.push({ name: '键盘聚焦保留描边及模糊且无填色', ok: await evaluate('(() => { const b = document.querySelector(".note-menu-button"), s = getComputedStyle(b); return b.matches(":focus-visible") && s.outlineStyle !== "none" && s.backgroundColor === "rgba(0, 0, 0, 0)" && getComputedStyle(b, "::before").opacity === "1" })()') })
+    await screenshot('row-actions-focus.png')
+    await evaluate('document.activeElement.blur(); document.querySelector("[data-menu-open]").setAttribute("data-menu-open", "true")')
+    await call('Emulation.setEmulatedMedia', { features: [{ name: 'prefers-reduced-motion', value: 'reduce' }] })
+    noteResults.push({ name: '减少动态效果时关闭模糊过渡', ok: await evaluate('getComputedStyle(document.querySelector(".note-menu-button"), "::before").transitionDuration === "0s"') })
+    await call('Emulation.setEmulatedMedia', { features: [] })
+    await sleep(200)
+    await screenshot(process.env.EDITOR_CAPTURE_NAME || 'row-actions.png')
+    await call('Emulation.setDeviceMetricsOverride', { width: 760, height: 850, deviceScaleFactor: 1, mobile: false })
+    await screenshot('row-actions-narrow.png')
+    for (const result of noteResults) console.log(`${result.ok ? 'PASS' : 'FAIL'} ${result.name}${!result.ok && result.error ? ': ' + result.error : ''}`)
+    if (noteResults.some(result => !result.ok)) process.exitCode = 1
+    console.log(`${noteResults.filter(r => r.ok).length}/${noteResults.length} row action checks passed`)
+    return
+  }
+  if (screenshotsEnabled && await evaluate('!!window.generationGallerySvg')) {
+    await fs.writeFile(path.join(output, 'generation-gallery.svg'), await evaluate('window.generationGallerySvg'))
+    await evaluate('window.showGenerationGallery()')
+    await evaluate('document.querySelectorAll(".MuiSnackbar-root").forEach(element => element.style.visibility = "hidden")')
+    const metrics = await call('Page.getLayoutMetrics')
+    const { data: galleryPng } = await call('Page.captureScreenshot', { format: 'png', captureBeyondViewport: true, clip: { x: 0, y: 0, width: 1280, height: Math.min(3000, metrics.cssContentSize.height), scale: 1 } })
+    await fs.writeFile(path.join(output, 'generation-gallery.png'), Buffer.from(galleryPng, 'base64'))
+  }
+  if (screenshotsEnabled && await evaluate('!!window.showColorGallery')) {
+    await evaluate('window.showColorGallery()')
+    await screenshot('canvas-color-themes.png')
+  }
+  if (screenshotsEnabled && await evaluate('!!window.showLegacyGallery')) {
+    await evaluate('window.showLegacyGallery()')
+    await screenshot('legacy-canvas-repaired.png')
+  }
   await screenshot('notes.png')
   // 笔记编辑器结果先打印：后面白板部分出错时也能看到序列化/保存回归的结论
   for (const result of noteResults) console.log(`${result.ok ? 'PASS' : 'FAIL'} ${result.name}${result.error ? `\n${result.error}` : ''}`)
@@ -123,17 +200,22 @@ let server, browser, socket, profile
   await call('Emulation.setDeviceMetricsOverride', { width: 820, height: 580, deviceScaleFactor: 1, mobile: false })
   await sleep(300)
   await screenshot('whiteboard-narrow.png')
+  await evaluate("document.getElementById('board-host').style.width = '420px'")
+  await sleep(350)
+  await evaluate('window.openMobileProperties()')
+  await screenshot('whiteboard-compact.png')
   for (const result of results.slice(noteResults.length)) console.log(`${result.ok ? 'PASS' : 'FAIL'} ${result.name}${result.error ? `\n${result.error}` : ''}`)
   const failed = results.filter(result => !result.ok)
   await fs.writeFile(path.join(output, 'results.json'), JSON.stringify({ results, errors }, null, 2))
   if (errors.length) console.error('Browser exceptions:', errors)
-  console.log(`${results.length - failed.length}/${results.length} checks passed. Screenshots: output/editor-regression`)
+  console.log(`${results.length - failed.length}/${results.length} checks passed. ${screenshotsEnabled ? `Screenshots: ${output}` : 'Screenshots disabled for functional checks'}`)
   if (failed.length || errors.length) process.exitCode = 1
 })().catch(error => { console.error(error); process.exitCode = 1 }).finally(async () => {
   socket?.close()
   if (browser && browser.exitCode === null) {
     browser.kill()
     await Promise.race([new Promise(resolve => browser.once('exit', resolve)), sleep(2000)])
+    if (browser.exitCode === null) browser.kill('SIGKILL')
   }
   await server?.close()
   // Only delete the exact temporary profile created above.

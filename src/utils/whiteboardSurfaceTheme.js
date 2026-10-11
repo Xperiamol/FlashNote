@@ -4,10 +4,11 @@ export const createWhiteboardSurfaceTokens = ({ isDark, primaryColor }) => {
   const accent = primaryColor || '#1976d2'
   const text = isDark ? '#f2f2f3' : '#1f1f22'
   const muted = isDark ? '#9d9da5' : '#6e6e76'
-  const glassBackground = isDark ? alpha('#172033', 0.92) : alpha('#fafafa', 0.94)
+  // 与 MUI 浮层共用同一档液态玻璃透明度，避免白板菜单变成独立的实心卡片。
+  const glassBackground = isDark ? alpha('#172033', 0.72) : alpha('#fafafa', 0.72)
   const glassBackgroundImage = isDark
-    ? `linear-gradient(145deg, ${alpha('#ffffff', 0.075)} 0%, ${alpha('#ffffff', 0.018)} 46%, ${alpha(accent, 0.055)} 100%)`
-    : `linear-gradient(145deg, ${alpha('#ffffff', 0.38)} 0%, ${alpha('#ffffff', 0.08)} 48%, ${alpha(accent, 0.028)} 100%)`
+    ? `linear-gradient(145deg, ${alpha('#ffffff', 0.075)} 0%, ${alpha('#ffffff', 0)} 48%, ${alpha(accent, 0.035)} 100%)`
+    : `linear-gradient(145deg, ${alpha('#ffffff', 0.42)} 0%, ${alpha('#ffffff', 0.04)} 48%, ${alpha(accent, 0.025)} 100%)`
   const glassBorder = isDark
     ? '1px solid rgba(255, 255, 255, 0.11)'
     : '1px solid rgba(255, 255, 255, 0.68)'
@@ -26,7 +27,7 @@ export const createWhiteboardSurfaceTokens = ({ isDark, primaryColor }) => {
     glassBackground,
     glassBackgroundImage,
     glassBorder,
-    glassBlur: 'blur(20px) saturate(165%)',
+    glassBlur: 'blur(24px) saturate(165%)',
     glassShadow,
     hover,
     pressed,
@@ -89,7 +90,7 @@ export const createWhiteboardSurfaceSx = ({ isDark, primaryColor }) => {
       transform: 'translateX(-50%) !important',
       zIndex: 3,
     },
-    '& .excalidraw .shapes-section > :not(.flota-whiteboard-toolbar)': {
+    '& .excalidraw .shapes-section > :not(.flota-whiteboard-toolbar), & .excalidraw .App-top-bar section:has(.App-toolbar--mobile) > :not(.flota-whiteboard-toolbar)': {
       display: 'none !important',
     },
     '& .excalidraw .layer-ui__wrapper__top-right': {
@@ -220,8 +221,39 @@ export const createWhiteboardSurfaceSx = ({ isDark, primaryColor }) => {
       outlineOffset: '-3px',
     },
 
+    // Mobile Excalidraw wraps its property sheet and footer in one full-width
+    // island. Keep the shared floating property card separate from the footer.
+    '& .excalidraw .App-bottom-bar > .Island': {
+      background: 'transparent !important',
+      boxShadow: 'none !important',
+      border: '0 !important',
+      overflow: 'visible',
+      pointerEvents: 'none',
+    },
+    '& .excalidraw .App-mobile-menu': {
+      position: 'absolute !important',
+      pointerEvents: 'auto',
+      margin: '0 !important',
+    },
+    '& .excalidraw .App-bottom-bar footer.App-toolbar': {
+      width: 'fit-content',
+      maxWidth: '100%',
+      pointerEvents: 'auto',
+      backgroundColor: `${glassBackground} !important`,
+      backgroundImage: `${glassBackgroundImage} !important`,
+      border: `${glassBorder} !important`,
+      borderRadius: '10px',
+      boxShadow: `${glassShadow} !important`,
+    },
+    '& .excalidraw .App-bottom-bar .ToolIcon__icon': {
+      borderRadius: '8px',
+      transition: 'background-color 120ms ease, color 120ms ease, transform 80ms ease',
+      '&:hover': { backgroundColor: hover },
+      '&:active': { backgroundColor: pressed, transform: 'scale(.94)' },
+    },
+
     // Contextual property card
-    '& .excalidraw .App-menu__left': {
+    '& .excalidraw .App-menu__left, & .excalidraw .App-mobile-menu': {
       width: '220px',
       padding: '44px 12px 12px !important',
       backgroundColor: `${glassBackground} !important`,
@@ -234,7 +266,7 @@ export const createWhiteboardSurfaceSx = ({ isDark, primaryColor }) => {
       overflowY: 'auto',
       overscrollBehavior: 'contain',
     },
-    '& .excalidraw .App-menu__left .panelColumn': {
+    '& .excalidraw .App-menu__left .panelColumn, & .excalidraw .App-mobile-menu .panelColumn': {
       padding: '0 !important',
       background: 'transparent !important',
       border: '0 !important',

@@ -1,3 +1,20 @@
+import ExternalFileWindow from '../../src/components/common/ExternalFileWindow'
+import { usePrefsStore } from '../../src/store/usePrefsStore'
+import PendingActionCard from '../../src/components/ai/PendingActionCard'
+import { useDebouncedSave } from '../../src/hooks/useDebouncedSave'
+import { flushEditorSaves } from '../../src/utils/editorSaveRegistry'
+import { createGenerationTask, getGenerationTaskPhase } from '../../src/utils/aiCore/generationTask'
+import { TypewriterText } from '../../src/components/ai/thinking'
+import { renderComposer } from '../../src/utils/diagrams/composer'
+import { applyScenePatch } from '../../src/utils/diagrams/editScene'
+import { generationGallery } from './generation-gallery'
+import widgetCSS from '../../electron/services/widgets/runtime/base.css?raw'
+import widgetSDK from '../../electron/services/widgets/runtime/sdk.js?raw'
+import WidgetProbeHost, { collectProblems, probeWidget } from '../../src/components/widgets/WidgetProbeHost'
+import { exportToSvg } from '@excalidraw/excalidraw'
+import AICommandCenter from '../../src/components/ai/AICommandCenter'
+import MemoryUpdateNotice from '../../src/components/ai/MemoryUpdateNotice'
+import { replaceDataImagesInHtml } from '../../src/utils/dataUrlImage'
 import React, { createRef } from 'react'
 import { createRoot } from 'react-dom/client'
 import { ThemeProvider, createTheme, CssBaseline } from '@mui/material'
@@ -46,6 +63,389 @@ const mathSources = () => { const found = []; editor.state.doc.descendants(node 
 const links = () => { const found = []; editor.state.doc.descendants(node => { node.marks.forEach(mark => { if (mark.type.name === 'link') found.push(mark.attrs.href) }) }); return found }
 
 window.runEditorTests = async () => {
+  await test('外部文件：重复保存等待同一请求，保存期间新输入继续落盘，失败阻止关闭', async () => {
+    const oldAPI = window.electronAPI, oldMode = usePrefsStore.getState().externalFileMode
+    let release, fail = false, saved = [], revision = 0, closed = 0
+    usePrefsStore.setState({ externalFileMode: 'edit' })
+    window.electronAPI = { ...oldAPI, window: { close: async () => { await flushEditorSaves(); closed++ } }, externalFiles: {
+      read: async () => ({ success: true, data: { format: 'text', name: 'external.txt', raw: 'old', content: 'old', writable: true, modifiedAt: 1, revision: 'r0' } }),
+      write: async (_path, text, options) => {
+        equal(options.expectedRevision, `r${revision}`)
+        if (fail) return { success: false, error: 'disk full' }
+        await new Promise(resolve => { release = resolve })
+        saved.push(text); revision++
+        return { success: true, data: { size: text.length, modifiedAt: revision + 1, revision: `r${revision}` } }
+      },
+    } }
+    const edit = async text => {
+      const field = document.querySelector('textarea')
+      Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value').set.call(field, text)
+      field.dispatchEvent(new Event('input', { bubbles: true })); await sleep(20)
+    }
+    const save = () => window.dispatchEvent(new KeyboardEvent('keydown', { key: 's', metaKey: true, ctrlKey: true, bubbles: true }))
+    try {
+      root.render(wrap(<ExternalFileWindow filePath="/tmp/external.txt" />))
+      await waitFor(() => document.querySelector('textarea'), 'external editor')
+      await edit('first'); save(); await waitFor(() => release, 'first save')
+      save()
+      let completed = false
+      const closing = flushEditorSaves().then(() => { completed = true })
+      await edit('second')
+      assert(!completed, 'closing bypassed in-flight save')
+      const first = release; release = null; first()
+      await waitFor(() => release, 'second save')
+      equal(saved, ['first']); assert(!completed, 'closing bypassed latest input')
+      release(); await closing
+      equal(saved, ['first', 'second'])
+      fail = true; await edit('third'); save(); await sleep(30)
+      let blocked = false
+      try { await flushEditorSaves() } catch { blocked = true }
+      assert(blocked && document.querySelector('textarea').value === 'third', 'failure lost unsaved input')
+      await flushEditorSaves({ reason: 'sync' })
+      equal(closed, 0)
+      await waitFor(() => [...document.querySelectorAll('button')].some(button => button.textContent === '不保存'), 'close confirmation')
+      const discard = [...document.querySelectorAll('button')].find(button => button.textContent === '不保存')
+      assert(discard, 'close confirmation missing'); discard.click(); await sleep(30)
+      equal(closed, 1); equal(saved, ['first', 'second'])
+    } finally {
+      release?.()
+      root.render(wrap(<div />)); await sleep(30)
+      window.electronAPI = oldAPI; usePrefsStore.setState({ externalFileMode: oldMode })
+    }
+  })
+
+  await test('外部文件白板：等版本替换仍是修改，保存期间新增元素不会被标成已保存', async () => {
+    const oldAPI = window.electronAPI, oldMode = usePrefsStore.getState().externalFileMode
+    usePrefsStore.setState({ externalFileMode: 'edit' })
+    let release, saved = []
+    const elements = convertToExcalidrawElements([{ type: 'rectangle', id: 'original', x: 40, y: 40, width: 100, height: 60 }])
+    window.electronAPI = { ...oldAPI, externalFiles: {
+      read: async () => ({ success: true, data: { format: 'whiteboard', name: 'scene.excalidraw', writable: true, modifiedAt: 1,
+        whiteboard: { elements, appState: { viewBackgroundColor: '#ffffff' }, files: {} } } }),
+      writeWhiteboard: async (_path, scene) => {
+        const snapshot = JSON.parse(JSON.stringify(scene))
+        await new Promise(resolve => { release = resolve })
+        saved.push(snapshot)
+        return { success: true, data: { size: 100, modifiedAt: saved.length + 1 } }
+      },
+    } }
+    const save = () => window.dispatchEvent(new KeyboardEvent('keydown', { key: 's', metaKey: true, ctrlKey: true, bubbles: true }))
+    try {
+      root.render(wrap(<ExternalFileWindow filePath="/tmp/scene.excalidraw" />))
+      await waitFor(() => window.h?.app?.scene?.getNonDeletedElements()?.[0]?.id === elements[0].id, 'external board')
+      await sleep(100)
+      const board = window.h.app
+      const replacement = { ...board.scene.getNonDeletedElements()[0], id: 'replacement', x: 70 }
+      board.updateScene({ elements: [replacement] }); await sleep(40)
+      save(); await waitFor(() => release, 'board first save')
+      board.updateScene({ elements: [replacement, { ...replacement, id: 'added', x: 220 }] }); await sleep(40)
+      let completed = false
+      const closing = flushEditorSaves().then(() => { completed = true })
+      const first = release; release = null; first()
+      await waitFor(() => release, 'board latest scene save')
+      equal(saved[0].elements.map(el => el.id), ['replacement'])
+      assert(!completed, 'latest board marked clean too soon')
+      release(); await closing
+      equal(saved[1].elements.map(el => el.id), ['replacement', 'added'])
+      await flushEditorSaves()
+    } finally {
+      release?.(); root.render(wrap(<div />)); await sleep(40)
+      window.electronAPI = oldAPI; usePrefsStore.setState({ externalFileMode: oldMode })
+    }
+  })
+  await test('保存屏障：连续输入有最长等待，失败可重试，保存中新增输入仍会落盘', async () => {
+    let hook, value = 0, saved = [], fail = false, release
+    const Probe = () => {
+      hook = useDebouncedSave(async () => {
+        const snapshot = value
+        if (fail) return false
+        if (release === 'pause') await new Promise(resolve => { release = resolve })
+        saved.push(snapshot)
+      }, 80, 140)
+      return null
+    }
+    root.render(wrap(<Probe />))
+    await waitFor(() => hook, 'save hook')
+    const typing = setInterval(() => { value++; hook.debouncedSave() }, 20)
+    try { await sleep(230); assert(saved.length > 0, 'continuous typing starved saving') }
+    finally { clearInterval(typing) }
+    await flushEditorSaves()
+    equal(saved.at(-1), value)
+    fail = true; value++; hook.debouncedSave()
+    let rejected = false
+    try { await flushEditorSaves() } catch { rejected = true }
+    assert(rejected && hook.hasPendingSave(), 'failed save was acknowledged')
+    fail = false; release = 'pause'
+    const first = flushEditorSaves()
+    await waitFor(() => typeof release === 'function', 'in-flight save')
+    value++; hook.debouncedSave()
+    release(); release = null
+    await first
+    equal(saved.at(-1), value)
+    assert(!hook.hasPendingSave(), 'latest save remains pending')
+    root.render(wrap(<div />)); await sleep(20)
+  })
+  if (window.acceptanceStorage) await test('Electron验收：图片真实落盘与 SQLite 保存、重开后可解码', async () => {
+    const storage = window.acceptanceStorage
+    const oldAPI = window.electronAPI
+    window.electronAPI = { ...oldAPI, images: { getPath: async path => ({ success: true, data: path }) } }
+    try {
+      const canvas = document.createElement('canvas')
+      canvas.width = 32; canvas.height = 24
+      canvas.getContext('2d').fillRect(0, 0, 32, 24)
+      for (const mime of ['image/png', 'image/jpeg', 'image/webp']) {
+        const original = canvas.toDataURL(mime)
+        const bytes = Uint8Array.from(atob(original.split(',')[1]), char => char.charCodeAt(0))
+        const relative = await storage.saveImage(bytes, `pasted.${mime.split('/')[1]}`)
+        await mountNote(`![验收图片](${relative})\n\n# 图片后的标题`)
+        const created = await storage.createNote(ref.current.getMarkdown())
+        assert(created.success, created.error)
+        const saved = await storage.readNote(created.data.id)
+        assert(saved.success, saved.error)
+        await mountNote(saved.data.content)
+        await waitFor(() => [...document.querySelectorAll('.tiptap img')].some(img => img.complete && img.naturalWidth === 32), 'real app image decoded')
+        equal(await storage.readImage(relative), original)
+        const updated = await storage.updateNote(created.data.id, ref.current.getMarkdown())
+        assert(updated.success, updated.error)
+        equal((await storage.readNote(created.data.id)).data.content, saved.data.content)
+      }
+    } finally { window.electronAPI = oldAPI }
+  })
+  await test('AI验收：运行卡片可停止，失败提示留在原卡片且可重试', async () => {
+    const task = createGenerationTask('acceptance-stop')
+    const action = { actionId: 'acceptance-stop', name: 'update_whiteboard', args: { id: 328 }, status: 'running' }
+    const show = value => root.render(wrap(<div id="action-acceptance"><PendingActionCard action={value} onExecute={() => {}} /></div>))
+    try {
+      show(action)
+      await waitFor(() => [...document.querySelectorAll('#action-acceptance button')].some(b => b.textContent === '停止生成'), 'stop button')
+      const stop = [...document.querySelectorAll('#action-acceptance button')].find(b => b.textContent === '停止生成')
+      stop.click()
+      await waitFor(() => stop.disabled && stop.textContent === '正在停止', 'cancellation state')
+      equal(getGenerationTaskPhase(action.actionId), 'cancelling')
+      show({ ...action, status: 'failed', error: '验收：图片保存失败' })
+      await waitFor(() => document.querySelector('#action-acceptance').textContent.includes('验收：图片保存失败'), 'inline failure')
+      assert([...document.querySelectorAll('#action-acceptance button')].some(b => b.textContent === '重试'), 'retry missing')
+    } finally { task.dispose(); root.render(wrap(<div />)) }
+  })
+  await test('AI体验：逐字输入、停顿、回删与短语切换', async () => {
+    const show = text => root.render(wrap(<React.StrictMode><div id="typing-test"><TypewriterText text={text} /></div></React.StrictMode>))
+    show('ABC')
+    await waitFor(() => document.querySelector('#typing-test'), 'typing mounted')
+    const content = () => document.querySelector('#typing-test').textContent
+    const frames = []
+    const observer = new MutationObserver(() => frames.push(content()))
+    observer.observe(document.querySelector('#typing-test'), { childList: true, characterData: true, subtree: true })
+    await waitFor(() => content() === 'A', 'first character')
+    show('新👩‍💻')
+    await waitFor(() => content() === 'ABC', 'old phrase completes without jumping')
+    await sleep(400)
+    equal(content(), 'ABC')
+    await waitFor(() => frames.includes('AB'), 'erasing')
+    await waitFor(() => frames.includes(''), 'erased')
+    await waitFor(() => content() === '新👩‍💻', 'new phrase and grapheme')
+    await waitFor(() => frames.lastIndexOf('新') > frames.indexOf('新👩‍💻'), 'erase entire emoji')
+    observer.disconnect()
+    root.render(wrap(<div />))
+  })
+  await test('AI体验：深色卡片在明暗画布真实导出', async () => {
+    const result = renderComposer({ type: 'card', props: { w: 480, fill: 'rgb(15, 23, 42)', title: '教学与学习创新', body: '总奖金池 $11,000', titleSize: 32, bodySize: 24 } })
+    const panels = []
+    for (const dark of [false, true]) {
+      const svg = await exportToSvg({ elements: result.elements, files: {}, appState: { viewBackgroundColor: '#ffffff', exportBackground: true, exportWithDarkMode: dark } })
+      assert([...svg.querySelectorAll('text')].every(el => el.getAttribute('fill') === '#ffffff'), 'dark banner text must be light before theme filtering')
+      assert(Boolean(svg.getAttribute('filter')) === dark, 'theme export filter not applied')
+      svg.style.width = '100%'
+      svg.style.height = 'auto'
+      panels.push(`<div style="flex:1;min-width:0"><p>${dark ? '深色画布' : '浅色画布'}</p>${svg.outerHTML}</div>`)
+    }
+    window.showColorGallery = async () => {
+      root.render(wrap(<div id="color-gallery" style={{ display: 'flex', gap: 24, padding: 24 }} dangerouslySetInnerHTML={{ __html: panels.join('') }} />))
+      await waitFor(() => document.querySelector('#color-gallery svg'), 'color gallery')
+    }
+  })
+  await test('富文本 Markdown 公式自动转换且代码和金额保持原样', async () => {
+    const html = normalizePastedHtml('<p>公式 <span>$x^2$</span> 和 \\(y+1\\)</p><p>$$<br>\\frac{a}{b}<br>$$</p><pre><code>$literal$</code></pre><p>价格 $5 和 $10</p>')
+    await mountNote('')
+    editor.commands.insertContent(html)
+    equal(mathSources(), ['x^2', 'y+1', '\\frac{a}{b}'])
+    assert(editor.state.doc.textContent.includes('$literal$'), 'code changed')
+    assert(editor.state.doc.textContent.includes('价格 $5 和 $10'), 'currency changed')
+    const saved = ref.current.getMarkdown()
+    await mountNote(saved)
+    equal(mathSources(), ['x^2', 'y+1', '\\frac{a}{b}'])
+  })
+  await test('AI链路：组件实际 SDK 写入、重开读取、窄窗样式与溢出反馈', async () => {
+    const records = []
+    const frame = document.createElement('iframe')
+    frame.style.cssText = 'width:320px;height:240px;border:0'
+    document.body.appendChild(frame)
+    let health
+    const listener = event => {
+      if (event.source !== frame.contentWindow || !event.data?.__flota) return
+      const msg = event.data
+      if (msg.type === 'health') health = msg
+      if (msg.type === 'rpc') {
+        let result
+        if (msg.method === 'data.insert') { records.push({ ...msg.params.data, _id: 'record' }); result = records.at(-1) }
+        else if (msg.method === 'data.query') result = records
+        else result = null
+        frame.contentWindow.postMessage({ __flota: 1, type: 'rpc-result', id: msg.id, result }, '*')
+      }
+    }
+    window.addEventListener('message', listener)
+    const html = `<!doctype html><html data-theme="light"><head><style>${widgetCSS}</style></head><body>
+      <main class="fl-card"><h1 class="fl-title">本周阅读</h1><p class="fl-muted">记录一点进展，让计划持续发生。</p><button class="fl-btn fl-btn-primary">完成一项</button><p id="count"></p></main>
+      <script>${widgetSDK}<\/script><script>
+      const rows = flota.data.collection('entries');
+      async function refresh(){document.querySelector('#count').textContent = (await rows.query()).length + ' 项已完成';}
+      document.querySelector('button').onclick = async () => {await rows.insert({title:'读书'}); await refresh();}; refresh();
+      <\/script></body></html>`
+    try {
+      frame.srcdoc = html
+      await waitFor(() => frame.contentDocument?.querySelector('#count')?.textContent === '0 项已完成', 'widget SDK read')
+      frame.contentDocument.querySelector('button').click()
+      await waitFor(() => records.length === 1 && frame.contentDocument.querySelector('#count').textContent === '1 项已完成', 'widget SDK write')
+      await waitFor(() => health, 'widget health')
+      assert(health.overflowX <= 8, 'compact widget overflows')
+      frame.contentDocument.documentElement.dataset.theme = 'dark'
+      assert(frame.contentWindow.getComputedStyle(frame.contentDocument.body).color !== 'rgb(30, 41, 59)', 'dark theme did not apply')
+      frame.srcdoc = html
+      await waitFor(() => frame.contentDocument?.querySelector('#count')?.textContent === '1 项已完成', 'widget reopened state')
+      assert(collectProblems({ errors: [], health: { elements: 5, text: 20, overflowX: 200 } }).some(problem => problem.message.includes('溢出')), 'overflow must fail preflight')
+      assert(collectProblems({ skipped: true }).length > 0, 'skipped preflight must fail')
+    } finally { window.removeEventListener('message', listener); frame.remove() }
+  })
+  await test('AI链路：局部 SVG 修改保留尺寸、ID、其他元素及图片', async () => {
+    const asset = createSvgAsset('<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 300 120"><text x="20" y="50">旧标题</text></svg>')
+    const unrelated = { ...asset.elements[0], id: 'untouched', x: 600 }
+    const result = applyScenePatch([...asset.elements, unrelated], { updates: [{ id: asset.elements[0].id, svgSource: '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 300 120"><text x="20" y="50">新标题</text></svg>' }], remove: [] })
+    equal(result.elements[0].id, asset.elements[0].id)
+    equal(result.elements[0].width, asset.elements[0].width)
+    assert(result.elements[1] === unrelated, 'unrelated element changed')
+    assert(result.elements[0].fileId !== asset.elements[0].fileId, 'SVG file must be replaced')
+  })
+  await test('AI链路：后台局部修改保存后保留旧图片索引', async () => {
+    const previous = window.electronAPI
+    let saved
+    const { applyWhiteboardGenerationToNote, buildWhiteboardContent } = await import('../../src/utils/whiteboardAI')
+    const elements = [{ id: 'title', type: 'text', text: '旧标题', originalText: '旧标题', x: 10, y: 10, width: 200, height: 20, fontSize: 16 }, { id: 'photo', type: 'image', fileId: 'photo-file', x: 400, y: 10, width: 200, height: 200 }]
+    window.electronAPI = { ai: { chat: async () => ({ success: true, data: { content: JSON.stringify({ updates: [{ id: 'title', changes: { text: '新标题' } }], remove: [] }) } }) } }
+    try {
+      await applyWhiteboardGenerationToNote({ note: { id: 7, note_type: 'whiteboard', content: buildWhiteboardContent({ elements, fileMap: { 'photo-file': { fileName: 'photo.png' } } }) }, action: 'edit', prompt: '修改标题', updateNote: async (id, data) => { saved = JSON.parse(data.content); return { success: true } } })
+      equal(saved.fileMap['photo-file'].fileName, 'photo.png')
+      equal(saved.elements.find(element => element.id === 'photo').fileId, 'photo-file')
+      equal(saved.elements.find(element => element.id === 'title').text, '新标题')
+    } finally { window.electronAPI = previous }
+  })
+  await test('AI链路：StrictMode 不会把重复挂载误判为检查中断', async () => {
+    const controller = new AbortController()
+    root.render(wrap(<React.StrictMode><WidgetProbeHost /></React.StrictMode>))
+    await sleep(100)
+    let resolved = false
+    const checking = probeWidget('__draft__strict-test', 'full', controller.signal).then(result => { resolved = true; return result })
+    await sleep(100)
+    assert(!resolved, 'StrictMode cleanup prematurely resolved preflight')
+    controller.abort()
+    await checking
+    root.render(wrap(<div />))
+  })
+  await test('AI链路：原语样张真实导出、文字与长表格完整呈现', async () => {
+    const result = renderComposer(structuredClone(generationGallery))
+    const svg = await exportToSvg({ elements: result.elements, files: {}, appState: { viewBackgroundColor: '#f8fafc', exportBackground: true, exportWithDarkMode: false } })
+    assert(!/NaN/.test(svg.outerHTML), 'invalid SVG coordinates')
+    assert(svg.textContent.includes('更多重点'), 'missing title')
+    svg.style.width = '100%'
+    svg.style.height = 'auto'
+    root.render(wrap(<div id="generation-gallery" style={{ margin: '24px auto', maxWidth: 1180, border: '1px solid #e2e8f0', borderRadius: 20, overflow: 'hidden' }} />))
+    await waitFor(() => document.querySelector('#generation-gallery'), 'gallery')
+    document.querySelector('#generation-gallery').appendChild(svg)
+    const previousAPI = window.electronAPI
+    let reviewed
+    window.electronAPI = { ai: { getConfig: async () => ({ success: true, data: { visionEnabled: true } }), chat: async messages => { reviewed = messages; return { success: true, data: { content: '{"issues":[]}' } } } } }
+    try {
+      const { reviewCanvas } = await import('../../src/utils/diagrams/visualReview')
+      equal(await reviewCanvas(result, '验收原语样张'), [])
+      assert(reviewed[1].content[1].image_url.url.startsWith('data:image/png;base64,'), 'visual review did not receive actual rendered PNG')
+    } finally { window.electronAPI = previousAPI }
+    window.generationGallerySvg = svg.outerHTML
+    window.showGenerationGallery = async () => {
+      root.render(wrap(<div id="final-gallery" style={{ padding: 24, maxWidth: 1200, margin: '0 auto' }} dangerouslySetInnerHTML={{ __html: window.generationGallerySvg }} />))
+      await waitFor(() => document.querySelector('#final-gallery svg'), 'final gallery')
+    }
+  })
+  await test('附件：AI 小窗拖入图片和文本，预览并发送多模态消息', async () => {
+    const oldAPI = window.electronAPI
+    const oldState = useStore.getState()
+    let sent
+    window.electronAPI = { ...oldAPI, ai: {
+      getConfig: async () => ({ success: true, data: { visionEnabled: true } }),
+      onChatChunk: () => () => {},
+      chatStream: async messages => { sent = messages; return { success: true, fullContent: '收到附件' } },
+    } }
+    useStore.setState({ notes: [], selectedNoteId: null, aiActiveConvId: 'attachments-test', aiConversations: [{ id: 'attachments-test', messages: [], title: '附件测试' }] })
+    try {
+      root.render(wrap(<AICommandCenter open notesOverride={[]} selectedNoteIdOverride={null} onClose={() => {}} />))
+      await waitFor(() => document.querySelector('[aria-label="添加图片或文本文件"]'), 'attachment picker')
+      await sleep(100)
+      const button = document.querySelector('[aria-label="添加图片或文本文件"]')
+      const panel = button.closest('.MuiPaper-root')
+      const transfer = new DataTransfer()
+      transfer.items.add(new File(['任务：23 Oct 2026 截止'], 'dates.txt', { type: 'text/plain' }))
+      const png = Uint8Array.from(atob('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+jN1cAAAAASUVORK5CYII='), ch => ch.charCodeAt(0))
+      transfer.items.add(new File([png], 'sample.png', { type: 'image/png' }))
+      const drop = new DragEvent('drop', { bubbles: true, cancelable: true, dataTransfer: transfer })
+      panel.dispatchEvent(drop)
+      assert(drop.defaultPrevented, '文件拖入没有被接管')
+      await waitFor(() => panel.textContent.includes('dates.txt') && panel.textContent.includes('sample.png'), 'attachment previews')
+      panel.querySelector('[aria-label="发送"]').click()
+      await waitFor(() => sent, 'multimodal send')
+      const content = sent.at(-1).content
+      assert(Array.isArray(content), '图片没有以多模态消息发送')
+      assert(content.some(part => part.type === 'text' && part.text.includes('23 Oct 2026')), '文本文件内容丢失')
+      assert(content.some(part => part.type === 'image_url' && part.image_url.url.startsWith('data:image/png;base64,')), '图片内容丢失')
+      await sleep(100)
+    } finally {
+      root.render(wrap(<div />))
+      await sleep(50)
+      window.electronAPI = oldAPI
+      useStore.setState({ notes: oldState.notes, selectedNoteId: oldState.selectedNoteId, aiActiveConvId: oldState.aiActiveConvId, aiConversations: oldState.aiConversations })
+    }
+  })
+  await test('附件：本地图片保存、重开、再次保存保持引用与独立段落', async () => {
+    const imagePath = 'images/1791354883254_009c361ada6a725f432ad2dcd7f0c485.jpg'
+    const markdown = `![照片](${imagePath})\n\n# 图片之后的标题`
+    await mountNote(markdown)
+    const saved = ref.current.getMarkdown()
+    await mountNote(saved)
+    const savedAgain = ref.current.getMarkdown()
+    equal(savedAgain, saved)
+    let src
+    editor.state.doc.descendants(node => { if (node.type.name === 'image') src = node.attrs.src })
+    equal(src, imagePath)
+    assert(types().includes('heading'), '图片吞掉了后续标题')
+    const spec = editor.schema.nodes.image.spec.toDOM(editor.schema.nodes.image.create({ src: imagePath }))
+    equal(spec[1].src, `app://${imagePath}`)
+  })
+  await test('附件：临时 Blob 图片持久化后不保留临时地址', async () => {
+    const oldAPI = window.electronAPI
+    const blobUrl = URL.createObjectURL(new Blob(['test-image'], { type: 'image/jpeg' }))
+    let stored
+    window.electronAPI = { ...oldAPI, images: { saveFromBuffer: async (buffer, name) => { stored = { buffer, name }; return { success: true, data: 'images/stored.jpg' } } } }
+    try {
+      const html = await replaceDataImagesInHtml(`<p>前文</p><img src="${blobUrl}"><p>后文</p>`)
+      assert(html.includes('images/stored.jpg') && !html.includes('blob:'), html)
+      assert(stored.name.endsWith('.jpg'), stored.name)
+      equal(new TextDecoder().decode(stored.buffer), 'test-image')
+    } finally { window.electronAPI = oldAPI; URL.revokeObjectURL(blobUrl) }
+  })
+  await test('附件：窄窗口撤销按钮仍保持单行且不被摘要挤压', async () => {
+    root.render(wrap(<div style={{ width: 180 }}><MemoryUpdateNotice variant="pill" updates={{ changes: [{ op: 'add', id: 1, content: '这是一条很长很长的记忆摘要，用于测试按钮的收缩问题' }] }} onUndo={() => {}} /></div>))
+    await waitFor(() => [...document.querySelectorAll('button')].some(button => button.textContent === '撤销'), 'undo button')
+    const button = [...document.querySelectorAll('button')].find(button => button.textContent === '撤销')
+    equal(getComputedStyle(button).whiteSpace, 'nowrap')
+    equal(getComputedStyle(button).flexShrink, '0')
+    assert(button.getBoundingClientRect().width >= 35, '撤销按钮被挤窄')
+  })
   await test('网址规范化保留编码、查询参数和锚点', () => {
     equal(normalizeLinkUrl(' https://example.com/a(b)?x=a%26b&next=%2Fhome#章节 '), 'https://example.com/a(b)?x=a%26b&next=%2Fhome#%E7%AB%A0%E8%8A%82')
     equal(normalizeLinkUrl('www.example.com/a'), 'https://www.example.com/a')
@@ -267,7 +667,7 @@ $$
       // 用户接着打字，保存的是"新内容 + 输入"，不是旧内容
       const tiptap = document.querySelector('.wysiwyg-editor-content').editor
       tiptap.commands.insertContentAt(1, '补充：')
-      await sleep(3600) // NoteEditor 防抖 3 秒保存
+      await sleep(2100) // 等待 1.5 秒防抖及异步保存
       assert(saved.length > 0, 'nothing saved')
       const last = saved[saved.length - 1].content
       assert(last.includes('手机上改过的新内容') && last.includes('补充：'), `saved stale content: ${last}`)
@@ -278,7 +678,60 @@ $$
       await sleep(300)
       assert(document.querySelector('.wysiwyg-editor-content').textContent.includes('未保存'), 'unsaved typing was overwritten')
     } finally {
+      await flushEditorSaves()
+      root.render(wrap(<div />)); await sleep(50)
       useStore.setState({ updateNote: original, notes: [], selectedNoteId: null })
+    }
+  })
+  await test('类型转换：数据库拒绝时保留画布，重试成功后才切到 Markdown', async () => {
+    const originalState = useStore.getState()
+    const oldAPI = window.electronAPI
+    const note = { id: 'conversion-retry', title: '转换验收', note_type: 'whiteboard', tags: [], content: JSON.stringify({
+      type: 'excalidraw', version: 2,
+      elements: convertToExcalidrawElements([{ type: 'text', text: '保留这段内容', x: 30, y: 30 }]),
+      appState: { viewBackgroundColor: '#ffffff' }, fileMap: {}
+    }) }
+    let attempts = 0, fail = true
+    window.electronAPI = { ...oldAPI, whiteboard: {
+      loadImages: async map => ({ success: true, data: map }),
+      saveImages: async map => ({ success: true, data: map }),
+      savePreview: async () => ({ success: true }),
+    } }
+    useStore.setState({ notes: [note], selectedNoteId: note.id, currentView: 'notes', editorMode: 'wysiwyg',
+      updateNote: async (id, updates) => {
+        if (updates.note_type === 'markdown') {
+          attempts++
+          if (fail) return { success: false, error: '模拟磁盘写入失败' }
+        }
+        useStore.setState(state => ({ notes: state.notes.map(n => n.id === id ? { ...n, ...updates } : n) }))
+        return { success: true, data: { ...note, ...updates } }
+      }
+    })
+    const convert = async () => {
+      document.querySelector('button[aria-label="Markdown"]').click()
+      await waitFor(() => [...document.querySelectorAll('button')].some(b => b.textContent === '确认转换'), 'conversion dialog')
+      ;[...document.querySelectorAll('button')].find(b => b.textContent === '确认转换').click()
+    }
+    try {
+      root.render(wrap(<div style={{ height: 700 }}><NoteEditor /></div>))
+      await waitFor(() => document.querySelector('.excalidraw canvas'), 'conversion canvas')
+      await sleep(400)
+      await convert()
+      await waitFor(() => attempts === 1, 'failed conversion attempted').catch(error => {
+        throw new Error(error.message + JSON.stringify({ attempts, text: document.body.textContent.slice(-1600) }))
+      })
+      await sleep(100)
+      assert(document.querySelector('.excalidraw canvas'), 'failed conversion unmounted original canvas')
+      equal(useStore.getState().notes[0].note_type, 'whiteboard')
+      await waitFor(() => !document.querySelector('#conversion-dialog-title'), 'failed dialog closed')
+      fail = false
+      await convert()
+      await waitFor(() => document.querySelector('.wysiwyg-editor-content')?.textContent.includes('保留这段内容'), 'conversion committed').catch(error => { throw new Error(error.message + JSON.stringify({ attempts, note: useStore.getState().notes[0], text: document.body.textContent.slice(-1600) })) })
+      equal(useStore.getState().notes[0].note_type, 'markdown')
+    } finally {
+      root.render(wrap(<div />)); await sleep(50)
+      window.electronAPI = oldAPI
+      useStore.setState(originalState)
     }
   })
   await test('打开着的画布被云同步更新：没在编辑就载入新版本', async () => {
@@ -563,6 +1016,56 @@ $$
     equal(chooseWhiteboardPanelPosition({ ...options, previous: position.side }).side, position.side)
     assert(position.left + 210 <= 1000, 'outside canvas')
   })
+  if (window.legacyAcceptanceScene) await test('原画布验收：第328号画布副本在两种风格恢复颜色且保存不丢元素', async () => {
+    const original = window.legacyAcceptanceScene
+    const oldAPI = window.electronAPI
+    const oldState = useStore.getState()
+    let output
+    try {
+      window.electronAPI = { ...oldAPI, whiteboard: {
+        loadImages: async map => ({ success: true, data: map }),
+        saveImages: async map => ({ success: true, data: map }),
+        savePreview: async () => ({ success: true }),
+      } }
+      for (const style of ['neat', 'sketchy']) {
+        const note = { id: `legacy-${style}`, title: '原画布只读副本', note_type: 'whiteboard', content: JSON.stringify(original) }
+        useStore.setState({ notes: [note], theme: 'light', whiteboardStyle: style, updateNote: async () => ({ success: true }) })
+        let getter
+        root.render(wrap(<div style={{ width: 1200, height: 760 }}><WhiteboardEditor key={style} noteId={note.id} onGetContent={value => { getter = value }} /></div>))
+        await waitFor(() => document.querySelector('.excalidraw canvas') && getter, 'legacy editor')
+        let content
+        for (let attempt = 0; attempt < 50; attempt++) {
+          content = await getter()
+          if (content && JSON.parse(content).elements.length === original.elements.length) break
+          await sleep(100)
+        }
+        assert(content, 'legacy scene not ready')
+        output = JSON.parse(content)
+        equal(output.elements.length, original.elements.length)
+        const gradients = original.elements.filter(el => String(el.backgroundColor).includes('gradient('))
+        assert(gradients.length === 2, 'unexpected source scene')
+        for (const shape of gradients) {
+          const restored = output.elements.find(el => el.id === shape.id)
+          equal(restored.backgroundColor.toLowerCase(), shape.backgroundColor.match(/#[0-9a-f]{6}/i)[0].toLowerCase())
+          equal([restored.x, restored.y, restored.width, restored.height], [shape.x, shape.y, shape.width, shape.height])
+        }
+      }
+      const panels = []
+      for (const dark of [false, true]) {
+        const svg = await exportToSvg({ elements: output.elements, files: {}, appState: { viewBackgroundColor: '#ffffff', exportBackground: true, exportWithDarkMode: dark } })
+        svg.style.width = '100%'; svg.style.height = 'auto'
+        panels.push(`<div style="flex:1;min-width:0"><p>${dark ? '深色显示' : '浅色显示'}</p>${svg.outerHTML}</div>`)
+      }
+      window.showLegacyGallery = async () => {
+        root.render(wrap(<div id="legacy-gallery" style={{ display: 'flex', gap: 16, padding: 16 }} dangerouslySetInnerHTML={{ __html: panels.join('') }} />))
+        await waitFor(() => document.querySelector('#legacy-gallery svg'), 'legacy gallery')
+      }
+    } finally {
+      root.render(wrap(<div />)); await sleep(50)
+      window.electronAPI = oldAPI
+      useStore.setState(oldState)
+    }
+  })
   await mountNote('# 数学笔记\n\n勾股定理：$a^2 + b^2 = c^2$。\n\n$$\n\\int_0^1 x^2\\,dx = \\frac{1}{3}\n$$\n\n[查看参考文档](<https://example.com/中文(a)?x=1&y=2>)\n\n双击公式可编辑，链接支持直接粘贴。')
   return results
 }
@@ -619,16 +1122,14 @@ window.checkWhiteboardToolbar = async () => {
     more.click()
     await waitFor(() => !document.querySelector('[role="menu"]'), 'create menu close')
   })
-  await test('富文本 Markdown 公式自动转换且代码和金额保持原样', async () => {
-    const html = normalizePastedHtml('<p>公式 <span>$x^2$</span> 和 \\(y+1\\)</p><p>$$<br>\\frac{a}{b}<br>$$</p><pre><code>$literal$</code></pre><p>价格 $5 和 $10</p>')
-    await mountNote('')
-    editor.commands.insertContent(html)
-    equal(mathSources(), ['x^2', 'y+1', '\\frac{a}{b}'])
-    assert(editor.state.doc.textContent.includes('$literal$'), 'code changed')
-    assert(editor.state.doc.textContent.includes('价格 $5 和 $10'), 'currency changed')
-    const saved = ref.current.getMarkdown()
-    await mountNote(saved)
-    equal(mathSources(), ['x^2', 'y+1', '\\frac{a}{b}'])
+  await test('白板验收：外部保存遇到图片落盘失败必须拒绝不完整内容', async () => {
+    const original = window.electronAPI.whiteboard.saveImages
+    window.electronAPI.whiteboard.saveImages = async () => ({ success: false, error: '验收磁盘写入失败' })
+    try {
+      let error
+      try { await window.getBoardContent() } catch (caught) { error = caught }
+      assert(error?.message.includes('验收磁盘写入失败'), 'image persistence failure was silently ignored')
+    } finally { window.electronAPI.whiteboard.saveImages = original }
   })
   return results
 }
@@ -692,11 +1193,24 @@ window.checkEditableContextMenu = async (kind) => {
   return results
 }
 window.testReady = true
+window.openMobileProperties = async () => {
+  const restore = document.querySelector('.App-bottom-bar [aria-label="展开属性面板"]')
+  restore?.click()
+  if (!document.querySelector('.App-mobile-menu')) {
+    const edit = [...document.querySelectorAll('.App-bottom-bar [aria-label]')].find(el => /属性|properties|编辑|Edit/i.test(el.getAttribute('aria-label')))
+    assert(edit, 'mobile property toggle missing')
+    edit.click()
+  }
+  await waitFor(() => document.querySelector('.App-mobile-menu .flota-properties-header'), 'shared mobile property header')
+  await sleep(150)
+}
 window.checkEmbeddedWhiteboard = async () => {
   document.getElementById('board-host').style.width = '820px'
   document.getElementById('board-host').style.height = '580px'
   await sleep(200)
   await test('嵌入式窄白板的颜色弹窗保持在画布范围内', async () => {
+    document.querySelector('button[aria-label="矩形"]').click()
+    await waitFor(() => document.querySelector('.App-menu__left .properties-trigger'), 'rectangle color controls')
     const trigger = document.querySelector('.App-menu__left .properties-trigger')
     trigger.click()
     await waitFor(() => document.querySelector('[data-radix-popper-content-wrapper] .color-picker-content'), 'color popover')
@@ -706,6 +1220,32 @@ window.checkEmbeddedWhiteboard = async () => {
     assert(rect.left >= canvas.left && rect.right <= canvas.right && rect.bottom <= canvas.bottom, `popover clipped: ${JSON.stringify(rect.toJSON())}`)
     trigger.click()
     await waitFor(() => !document.querySelector('[data-radix-popper-content-wrapper] .color-picker-content'), 'color popover close')
+  })
+  await test('窄窗和正常尺寸复用绘图工具栏、动画及工具状态', async () => {
+    const host = document.getElementById('board-host')
+    for (const width of [620, 420, 820]) {
+      host.style.width = `${width}px`
+      await sleep(350)
+      await waitFor(() => document.querySelector('.flota-whiteboard-toolbar button[aria-label="矩形"]'), `toolbar ${width}`)
+      assert(document.querySelectorAll('.flota-whiteboard-toolbar').length === 1, 'duplicate toolbar')
+      const toolbar = document.querySelector('.flota-whiteboard-toolbar')
+      const rect = toolbar.getBoundingClientRect()
+      const canvas = document.querySelector('.excalidraw canvas').getBoundingClientRect()
+      assert(rect.width > 0 && rect.left >= canvas.left - 1 && rect.right <= canvas.right + 1, `toolbar overflow at ${width}`)
+      if (width === 420) {
+        await window.openMobileProperties()
+        const panel = document.querySelector('.App-mobile-menu').getBoundingClientRect()
+        assert(panel.width <= 230 && panel.top >= rect.bottom && panel.bottom <= canvas.bottom, `mobile property panel invalid: ${JSON.stringify(panel.toJSON())}`)
+      }
+      const button = toolbar.querySelector('button[aria-label="矩形"]')
+      assert(getComputedStyle(button).transitionDuration !== '0s', 'button motion lost')
+      const target = button.getBoundingClientRect()
+      assert(button.contains(document.elementFromPoint(target.left + target.width / 2, target.top + target.height / 2)), `toolbar is obscured at ${width}px`)
+      button.click()
+      await waitFor(() => button.getAttribute('aria-pressed') === 'true', 'tool active')
+      const native = document.querySelector('.App-toolbar--mobile')
+      if (native) assert(native.getClientRects().length === 0, 'native mobile toolbar remains visible')
+    }
   })
   return results
 }

@@ -1,7 +1,7 @@
 const { EventEmitter } = require('events');
 const fs = require('fs').promises;
 const path = require('path');
-const { dialog, app } = require('electron');
+const { dialog } = require('electron');
 const { getFileTimes } = require('../utils/fileTimes');
 
 // 导入新的导入导出器

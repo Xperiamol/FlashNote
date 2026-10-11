@@ -182,7 +182,7 @@ export default function WhiteboardToolbar({
       sx={() => ({
         display: 'flex',
         alignItems: 'center',
-        maxWidth: 'calc(100vw - 156px)',
+        maxWidth: 'calc(100cqw - 32px)',
         height: 48,
         px: 0.5,
         overflowX: 'auto',

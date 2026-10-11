@@ -1,33 +1,10 @@
+const { getUserDataPath } = require('../utils/userDataPath');
 const Database = require('better-sqlite3');
 const path = require('path');
 const fs = require('fs');
 const { detectDefaultLanguage } = require('../utils/defaultLanguage');
 
-// 尝试加载 Electron，如果失败则使用 null（独立运行模式）
-let app = null;
-try {
-  const electron = require('electron');
-  app = electron.app;
-} catch (e) {
-  // 独立运行模式（如 MCP Server），不依赖 Electron
-}
-
 // ========== 数据库日志工具 ==========
-const getUserDataPath = () => {
-  if (app) {
-    return app.getPath('userData');
-  }
-  // 独立运行模式：使用标准路径
-  const platform = process.platform;
-  const homeDir = process.env.HOME || process.env.USERPROFILE;
-  if (platform === 'win32') {
-    return path.join(process.env.APPDATA || homeDir, 'Flota');
-  } else if (platform === 'darwin') {
-    return path.join(homeDir, 'Library', 'Application Support', 'Flota');
-  } else {
-    return path.join(homeDir, '.config', 'Flota');
-  }
-};
 
 const dbLogFile = path.join(getUserDataPath(), 'startup-debug.log');
 function dbLog(...args) {
@@ -51,7 +28,7 @@ class DatabaseManager {
   async initialize(customDbPath = null) {
     try {
       // 获取用户数据目录
-      const userDataPath = app ? app.getPath('userData') : getUserDataPath();
+      const userDataPath = getUserDataPath();
       const dbDir = path.join(userDataPath, 'database');
       
       dbLog('用户数据目录:', userDataPath);

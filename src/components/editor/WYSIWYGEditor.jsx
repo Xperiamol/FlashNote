@@ -1,9 +1,10 @@
+import { editorImageSource, imageUploadName } from '../../utils/editorImageSource'
 import { forwardRef, useEffect, useImperativeHandle, useLayoutEffect, useMemo, useRef, useState, useCallback } from 'react'
 import { useEditor, EditorContent, NodeViewWrapper, NodeViewContent, ReactNodeViewRenderer } from '@tiptap/react'
 import { Extension, Mark } from '@tiptap/core'
 import { Plugin, PluginKey, TextSelection } from '@tiptap/pm/state'
 import { Decoration, DecorationSet } from '@tiptap/pm/view'
-import { Fragment, Slice } from '@tiptap/pm/model'
+import { Fragment} from '@tiptap/pm/model'
 import StarterKit from '@tiptap/starter-kit'
 import HardBreak from '@tiptap/extension-hard-break'
 import Placeholder from '@tiptap/extension-placeholder'
@@ -870,6 +871,9 @@ const ImageNodeView = ({ node, selected, editor, getPos, extension }) => {
 // 于是「图片 + 标题」会被写成 `![](src)# 标题`（同一行），重新加载时 markdown-it
 // 不再把 `# 标题` 当作 ATX 标题，标题格式因此丢失。块级图片后补 closeBlock 修复。
 const CustomImage = Image.extend({
+  renderHTML({ HTMLAttributes }) {
+    return ['img', { ...this.options.HTMLAttributes, ...HTMLAttributes, src: editorImageSource(HTMLAttributes.src) }]
+  },
   addNodeView() {
     return ReactNodeViewRenderer(ImageNodeView)
   },
@@ -2660,9 +2664,9 @@ const WYSIWYGEditor = forwardRef(({ noteId, content, onChange, onEditorReady, on
     try {
       const arrayBuffer = await blob.arrayBuffer()
       const buffer = new Uint8Array(arrayBuffer)
-      const fileName = `paste_${Date.now()}.png`
+      const fileName = imageUploadName(blob)
       const imagePath = await imageAPI.saveFromBuffer(buffer, fileName)
-      if (imagePath) {
+      if (imagePath && !ed.isDestroyed && editorRef.current === ed) {
         // 插入原始相对路径，NodeView 会异步解析为可显示 URL
         if (typeof pos === 'number') {
           ed.chain().focus().insertContentAt(pos, {
@@ -2675,6 +2679,7 @@ const WYSIWYGEditor = forwardRef(({ noteId, content, onChange, onEditorReady, on
       }
     } catch (error) {
       console.error('[WYSIWYGEditor] 图片保存失败:', error)
+      notifyError(`图片保存失败：${error.message}`)
     }
   }
 
@@ -2893,19 +2898,18 @@ const WYSIWYGEditor = forwardRef(({ noteId, content, onChange, onEditorReady, on
 
         // 3) 富文本 HTML：若包含 <img src="data:image/..."> 这种 base64 内联图（如飞书复制），
         //    先把 data URL 持久化为本地图片文件，避免超长 data URL 被写入 markdown 后续被序列化破坏。
-        if (htmlText && /<img[^>]+src=(["'])data:image\//i.test(htmlText)) {
+        if (htmlText && /<img\b/i.test(htmlText) && /(?:data:image\/|blob:)/i.test(htmlText)) {
           event.preventDefault()
+          const ed = editorRef.current
           replaceDataImagesInHtml(htmlText).then((processedHtml) => {
-            const ed = editorRef.current
-            if (!ed || ed.isDestroyed) return
+            if (!ed || ed.isDestroyed || editorRef.current !== ed) return
             // 用替换后的 HTML 走 TipTap 默认 HTML 解析路径（pasteHTML）
             ed.commands.insertContent(processedHtml, {
               parseOptions: { preserveWhitespace: 'full' },
             })
           }).catch((err) => {
             console.warn('[WYSIWYGEditor] 处理粘贴 data URL 图片失败:', err)
-            const ed = editorRef.current
-            if (ed && !ed.isDestroyed) ed.commands.insertContent(htmlText)
+            notifyError(`图片持久化失败，未插入临时图片：${err.message}`)
           })
           return true
         }

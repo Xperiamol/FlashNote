@@ -4,7 +4,7 @@ import {
   Button,
   Typography,
   Paper,
-  Divider,
+
   FormControlLabel,
   Checkbox,
   TextField,
@@ -155,7 +155,7 @@ const ObsidianImportExport = () => {
             {showImportConfig ? <ExpandLessIcon /> : <ExpandMoreIcon />}
           </IconButton>
         </Box>
-        
+
         <Collapse in={showImportConfig}>
           {importerConfig && (
             <Box sx={{ mb: 2, pl: 2, borderLeft: '2px solid', borderColor: 'divider' }}>
@@ -245,7 +245,7 @@ const ObsidianImportExport = () => {
             {showExportConfig ? <ExpandLessIcon /> : <ExpandMoreIcon />}
           </IconButton>
         </Box>
-        
+
         <Collapse in={showExportConfig}>
           {exporterConfig && (
             <Box sx={{ mb: 2, pl: 2, borderLeft: '2px solid', borderColor: 'divider' }}>

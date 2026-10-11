@@ -13,7 +13,7 @@ export default function useWhiteboardProperties(api, container, collapsed) {
     const resize = new ResizeObserver(() => schedule())
     const layout = () => {
       frame = 0
-      const nextPanel = container.querySelector('.App-menu__left')
+      const nextPanel = container.querySelector('.App-menu__left, .App-mobile-menu')
       if (nextPanel !== panel) {
         if (panel) resize.unobserve(panel)
         panel = nextPanel
@@ -65,7 +65,7 @@ export default function useWhiteboardProperties(api, container, collapsed) {
       panel.style.setProperty('bottom', 'auto', 'important')
     }
     const schedule = () => { if (!frame) frame = requestAnimationFrame(layout) }
-    const down = event => { interacting = Boolean(event.target.closest?.('.App-menu__left, .popover, .color-picker, .Dialog')) }
+    const down = event => { interacting = Boolean(event.target.closest?.('.App-menu__left, .App-mobile-menu, .popover, .color-picker, .Dialog')) }
     const up = () => { interacting = false; schedule() }
     resize.observe(container)
     const mutation = new MutationObserver(schedule)

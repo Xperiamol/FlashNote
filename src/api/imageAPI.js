@@ -1,94 +1,24 @@
+import { imageUploadName } from '../utils/editorImageSource'
+
+const callImageAPI = async (method, args, errorMessage) => {
+  try {
+    const result = await window.electronAPI.images[method](...args)
+    if (!result.success) throw new Error(result.error)
+    return result.data
+  } catch (error) {
+    console.error(`${errorMessage}:`, error)
+    throw error
+  }
+}
+
 // 图片处理相关API
 export const imageAPI = {
-  // 保存图片（从Buffer）
-  async saveFromBuffer(buffer, fileName) {
-    try {
-      const result = await window.electronAPI.images.saveFromBuffer(buffer, fileName)
-      if (result.success) {
-        return result.data
-      } else {
-        throw new Error(result.error)
-      }
-    } catch (error) {
-      console.error('保存图片失败:', error)
-      throw error
-    }
-  },
-
-  // 保存图片（从文件路径）
-  async saveFromPath(sourcePath, fileName) {
-    try {
-      const result = await window.electronAPI.images.saveFromPath(sourcePath, fileName)
-      if (result.success) {
-        return result.data
-      } else {
-        throw new Error(result.error)
-      }
-    } catch (error) {
-      console.error('保存图片失败:', error)
-      throw error
-    }
-  },
-
-  // 选择图片文件
-  async selectFile() {
-    try {
-      const result = await window.electronAPI.images.selectFile()
-      if (result.success) {
-        return result.data
-      } else {
-        throw new Error(result.error)
-      }
-    } catch (error) {
-      console.error('选择图片失败:', error)
-      throw error
-    }
-  },
-
-  // 获取图片完整路径
-  async getPath(relativePath) {
-    try {
-      const result = await window.electronAPI.images.getPath(relativePath)
-      if (result.success) {
-        return result.data
-      } else {
-        throw new Error(result.error)
-      }
-    } catch (error) {
-      console.error('获取图片路径失败:', error)
-      throw error
-    }
-  },
-
-  // 获取图片base64数据
-  async getBase64(relativePath) {
-    try {
-      const result = await window.electronAPI.images.getBase64(relativePath)
-      if (result.success) {
-        return result.data
-      } else {
-        throw new Error(result.error)
-      }
-    } catch (error) {
-      console.error('获取图片base64失败:', error)
-      throw error
-    }
-  },
-
-  // 删除图片
-  async delete(relativePath) {
-    try {
-      const result = await window.electronAPI.images.delete(relativePath)
-      if (result.success) {
-        return result.data
-      } else {
-        throw new Error(result.error)
-      }
-    } catch (error) {
-      console.error('删除图片失败:', error)
-      throw error
-    }
-  },
+  saveFromBuffer: (buffer, fileName) => callImageAPI('saveFromBuffer', [buffer, fileName], '保存图片失败'),
+  saveFromPath: (sourcePath, fileName) => callImageAPI('saveFromPath', [sourcePath, fileName], '保存图片失败'),
+  selectFile: () => callImageAPI('selectFile', [], '选择图片失败'),
+  getPath: (relativePath) => callImageAPI('getPath', [relativePath], '获取图片路径失败'),
+  getBase64: (relativePath) => callImageAPI('getBase64', [relativePath], '获取图片base64失败'),
+  delete: (relativePath) => callImageAPI('delete', [relativePath], '删除图片失败'),
 
   // 从粘贴板保存图片
   async saveFromClipboard() {
@@ -109,7 +39,7 @@ export const imageAPI = {
               try {
                 const arrayBuffer = await blob.arrayBuffer()
                 const buffer = new Uint8Array(arrayBuffer)
-                const fileName = `clipboard_${Date.now()}.png`
+                const fileName = imageUploadName(blob, 'clipboard')
                 const imagePath = await this.saveFromBuffer(buffer, fileName)
                 resolve({ imagePath, fileName })
                 return

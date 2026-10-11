@@ -1,3 +1,4 @@
+const { writeFileAtomic } = require('../utils/atomicFile');
 const { ipcMain, app } = require('electron')
 const fs = require('fs')
 const path = require('path')
@@ -44,7 +45,7 @@ const registerWhiteboardHandlers = () => {
       await fs.promises.mkdir(previewDir, { recursive: true })
       const filePath = path.join(previewDir, `${syncId}.png`)
       const buffer = Buffer.from(pngBase64, 'base64')
-      await fs.promises.writeFile(filePath, buffer)
+      await writeFileAtomic(filePath, buffer)
       // 仅本地落盘。上传交给 SyncEngine.syncWhiteboardPreview（带 previewHashes 内容去重），
       // 避免每次保存都直传坚果云、即使内容未变也重传造成重复流量。
       return { success: true }

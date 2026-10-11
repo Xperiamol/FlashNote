@@ -1,30 +1,7 @@
+const { getUserDataPath } = require('../../utils/userDataPath');
 const BaseExporter = require('./BaseExporter');
 const path = require('path');
-const fs = require('fs').promises;
 const { existsSync } = require('fs');
-
-// 获取用户数据路径
-const getUserDataPath = () => {
-  let app = null;
-  try {
-    app = require('electron').app;
-  } catch (e) {
-    // Standalone mode
-  }
-  
-  if (app) return app.getPath('userData');
-  
-  const platform = process.platform;
-  const homeDir = process.env.HOME || process.env.USERPROFILE;
-  
-  if (platform === 'win32') {
-    return path.join(process.env.APPDATA || homeDir, 'Flota');
-  } else if (platform === 'darwin') {
-    return path.join(homeDir, 'Library', 'Application Support', 'Flota');
-  } else {
-    return path.join(homeDir, '.config', 'Flota');
-  }
-}
 
 /**
  * Obsidian 导出器
