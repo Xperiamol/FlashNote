@@ -1,3 +1,4 @@
+import { createGenerationTask } from './generationTask'
 // 统一的待确认动作执行器（问题2）。
 //
 // 固定链路：validate pending -> resolve immutable target/source -> get latest scene
@@ -43,13 +44,15 @@ const buildFallback = (action) => ({
   context: action.context || null,
 })
 
-const executeWhiteboardAction = async (action, overrides, deps) => {
+const executeWhiteboardAction = async (action, overrides, deps, task) => {
   const claim = await window.electronAPI?.ai?.consumePendingAction?.(action.actionId, buildFallback(action))
   if (!claim?.success) {
     throw new Error(claim?.error || '待确认操作不存在或已过期')
   }
+  task?.throwIfCancelled()
   const claimedArgs = { ...(claim.action?.args || action.args || {}), ...(overrides || {}) }
   const actionContext = claim.action?.context || action.context || null
+  if (task) task.referenceImages = actionContext?.referenceImages || []
 
   if (action.name === 'create_whiteboard') {
     return executeCreateWhiteboardToolAction({
@@ -61,6 +64,7 @@ const executeWhiteboardAction = async (action, overrides, deps) => {
       deleteNote: deps.deleteNote,
       updateNote: deps.updateNote,
       loadNotes: deps.loadNotes,
+      task,
     })
   }
   return executeUpdateWhiteboardToolAction({
@@ -71,10 +75,11 @@ const executeWhiteboardAction = async (action, overrides, deps) => {
     updateNote: deps.updateNote,
     loadNotes: deps.loadNotes,
     setSelectedNoteId: deps.setSelectedNoteId,
+    task,
   })
 }
 
-const executeWidgetAction = async (action) => {
+const executeWidgetAction = async (action, task) => {
   const claim = await window.electronAPI?.ai?.consumePendingAction?.(action.actionId, buildFallback(action))
   if (!claim?.success) {
     throw new Error(claim?.error || '待确认操作不存在或已过期')
@@ -94,10 +99,14 @@ const executeWidgetAction = async (action) => {
 
   const result = await runWidgetGeneration({
     instruction: args.instruction || '',
+    referenceImages: (claim.action?.context || action.context)?.referenceImages || [],
     widgetId: isUpdate ? args.id : undefined,
     instanceId: previewInstanceId || undefined,
     instanceName: args.instance_name,
     onProgress: report,
+    task,
+    initialDraftId: action.resultData?.draftId || null,
+    initialErrors: action.resultData?.problems || null,
   })
   useWidgetActionProgress.getState().clear(action.actionId)
 
@@ -135,11 +144,13 @@ export const runPendingAction = async ({ action, overrides = null, deps = {} }) 
 
   // 长文写作等耗时动作：执行期间接收主进程推来的步骤进度，卡片上实时显示
   ensureActionProgressSubscription()
+  let task
   try {
+    if (WHITEBOARD_ACTIONS.has(action.name) || WIDGET_ACTIONS.has(action.name)) task = createGenerationTask(action.actionId)
     const result = WHITEBOARD_ACTIONS.has(action.name)
-      ? await executeWhiteboardAction(action, overrides, deps)
+      ? await executeWhiteboardAction(action, overrides, deps, task)
       : WIDGET_ACTIONS.has(action.name)
-        ? await executeWidgetAction(action)
+        ? await executeWidgetAction(action, task)
         : await window.electronAPI?.ai?.executePendingAction?.(action.actionId, overrides, buildFallback(action))
     // 步骤进度只在执行期间显示，完成后由结果卡片接管
     useActionSteps.getState().clear(action.actionId)
@@ -163,12 +174,18 @@ export const runPendingAction = async ({ action, overrides = null, deps = {} }) 
   } catch (error) {
     return {
       success: false,
-      message: `操作失败：${error?.message || '未知错误'}`,
+      cancelled: task?.signal.aborted || error?.name === 'AbortError',
+      message: task?.signal.aborted ? '已停止生成' : `操作失败：${error?.message || '未知错误'}`,
       error: error?.message || '未知错误',
       finalAction: action,
+      resultData: error?.draftId ? { draftId: error.draftId, problems: error.problems || [{ message: error.message }] } : null,
       reloadNotes: false,
       reloadTodos: false,
     }
+  } finally {
+    task?.dispose()
+    useWidgetActionProgress.getState().clear(action.actionId)
+    useActionSteps.getState().clear(action.actionId)
   }
 }
 

@@ -1,5 +1,8 @@
 import { useEffect, useState } from 'react'
 import { Box } from '@mui/material'
+import { ThemeProvider, createTheme } from '@mui/material/styles'
+
+const PROBE_THEMES = { light: createTheme(), dark: createTheme({ palette: { mode: 'dark' } }) }
 import WidgetHost from './WidgetHost'
 
 const PROBE_TIMEOUT_MS = 8000
@@ -13,25 +16,28 @@ let enqueue = null
  * @param {'compact'|'medium'|'full'} [size]
  * @returns {Promise<{ errors: Array<{message: string, stack?: string}>, health: object | null, skipped?: boolean }>}
  */
-export const probeWidget = (draftId, size = 'full') => new Promise((resolve) => {
+export const probeWidget = (draftId, size = 'full', signal, viewport = {}) => new Promise((resolve) => {
   if (!enqueue) return resolve({ errors: [], health: null, skipped: true })
-  enqueue({ id: `${draftId}-${size}-${Date.now()}`, draftId, size, resolve })
+  if (signal?.aborted) return resolve({ errors: [], health: null, skipped: true })
+  enqueue({ id: `${draftId}-${size}-${Date.now()}-${Math.random()}`, draftId, size, signal, viewport, resolve })
 })
 
 /** 由预跑结果得出需要修复的问题 */
 export const collectProblems = (probe) => {
-  if (probe.skipped) return []
+  if (probe.skipped) return [{ message: '预览检查不可用，不能将未检查的草稿发布为组件', fatal: true }]
   const problems = [...probe.errors]
   if (probe.health && probe.health.elements <= 2 && probe.health.text === 0) {
     problems.push({ message: '白屏：组件加载后页面上没有渲染出任何内容' })
   } else if (!probe.health && !problems.length) {
     problems.push({ message: '组件加载超时，没有完成渲染（可能有死循环，或脚本在加载时就中断了）' })
   }
+  if (probe.health?.overflowX > 8) problems.push({ message: `页面横向溢出 ${probe.health.overflowX}px，请使用响应式宽度，避免内容被裁切` })
+  for (const issue of probe.health?.issues || []) problems.push({ message: issue })
   return problems
 }
 
 function Probe({ request, onDone }) {
-  const [state] = useState(() => ({ errors: [], health: null, timer: null, finished: false }))
+  const [state] = useState(() => ({ errors: [], health: null, timer: null, finished: false, epoch: 0 }))
   const finish = () => {
     if (state.finished) return
     state.finished = true
@@ -40,8 +46,17 @@ function Probe({ request, onDone }) {
     onDone(request.id)
   }
   useEffect(() => {
+    const epoch = ++state.epoch
+    if (request.signal?.aborted) { finish(); return }
     state.timer = setTimeout(finish, PROBE_TIMEOUT_MS)
-    return () => clearTimeout(state.timer)
+    request.signal?.addEventListener('abort', finish, { once: true })
+    return () => {
+      clearTimeout(state.timer)
+      request.signal?.removeEventListener('abort', finish)
+      queueMicrotask(() => {
+        if (state.epoch === epoch && !state.finished) request.resolve({ errors: state.errors, health: state.health, skipped: true })
+      })
+    }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
   const onEvent = (event) => {
@@ -68,9 +83,9 @@ export default function WidgetProbeHost() {
   }, [])
   if (!requests.length) return null
   return (
-    <Box aria-hidden sx={{ position: 'fixed', left: -10000, top: 0, width: 480, pointerEvents: 'none', opacity: 0 }}>
+    <Box aria-hidden sx={{ position: 'fixed', left: -10000, top: 0, width: 1000, pointerEvents: 'none', opacity: 0 }}>
       {requests.map((request) => (
-        <Probe key={request.id} request={request} onDone={(id) => setRequests((list) => list.filter((item) => item.id !== id))} />
+        <ThemeProvider key={request.id} theme={PROBE_THEMES[request.viewport.theme] || PROBE_THEMES.light}><Box sx={{ width: request.viewport.width || 480 }}><Probe request={request} onDone={(id) => setRequests((list) => list.filter((item) => item.id !== id))} /></Box></ThemeProvider>
       ))}
     </Box>
   )

@@ -1,3 +1,4 @@
+import { releasePopoverFocus } from '../../utils/popoverFocus'
 import React, { useState, useRef, useEffect, useCallback, useMemo } from 'react'
 import {
   Box, Typography, TextField, IconButton, Paper,
@@ -27,6 +28,7 @@ import LongDocSteps from './LongDocSteps'
 import FlotaAIIcon from '../common/FlotaAIIcon'
 import FlotaAIOrb from '../common/FlotaAIOrb'
 import { getContextSources, truncateText } from '../../utils/aiContextUtils'
+import { getUiLocation } from '../../utils/aiCore/uiLocation'
 import { buildContext } from '../../utils/aiCore/contextBuilder'
 import {
   getLatestConfirmableAction,
@@ -34,11 +36,12 @@ import {
   isExplicitPendingActionConfirmation,
   supersedeStalePendingActions,
   toApiMessages,
+  stripInternalActionAnnotations,
 } from '../../utils/aiCore/pendingActions'
 import PendingActionCard from './PendingActionCard'
 import MemoryUpdateNotice from './MemoryUpdateNotice'
 import { useUndoMemoryUpdate } from '../../hooks/useAutoMemoryNotices'
-import { buildMessageMetadata, createUserMessage, createAssistantMessage, extractPendingActions } from '../../utils/aiCore/messageModel'
+import { messageText, parseToolResult, buildMessageMetadata, createUserMessage, createAssistantMessage, extractPendingActions } from '../../utils/aiCore/messageModel'
 import usePendingActionExecution from '../../hooks/usePendingActionExecution'
 import useAIStream from '../../hooks/useAIStream'
 import { isImeComposing } from '../../utils/imeUtils'
@@ -269,9 +272,8 @@ const ChatMessage = React.memo(({ msg, theme, userAvatar, onExecuteAction, onDis
   const isUser = msg.role === 'user'
   // 兼容多模态 content：array 时拆出 text + image_url
   const isArrayContent = Array.isArray(msg.content)
-  const textContent = isArrayContent
-    ? msg.content.filter((p) => p?.type === 'text').map((p) => p.text || '').join('\n')
-    : (msg.content || '')
+  const rawTextContent = messageText(msg.content)
+  const textContent = isUser ? rawTextContent : stripInternalActionAnnotations(rawTextContent)
   const imageParts = isArrayContent ? msg.content.filter((p) => p?.type === 'image_url') : []
   const hasContent = Boolean(textContent) || imageParts.length > 0
   return (
@@ -324,18 +326,6 @@ const ChatMessage = React.memo(({ msg, theme, userAvatar, onExecuteAction, onDis
             </Box>
           ))}
 
-          {/* 待确认动作卡（统一读取 msg.actions 与历史 toolCalls[].action） */}
-          {getMessagePendingActions(msg).map((action) => (
-            <Box key={action.actionId} sx={{ mb: 0.75 }}>
-              <PendingActionCard
-                action={action}
-                executing={executingActionIds.has(action.actionId)}
-                onExecute={onExecuteAction}
-                onDismiss={onDismissAction}
-              />
-            </Box>
-          ))}
-
           {/* 消息内容 */}
           {hasContent && (
             <Paper
@@ -368,6 +358,18 @@ const ChatMessage = React.memo(({ msg, theme, userAvatar, onExecuteAction, onDis
               )}
             </Paper>
           )}
+          {/* 待确认动作卡（统一读取 msg.actions 与历史 toolCalls[].action） */}
+          {getMessagePendingActions(msg).map((action) => (
+            <Box key={action.actionId} sx={{ mb: 0.75 }}>
+              <PendingActionCard
+                action={action}
+                executing={executingActionIds.has(action.actionId)}
+                onExecute={onExecuteAction}
+                onDismiss={onDismissAction}
+              />
+            </Box>
+          ))}
+
           {!isUser && textContent && (
             <Box sx={{ display: 'flex', gap: 0.75, mt: 0.75, flexWrap: 'wrap', opacity: 0.9 }}>
               <Chip size="small" label="存为笔记" onClick={() => onSaveAsNote?.(textContent)} variant="outlined" sx={{ height: 24 }} />
@@ -446,10 +448,8 @@ export default function AIChatView({ onTodoUpdated }) {
   const [input, setInput] = useState('')
   const [pendingImages, setPendingImages] = useState([]) // [{ id, dataUrl }]
   const [visionEnabled, setVisionEnabled] = useState(false)
-  const [loading, setLoading] = useState(false)
-  // 正在流式生成的会话 id。loading 是组件级单例，必须配合它判断「思考中」属于哪个会话，
-  // 否则在 A 生成时切到 B，B 会错误地显示思考中并被锁住输入。
-  const [streamingConvId, setStreamingConvId] = useState(null)
+  const [streamingConversationIds, setStreamingConversationIds] = useState([])
+  const inFlightConversationsRef = useRef(new Set())
   const [streamContent, setStreamContent] = useState('')
   const [thinkingPhrase, setThinkingPhrase] = useState('Thinking… 思考中')
   const [toolCalls, setToolCalls] = useState([])
@@ -479,6 +479,8 @@ export default function AIChatView({ onTodoUpdated }) {
   // 未选中任何笔记（通用聊天）→ 跟随全局活动对话。
   // 关键：选中笔记时绝不回退到 aiActiveConvId，否则切到「尚无对话的笔记」会串显示上一条/通用对话。
   const currentConversationId = selectedNoteId != null ? noteConversationId : (aiActiveConvId || null)
+  const loading = streamingConversationIds.includes(currentConversationId)
+  const streamingConvId = streamingConversationIds.find(id => id !== currentConversationId) || null
   const currentConversation = useMemo(
     () => aiConversations.find((conversation) => conversation.id === currentConversationId) || null,
     [aiConversations, currentConversationId]
@@ -544,8 +546,8 @@ export default function AIChatView({ onTodoUpdated }) {
 
   // 当前视图是否正在流式生成：必须当前可见会话恰好就是那个正在生成的会话。
   // 这样在别的会话后台生成时，本视图不会被误锁。
-  const isStreaming = loading && streamingConvId != null && streamingConvId === currentConversationId
-  const hasBackgroundStreaming = loading && streamingConvId != null && streamingConvId !== currentConversationId
+  const isStreaming = loading
+  const hasBackgroundStreaming = streamingConvId != null
   const backgroundStreamingConversation = useMemo(
     () => aiConversations.find((conversation) => conversation.id === streamingConvId) || null,
     [aiConversations, streamingConvId]
@@ -572,7 +574,7 @@ export default function AIChatView({ onTodoUpdated }) {
       setMessages(currentConversation?.messages || [])
       messagesRef.current = currentConversation?.messages || []
       pendingScrollToLatestConvRef.current = currentConversationId
-      const draft = loading && streamingConvId === currentConversationId
+      const draft = loading
         ? readStreamDraft(currentConversationId)
         : null
       setStreamContent(draft?.streamContent || '')
@@ -663,14 +665,6 @@ export default function AIChatView({ onTodoUpdated }) {
     aiSwitchConv(streamingConvId)
   }, [streamingConvId, aiSwitchConv])
 
-  const parseToolResult = (result) => {
-    try {
-      return typeof result === 'string' ? JSON.parse(result) : result
-    } catch (_) {
-      return null
-    }
-  }
-
   const updateCurrentConversationMessages = useCallback((updater) => {
     const nextMessages = updater(messagesRef.current || [])
     messagesRef.current = nextMessages
@@ -728,6 +722,8 @@ export default function AIChatView({ onTodoUpdated }) {
         ]
       : text
 
+    if (inFlightConversationsRef.current.has(currentId)) return
+    inFlightConversationsRef.current.add(currentId)
     const userMsg = createUserMessage({
       content: userContent,
       metadata: buildMessageMetadata({
@@ -741,8 +737,7 @@ export default function AIChatView({ onTodoUpdated }) {
     setMessages(newMessages)
     setInput('')
     setPendingImages([])
-    setLoading(true)
-    setStreamingConvId(currentId)
+    setStreamingConversationIds(ids => [...ids, currentId])
     setThinkingPhrase(pickThinkingPhrase())
     setStreamContent('')
     setToolCalls([])
@@ -769,7 +764,8 @@ export default function AIChatView({ onTodoUpdated }) {
     try {
       // 构建发送给 API 的消息（只含 role + content，assistant 附带实际生成的确认卡；多模态 content array 原样透传）
       const apiMessages = toApiMessages(newMessages)
-      const contextPackage = await buildContext({ notes, selectedNoteId, query: text, contextEnabled })
+      // AI 页可注入最近查看的笔记，但用户此刻不在笔记里，上下文会如实标明
+      const prepareContext = () => buildContext({ notes, selectedNoteId, query: text, contextEnabled, location: getUiLocation(useStore.getState()) })
 
       let currentToolCalls = []
       let currentSteps = []
@@ -785,10 +781,10 @@ export default function AIChatView({ onTodoUpdated }) {
         if (isActiveView()) setSteps([...currentSteps])
       }
 
-      const { result, content: currentContent, cancelledByUser, requestId } = await runStream({
+      const { result, content: currentContent, cancelledByUser, requestId, contextPackage } = await runStream({
         conversationId: currentId,
         messages: apiMessages,
-        contextPackage,
+        prepareContext,
         requestPrefix: 'aichat',
         options: {
           scene: 'chat_panel',
@@ -812,13 +808,13 @@ export default function AIChatView({ onTodoUpdated }) {
         onChunk: (chunk) => {
           switch (chunk.type) {
             case 'tool_start':
-              showActiveTool(chunk.name || null)
+              if (isActiveView()) showActiveTool(chunk.name || null)
               currentToolCalls = [...currentToolCalls, { name: chunk.name, args: chunk.args, done: false }]
               writeStreamDraft(currentId, { toolCalls: [...currentToolCalls] })
               if (isActiveView()) setToolCalls([...currentToolCalls])
               break
             case 'tool_end': {
-              clearActiveTool()
+              if (isActiveView()) clearActiveTool()
               const parsed = parseToolResult(chunk.result)
               currentToolCalls = currentToolCalls.map(tc =>
                 tc.name === chunk.name && !tc.done
@@ -941,14 +937,16 @@ export default function AIChatView({ onTodoUpdated }) {
         source: selectedNoteId == null ? 'general' : 'note'
       })
     } finally {
-      pendingConversationIdRef.current = null
-      setStreamingConvId(null)
-      if (activeToolClearTimerRef.current) {
-        window.clearTimeout(activeToolClearTimerRef.current)
-        activeToolClearTimerRef.current = null
+      if (pendingConversationIdRef.current === currentId) pendingConversationIdRef.current = null
+      inFlightConversationsRef.current.delete(currentId)
+      setStreamingConversationIds(ids => ids.filter(id => id !== currentId))
+      if (isActiveView()) {
+        if (activeToolClearTimerRef.current) {
+          window.clearTimeout(activeToolClearTimerRef.current)
+          activeToolClearTimerRef.current = null
+        }
+        setActiveTool(null)
       }
-      setActiveTool(null)
-      setLoading(false)
       if (currentView === 'ai' && isActiveView()) {
         inputRef.current?.focus()
       }
@@ -957,8 +955,8 @@ export default function AIChatView({ onTodoUpdated }) {
 
   const handleCancel = useCallback(async () => {
     if (!loading) return
-    await cancel()
-  }, [loading, cancel])
+    await cancel(currentConversationId)
+  }, [loading, cancel, currentConversationId])
 
   useEffect(() => {
     if (currentView !== 'ai' || !aiCommandRequest?.prompt) return
@@ -1032,6 +1030,7 @@ export default function AIChatView({ onTodoUpdated }) {
   }, [])
 
   const closeMessageContextMenu = useCallback(() => {
+    releasePopoverFocus()
     setMessageContextMenu(null)
   }, [])
 
@@ -1094,6 +1093,7 @@ export default function AIChatView({ onTodoUpdated }) {
   }, [])
 
   const closeInputContextMenu = useCallback(() => {
+    releasePopoverFocus()
     setInputContextMenu(null)
   }, [])
 
@@ -1262,7 +1262,7 @@ export default function AIChatView({ onTodoUpdated }) {
                   userSelect: 'text',
                 }}>
                   <Box sx={{ userSelect: 'text', cursor: 'text', '& > p:first-of-type': { mt: 0 }, '& > p:last-of-type': { mb: 0 } }}>
-                    <MarkdownContent content={streamContent} />
+                    <MarkdownContent content={stripInternalActionAnnotations(streamContent)} />
                   </Box>
                   <Box component="span" sx={{
                     display: 'inline-block', width: 6, height: 16,
@@ -1334,7 +1334,7 @@ export default function AIChatView({ onTodoUpdated }) {
               <Button size="small" variant="outlined" color="inherit" onClick={handleJumpToStreamingConversation}>
                 切回查看
               </Button>
-              <Button size="small" color="error" variant="outlined" onClick={handleCancel}>
+              <Button size="small" color="error" variant="outlined" onClick={() => cancel(streamingConvId)}>
                 停止
               </Button>
             </Box>
@@ -1361,9 +1361,9 @@ export default function AIChatView({ onTodoUpdated }) {
               sx={{ height: 24, borderRadius: 3 }}
             />
           ))}
-          {selectedNoteId && contextEnabled.currentNote && (
-            <Typography variant="caption" color="text.secondary">
-              已注入当前笔记
+          {currentNote && contextEnabled.currentNote && (
+            <Typography variant="caption" color="text.secondary" noWrap sx={{ minWidth: 0 }}>
+              已注入最近查看的「{truncateText(currentNote.title || '未命名', 14)}」
             </Typography>
           )}
         </Box>
@@ -1439,7 +1439,7 @@ export default function AIChatView({ onTodoUpdated }) {
         </Box>
         <Typography variant="caption" color="text.secondary" sx={{ mt: 0.5, display: 'block', textAlign: 'center' }}>
           {hasBackgroundStreaming
-            ? '另一个对话正在生成中，当前不能并行发送新请求。'
+            ? '另一个对话正在后台生成，你可以在这里继续提问。'
             : 'FlotaAI 可能会出错，请核实重要信息'}
         </Typography>
       </Box>

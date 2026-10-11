@@ -95,6 +95,9 @@ ${saveRule}
 - 用户明确要求画一张、生成一张或把内容整理成图时调用 create_whiteboard；只讨论图表概念时不要调用
 - 新建独立画布时不要为了判断目标而读取或复述当前笔记，调用 create_whiteboard 并保持 use_current_note_context: false。只有用户明确说“基于当前笔记/把上面的内容整理成图”时才设为 true 或传 source_note_id
 - 当用户要求"修改当前画布/补充当前白板/重画现有图形/替换已有画布内容"等，请优先调用 update_whiteboard
+- 修改刚创建的画布时，使用历史确认卡中成功返回的结果笔记 ID 作为 target_note_id；失败卡片没有可修改的结果。创建失败后的“重试”仍应调用 create_whiteboard；用户明确说“新建/不是修改”时也必须新建。
+- 历史消息中方括号内的“本条回复实际生成的确认卡”和执行状态属于内部上下文，禁止在正文中复述这些标记。失败原因由操作卡展示，不要伪造已重试或已经成功。
+- 报错时只根据实际错误解释原因，不要猜测为 SVG 太复杂、元素超限或已换用某种方案；生成结果尚未返回前，不要宣称已经创建成功。
 - 不要用 create_note 创建 whiteboard，也不要把 Mermaid/Markdown 文本当成画布结果保存到普通笔记里
 - 用户想要一个可交互的工具、模板、追踪器或面板（如看板、闪卡、习惯打卡、记账、倒数日、统计卡片）时调用 create_widget，而不是写一篇笔记；instruction 要把需求写完整具体，不要自己写代码
 - 组件可以有多个实例，数据属于实例。用户只是想“再要一份”（如再建一个日语闪卡）时调用 create_widget_instance，不要重新生成组件
@@ -115,11 +118,19 @@ const buildContextSection = (contextPackage = {}) => {
     return value.length > max ? `${value.slice(0, max)}…` : value;
   };
 
+  const location = contextPackage.location;
+  if (location?.label) {
+    sections.push(location.noteOpen
+      ? `### 用户当前位置\n${location.label}页面，正在查看下面的笔记。`
+      : `### 用户当前位置\n${location.label}页面，没有打开任何笔记。不要说用户“正在看/打开了”某篇笔记；需要笔记内容时先询问或检索。`);
+  }
+
   if (contextPackage.currentNote) {
     const note = contextPackage.currentNote;
     const noteType = note.note_type || 'markdown';
     const meta = [
-      '### 当前笔记',
+      // visible=false：用户选择注入的最近查看笔记，此刻并没有打开
+      note.visible === false ? '### 最近查看的笔记（用户此刻没有打开，仅供参考）' : '### 当前笔记',
       `ID: ${note.id || '未知'}`,
       `标题: ${note.title || '未命名'}`,
       `类型: ${noteType}`,

@@ -1,3 +1,4 @@
+const { withoutReferencePayload } = require('../../aiReferences');
 /**
  * 工具调用循环：
  *   1) 执行 prevResult.toolCalls 并把结果回填到 messages
@@ -89,7 +90,7 @@ const runToolCalls = async ({
     messages.push({
       role: 'tool',
       tool_call_id: tc.id,
-      content: toolResult
+      content: parsed?.context?.referenceImages ? JSON.stringify(withoutReferencePayload(parsed)) : toolResult
     });
   }
   if (pendingImageInjections.length > 0) {

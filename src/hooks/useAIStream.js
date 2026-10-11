@@ -5,58 +5,38 @@ const createRequestId = (prefix = 'ai') => (
   `${prefix}_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 6)}`
 )
 
-/**
- * 统一的 AI 流式请求生命周期：负责 requestId、取消、chunk 监听注册/清理、错误归一化。
- * 两个入口（AIChatView 功能页 / AICommandCenter 浮窗）共用同一套逻辑，避免各写一份流式代码。
- * 切会话保护由调用方用 conversationId 自行判断 isActiveView（哪个对话当前可见），
- * 本 hook 负责保证陈旧请求的 chunk 按 requestId 过滤掉，不会串台。
- */
+// 每个请求独立保存监听器与取消状态。旧请求的 finally 不能清掉新会话的监听器。
 export const useAIStream = () => {
+  const requestsRef = useRef(new Map())
   const activeRequestIdRef = useRef(null)
-  const chunkListenerRef = useRef(null)
-  const cancelRequestedRef = useRef(false)
 
-  const cleanupListener = useCallback(() => {
-    if (chunkListenerRef.current) {
-      chunkListenerRef.current()
-      chunkListenerRef.current = null
-    }
-  }, [])
-
-  const cancel = useCallback(async () => {
-    const requestId = activeRequestIdRef.current
-    if (!requestId) return
-    cancelRequestedRef.current = true
+  const cancel = useCallback(async (conversationId) => {
+    const requestId = conversationId == null ? activeRequestIdRef.current
+      : [...requestsRef.current].find(([, request]) => request.conversationId === conversationId)?.[0]
+    const request = requestsRef.current.get(requestId)
+    if (!request) return
+    request.cancelledByUser = true
+    request.cancelPreparation?.()
     aiLog.info('stream.cancel', { requestId })
-    try {
-      await window.electronAPI?.ai?.cancelStream?.(requestId)
-    } catch (_) {
-      // cancel failures should not block UI state
+    if (request.started) {
+      try { await window.electronAPI?.ai?.cancelStream?.(requestId) } catch (_) {}
     }
   }, [])
 
   const runStream = useCallback(async ({
-    conversationId = null,
-    messages,
-    contextPackage,
-    requestPrefix = 'ai',
-    options = {},
-    onContent,
-    onChunk,
-    onChunkError
+    conversationId = null, messages, contextPackage, requestPrefix = 'ai', options = {},
+    onContent, onChunk, onChunkError, prepareContext,
   }) => {
-    cleanupListener()
     const requestId = createRequestId(requestPrefix)
+    const request = { conversationId, cancelledByUser: false, cleanup: null }
+    requestsRef.current.set(requestId, request)
     activeRequestIdRef.current = requestId
-    cancelRequestedRef.current = false
     const startedAt = Date.now()
     aiLog.info('stream.start', { requestId, conversationId, scene: options?.scene || null })
-
     let content = ''
-    chunkListenerRef.current = window.electronAPI?.ai?.onChatChunk?.((chunk) => {
-      if (!chunk || chunk.requestId !== activeRequestIdRef.current) return
+    request.cleanup = window.electronAPI?.ai?.onChatChunk?.((chunk) => {
+      if (!chunk || chunk.requestId !== requestId) return
       onChunk?.(chunk)
-
       if (chunk.type === 'content') {
         content += chunk.content
         onContent?.(content, chunk)
@@ -65,43 +45,34 @@ export const useAIStream = () => {
         onChunkError?.(chunk)
       }
     })
-
     try {
-      const result = await window.electronAPI?.ai?.chatStream?.(messages, {
-        requestId,
-        conversationId,
-        contextPackage,
-        ...options
-      })
-      aiLog.info('stream.done', {
-        requestId,
-        conversationId,
-        success: result?.success,
-        cancelled: result?.cancelled || cancelRequestedRef.current,
-        durationMs: Date.now() - startedAt,
-      })
-      return {
-        result,
-        content,
-        requestId,
-        cancelledByUser: cancelRequestedRef.current
+      let resolvedContext = contextPackage
+      if (prepareContext) {
+        const cancelled = new Promise(resolve => { request.cancelPreparation = () => resolve(null) })
+        resolvedContext = await Promise.race([prepareContext(), cancelled])
       }
+      if (request.cancelledByUser) return { result: { cancelled: true }, content, requestId, contextPackage: {}, cancelledByUser: true }
+      request.started = true
+      const result = await window.electronAPI?.ai?.chatStream?.(messages, {
+        ...options, requestId, conversationId, contextPackage: resolvedContext,
+      })
+      aiLog.info('stream.done', { requestId, conversationId, success: result?.success, cancelled: result?.cancelled, durationMs: Date.now() - startedAt })
+      return { result, content, requestId, contextPackage: resolvedContext, cancelledByUser: request.cancelledByUser }
     } catch (error) {
       aiLog.error('stream.failed', { requestId, conversationId, error: error?.message })
       throw error
     } finally {
-      cleanupListener()
-      activeRequestIdRef.current = null
-      cancelRequestedRef.current = false
+      request.cleanup?.()
+      requestsRef.current.delete(requestId)
+      if (activeRequestIdRef.current === requestId) activeRequestIdRef.current = null
     }
-  }, [cleanupListener])
+  }, [])
 
-  useEffect(() => cleanupListener, [cleanupListener])
+  useEffect(() => () => {
+    for (const request of requestsRef.current.values()) request.cleanup?.()
+  }, [])
 
-  return {
-    runStream,
-    cancel
-  }
+  return { runStream, cancel }
 }
 
 export default useAIStream

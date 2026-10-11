@@ -142,7 +142,15 @@ export const summarizeWhiteboardElementsForAI = (elements = [], fileMap = {}) =>
   }
 
   const textSnippets = activeElements
-    .map((item) => trimInline(item?.text || '', 28))
+    .map((item) => {
+      if (item?.text) return trimInline(item.text, 80)
+      // 整体 SVG 只有一个 image 元素；编辑时仍需保留其中的标题、日期和正文。
+      if (item?.customData?.svgSource && typeof DOMParser !== 'undefined') {
+        const svg = new DOMParser().parseFromString(item.customData.svgSource, 'image/svg+xml')
+        return trimInline([...svg.querySelectorAll('text')].map(node => node.textContent).join(' | '), 4000)
+      }
+      return ''
+    })
     .filter(Boolean)
     .slice(0, 18)
 
@@ -237,7 +245,7 @@ const buildGroundingMessages = ({ prompt, note, messages = [], currentWhiteboard
 
 规则：
 1. 永远不要把画布原始 JSON 当成素材；如果提供了 currentWhiteboardSummary，只能使用这个语义摘要。
-2. append = 在现有画布基础上继续补充；replace = 清空后重新生成整张画布；edit = 基于当前画布内容做定向修改，输出“修改后的完整画布需求”。
+2. append = 在现有画布基础上继续补充；replace = 清空后重新生成整张画布；edit = 对已有元素做局部修改，groundedRequest 保留用户具体修改要求，不要求重新生成整图。
 3. 如果用户说“这段内容/上面/刚才/整理一下”，优先用最近对话里 assistant 或 user 的真实文本。
 4. 如果只有命令句、找不到具体素材，groundedRequest 设为空字符串，由前端用原 prompt 兜底。
 5. 不要画“Mermaid 规范 / 图表规范 / 画布功能说明”这类元信息。
@@ -322,9 +330,13 @@ export const groundWhiteboardRequest = async ({ note, prompt, messages = [] }) =
 }
 
 const normalizeAppState = (appState = {}) => ({
-  viewBackgroundColor: appState.viewBackgroundColor || '#ffffff',
-  currentItemFontFamily: appState.currentItemFontFamily || 1,
-  gridSize: appState.gridSize ?? null,
+  gridModeEnabled: Boolean(appState?.gridModeEnabled),
+  scrollX: appState?.scrollX,
+  scrollY: appState?.scrollY,
+  zoom: appState?.zoom,
+  viewBackgroundColor: appState?.viewBackgroundColor || '#ffffff',
+  currentItemFontFamily: appState?.currentItemFontFamily || 1,
+  gridSize: appState?.gridSize ?? null,
 })
 
 export const parseWhiteboardContent = (content = '') => {
@@ -351,6 +363,16 @@ export const parseWhiteboardContent = (content = '') => {
   }
 }
 
+// Every save path must finish image persistence before returning or writing scene JSON.
+export const saveWhiteboardFiles = async (files = {}) => {
+  const ids = Object.keys(files || {})
+  if (!ids.length) return {}
+  const result = await window.electronAPI.whiteboard.saveImages(files)
+  if (!result?.success) throw new Error(result?.error || '画布图片保存失败')
+  if (!result.data || ids.some(id => !result.data[id])) throw new Error('画布图片保存不完整，原内容未覆盖')
+  return result.data
+}
+
 export const buildWhiteboardContent = ({ elements = [], appState = {}, fileMap = {} }) => JSON.stringify({
   type: 'excalidraw',
   version: 2,
@@ -360,24 +382,13 @@ export const buildWhiteboardContent = ({ elements = [], appState = {}, fileMap =
   fileMap,
 })
 
-const buildEditGenerationPrompt = ({ prompt, currentWhiteboardSummary = '' }) => {
-  if (!currentWhiteboardSummary) {
-    return `请基于以下修改要求，输出修改后的完整画布：\n${prompt}`
-  }
-  return [
-    '请基于当前画布内容进行定向修改，并输出修改后的完整画布。',
-    '不要解释过程，不要保留与修改目标无关的冗余旧结构。',
-    `当前画布摘要：\n${currentWhiteboardSummary}`,
-    `修改要求：\n${prompt}`,
-  ].join('\n\n')
-}
-
 export const generateWhiteboardElementsByAction = async ({
   action = WHITEBOARD_AI_ACTIONS.APPEND,
   prompt,
   elements = [],
   appState = {},
   currentWhiteboardSummary = '',
+  task,
 }) => {
   const activeElements = elements.filter(element => element && !element.isDeleted)
   const normalizedAction = normalizeWhiteboardAction(action)
@@ -388,10 +399,12 @@ export const generateWhiteboardElementsByAction = async ({
   }
   const aiGenerateExcalidrawElements = await loadAIGenerator()
   const isAppend = normalizedAction === WHITEBOARD_AI_ACTIONS.APPEND
-  const generationPrompt = normalizedAction === WHITEBOARD_AI_ACTIONS.EDIT
-    ? buildEditGenerationPrompt({ prompt, currentWhiteboardSummary })
-    : String(prompt || '').trim()
-  const r = unwrap(await aiGenerateExcalidrawElements(generationPrompt, isAppend ? activeElements : []))
+  const r = normalizedAction === WHITEBOARD_AI_ACTIONS.EDIT
+    ? await import('./diagrams/editScene').then(({ editScene }) => editScene({ elements: activeElements, prompt, appState, task }))
+    : unwrap(await aiGenerateExcalidrawElements(String(prompt || '').trim(), isAppend ? activeElements : [], task))
+  if (!Array.isArray(r.elements) || !r.elements.some(element => element && !element.isDeleted)) {
+    throw new Error('画布生成结果为空，原画布未修改')
+  }
 
   return {
     action: normalizedAction,
@@ -406,13 +419,14 @@ export const generateWhiteboardElementsByAction = async ({
 
 const normalizeWhiteboardGenerationError = (error) => {
   const message = String(error?.message || error || '')
+  if (error?.name === 'AbortError') return error
   if (/fetch failed|network|网络|ECONN|ENOTFOUND|ETIMEDOUT|EAI_AGAIN|socket|timeout|超时|aborted|abort/i.test(message)) {
     return new Error('画布生成失败：网络请求失败，请检查网络或 AI 配置后重试')
   }
   return error instanceof Error ? error : new Error(message || '画布生成失败')
 }
 
-export const requestActiveWhiteboardGeneration = ({ noteId, prompt, action = WHITEBOARD_AI_ACTIONS.APPEND }) => {
+export const requestActiveWhiteboardGeneration = ({ noteId, prompt, action = WHITEBOARD_AI_ACTIONS.APPEND, task }) => {
   if (typeof window === 'undefined') return Promise.resolve(null)
 
   return new Promise((resolve, reject) => {
@@ -420,6 +434,7 @@ export const requestActiveWhiteboardGeneration = ({ noteId, prompt, action = WHI
       noteId: String(noteId),
       prompt,
       action: normalizeWhiteboardAction(action),
+      task,
       handled: false,
       resolve,
       reject,
@@ -432,7 +447,7 @@ export const requestActiveWhiteboardGeneration = ({ noteId, prompt, action = WHI
   })
 }
 
-export const applyWhiteboardGenerationToNote = async ({ note, prompt, action = WHITEBOARD_AI_ACTIONS.APPEND, updateNote }) => {
+export const applyWhiteboardGenerationToNote = async ({ note, prompt, action = WHITEBOARD_AI_ACTIONS.APPEND, updateNote, task }) => {
   if (!isWhiteboardNote(note)) {
     throw new Error('当前笔记不是画布')
   }
@@ -444,6 +459,7 @@ export const applyWhiteboardGenerationToNote = async ({ note, prompt, action = W
   const nextData = await generateWhiteboardElementsByAction({
     action,
     prompt,
+    task,
     elements: currentData.elements,
     appState: currentData.appState,
     currentWhiteboardSummary: summarizeWhiteboardElementsForAI(currentData.elements, currentData.fileMap),
@@ -451,24 +467,19 @@ export const applyWhiteboardGenerationToNote = async ({ note, prompt, action = W
 
   // 未在编辑器中打开的画布会走这里。生成器返回的是 Excalidraw BinaryFileData，
   // 必须先落盘再把 { fileName, mimeType } 索引写入笔记，否则重新打开时无法加载图片。
+  task?.throwIfCancelled()
   const generatedFiles = nextData.fileMap || {}
-  let persistedGeneratedFiles = {}
-  if (Object.keys(generatedFiles).length > 0) {
-    const saveResult = await window.electronAPI.whiteboard.saveImages(generatedFiles)
-    if (!saveResult?.success) {
-      throw new Error(saveResult?.error || '保存 AI 生成的画布图片失败')
-    }
-    persistedGeneratedFiles = saveResult.data || {}
-  }
+  const persistedGeneratedFiles = await saveWhiteboardFiles(generatedFiles)
 
   const normalizedAction = normalizeWhiteboardAction(nextData.action, action)
-  const persistedFileMap = normalizedAction === WHITEBOARD_AI_ACTIONS.APPEND
+  const persistedFileMap = normalizedAction !== WHITEBOARD_AI_ACTIONS.REPLACE
     ? { ...(currentData.fileMap || {}), ...persistedGeneratedFiles }
     : persistedGeneratedFiles
   const content = buildWhiteboardContent({
     ...nextData,
     fileMap: persistedFileMap,
   })
+  task?.beginCommit()
   const result = await updateNote(note.id, {
     content,
     note_type: 'whiteboard',
@@ -484,7 +495,7 @@ export const applyWhiteboardGenerationToNote = async ({ note, prompt, action = W
 const buildWhiteboardActionMessage = (result = {}) => {
   const action = normalizeWhiteboardAction(result.action)
   const warningText = Array.isArray(result.warnings) && result.warnings.length > 0
-    ? ` 部分区块未生成：${result.warnings.slice(0, 2).join('；')}${result.warnings.length > 2 ? '；...' : ''}`
+    ? ` 提示：${result.warnings.slice(0, 2).join('；')}${result.warnings.length > 2 ? '；...' : ''}`
     : ''
   if (action === WHITEBOARD_AI_ACTIONS.REPLACE) {
     return `已清空当前画布并重新生成 ${result.addedCount || 0} 个元素。${warningText}`
@@ -493,6 +504,16 @@ const buildWhiteboardActionMessage = (result = {}) => {
     return `已基于当前画布完成修改，生成 ${result.addedCount || 0} 个元素。${warningText}`
   }
   return `已在当前画布插入 ${result.addedCount || 0} 个元素。${warningText}`
+}
+
+// 数据已保存后的列表刷新失败不能把操作标成失败，否则用户重试会重复创建。
+const refreshWhiteboardNotes = async (loadNotes, result) => {
+  try {
+    await loadNotes?.()
+  } catch (error) {
+    logger.warn('[whiteboardAI] 画布已保存，但列表刷新失败:', error)
+    result.warnings = [...(result.warnings || []), '画布已保存，但列表刷新失败，请重新打开笔记列表']
+  }
 }
 
 export const executeCreateWhiteboardToolAction = async ({
@@ -504,6 +525,7 @@ export const executeCreateWhiteboardToolAction = async ({
   deleteNote,
   updateNote,
   loadNotes,
+  task,
 }) => {
   if (typeof createNote !== 'function' || typeof updateNote !== 'function') {
     throw new Error('缺少画布创建能力')
@@ -541,6 +563,7 @@ export const executeCreateWhiteboardToolAction = async ({
       prompt: generationPrompt,
       action: WHITEBOARD_AI_ACTIONS.REPLACE,
       updateNote,
+      task,
     })
   } catch (error) {
     if (typeof deleteNote === 'function') {
@@ -553,14 +576,14 @@ export const executeCreateWhiteboardToolAction = async ({
     throw normalizeWhiteboardGenerationError(error)
   }
 
-  await loadNotes?.()
+  await refreshWhiteboardNotes(loadNotes, result)
 
   return {
     success: true,
     noteId: newNote.id,
     title: newNote.title || title,
     addedCount: result.addedCount || 0,
-    message: `已创建画布《${newNote.title || title}》并生成 ${result.addedCount || 0} 个元素。`,
+    message: `已创建画布《${newNote.title || title}》并生成 ${result.addedCount || 0} 个元素。${result.warnings?.length ? ` 提示：${result.warnings.join('；')}` : ''}`,
     result,
   }
 }
@@ -573,6 +596,7 @@ export const executeUpdateWhiteboardToolAction = async ({
   updateNote,
   loadNotes,
   setSelectedNoteId,
+  task,
 }) => {
   if (typeof updateNote !== 'function') {
     throw new Error('缺少画布更新能力')
@@ -591,8 +615,8 @@ export const executeUpdateWhiteboardToolAction = async ({
       throw new Error('未找到指定的目标画布，可能已被删除')
     }
   } else {
-    const snapshotNote = resolveNoteById(notes, resolveContextNoteId(actionContext))
-    targetNote = snapshotNote || currentNote
+    const snapshotId = resolveContextNoteId(actionContext)
+    targetNote = snapshotId != null ? resolveNoteById(notes, snapshotId) : currentNote
   }
   if (!targetNote || !isWhiteboardNote(targetNote)) {
     throw new Error('未找到可修改的目标画布')
@@ -614,16 +638,18 @@ export const executeUpdateWhiteboardToolAction = async ({
     noteId: targetNote.id,
     prompt: generationPrompt,
     action,
+    task,
   })
   const result = activeResult || await applyWhiteboardGenerationToNote({
     note: targetNote,
     prompt: generationPrompt,
     action,
     updateNote,
+    task,
   })
 
-  setSelectedNoteId?.(targetNote.id)
-  await loadNotes?.()
+  // 后台完成不改变用户当前选中的笔记。
+  await refreshWhiteboardNotes(loadNotes, result)
 
   return {
     success: true,
@@ -635,4 +661,3 @@ export const executeUpdateWhiteboardToolAction = async ({
     result,
   }
 }
-

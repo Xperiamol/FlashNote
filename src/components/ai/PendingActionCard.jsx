@@ -1,4 +1,5 @@
-import { useEffect, useState } from 'react'
+import { subscribeGenerationTasks, getGenerationTaskPhase, cancelGenerationTask } from '../../utils/aiCore/generationTask'
+import { useEffect, useState, useSyncExternalStore } from 'react'
 import { Box, Button, Chip, CircularProgress, Paper, Typography, alpha, useTheme } from '@mui/material'
 import { useStore } from '../../store/useStore'
 import WidgetHost from '../widgets/WidgetHost'
@@ -44,6 +45,7 @@ const STATUS_META = {
   running: { palette: 'warning', title: '执行中' },
   done: { palette: 'success', title: '已完成' },
   failed: { palette: 'error', title: '执行失败' },
+  cancelled: { palette: 'warning', title: '已停止' },
   dismissed: { palette: null, title: '已忽略' },
   superseded: { palette: null, title: '已被新方案替代' }
 }
@@ -152,7 +154,7 @@ const ActionButtons = ({ action, status, compact, confirmLabel = '确认', confi
     )
   }
 
-  if (status === 'failed') {
+  if (status === 'failed' || status === 'cancelled') {
     return (
       <Button size="small" variant="outlined" color="error" onClick={onConfirm} sx={pillSx(compact)}>
         重试
@@ -206,6 +208,8 @@ const DEFAULT_RUNNING_COPY = { verb: '正在执行' }
 const formatElapsed = (seconds) => `${Math.floor(seconds / 60)}:${String(seconds % 60).padStart(2, '0')}`
 
 const RunningActionCard = ({ action, compact }) => {
+  const phase = useSyncExternalStore(subscribeGenerationTasks, () => getGenerationTaskPhase(action.actionId))
+
   const theme = useTheme()
   const copy = RUNNING_COPY[action.name] || DEFAULT_RUNNING_COPY
   const steps = useActionSteps((state) => state.byAction[action.actionId]) || []
@@ -243,6 +247,10 @@ const RunningActionCard = ({ action, compact }) => {
       <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.75 }}>
         <Typography sx={{ flex: 1, fontSize: 12, fontWeight: 700, color: 'primary.main' }}>{copy.verb}</Typography>
         <Typography sx={{ fontSize: 11.5, color: 'text.secondary', fontVariantNumeric: 'tabular-nums' }}>{formatElapsed(elapsed)}</Typography>
+        {phase && <Button size="small" variant="outlined" disabled={phase !== 'generating'}
+          onClick={() => cancelGenerationTask(action.actionId)} sx={pillSx(compact)}>
+          {phase === 'committing' ? '正在保存' : phase === 'cancelling' ? '正在停止' : '停止生成'}
+        </Button>}
       </Box>
       <Typography sx={{ mt: 0.5, fontSize: compact ? 13 : 13.5, fontWeight: 650, lineHeight: 1.45, wordBreak: 'break-word' }}>
         {getDetail(action)}
@@ -295,7 +303,7 @@ const SimpleActionCard = ({ action, executing, onExecute, onDismiss, compact }) 
   if (status === 'running') return <RunningActionCard action={action} compact={compact} />
 
   const paletteKey = STATUS_META[status].palette
-  const isFinished = status === 'done' || status === 'failed'
+  const isFinished = status === 'done' || status === 'failed' || status === 'cancelled'
   const detail = status === 'done' ? (action.resultMessage || getDetail(action)) : getDetail(action)
 
   return (
@@ -548,10 +556,18 @@ const WidgetActionCard = (props) => {
   const theme = useTheme()
   const status = getStatus(action, executing)
   const progress = useWidgetActionProgress((state) => state.byAction[action.actionId])
+  const phase = useSyncExternalStore(subscribeGenerationTasks, () => getGenerationTaskPhase(action.actionId))
   const selectedNote = useStore((state) => state.notes.find((note) => note.id === state.selectedNoteId))
   const [undone, setUndone] = useState(false)
+  const [showDraft, setShowDraft] = useState(false)
   const [busy, setBusy] = useState(false)
-  if (status !== 'running' && status !== 'done') return <SimpleActionCard {...props} />
+  if (status !== 'running' && status !== 'done') return <>
+    <SimpleActionCard {...props} />
+    {status === 'failed' && action.resultData?.draftId && <Box sx={{ mt: 0.5 }}>
+      <Button size="small" onClick={() => setShowDraft(value => !value)} sx={pillSx(compact)}>{showDraft ? '收起未发布预览' : '查看未发布预览'}</Button>
+      {showDraft && <WidgetHost instanceId={action.resultData.draftId} size="medium" surface="probe" maxHeight={420} />}
+    </Box>}
+  </>
 
   const paletteKey = STATUS_META[status].palette
   const data = action.resultData || {}
@@ -567,6 +583,10 @@ const WidgetActionCard = (props) => {
           {getDetail(action)}
         </Typography>
         <WidgetProgressSteps progress={progress} />
+        {phase && <Button size="small" variant="outlined" disabled={phase !== 'generating'}
+          onClick={() => cancelGenerationTask(action.actionId)} sx={{ ...pillSx(compact), mt: 1 }}>
+          {phase === 'committing' ? '正在保存' : phase === 'cancelling' ? '正在停止' : '停止生成'}
+        </Button>}
       </Paper>
     )
   }

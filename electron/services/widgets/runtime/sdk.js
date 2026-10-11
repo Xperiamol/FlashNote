@@ -236,6 +236,44 @@
     post({ type: 'ready' });
   });
 
+  // Inspect visible HTML text only; intentional ellipsis, gradients and disabled controls are excluded.
+  function inspectLayout() {
+    var issues = [];
+    function add(message) { if (issues.indexOf(message) < 0 && issues.length < 4) issues.push(message); }
+    function rgb(value) {
+      var parts = String(value).match(/[\d.]+/g);
+      if (!parts || parts.length < 3 || (parts.length > 3 && Number(parts[3]) < 1)) return null;
+      return parts.slice(0, 3).map(Number);
+    }
+    function luminance(color) {
+      return color.map(function (value) { var c = value / 255; return c <= 0.04045 ? c / 12.92 : Math.pow((c + 0.055) / 1.055, 2.4); })
+        .reduce(function (sum, value, index) { return sum + value * [0.2126, 0.7152, 0.0722][index]; }, 0);
+    }
+    Array.prototype.slice.call(document.body.querySelectorAll('*'), 0, 200).forEach(function (element) {
+      if (element.namespaceURI !== 'http://www.w3.org/1999/xhtml' || element.children.length || element.disabled || element.closest('[aria-hidden="true"]')) return;
+      var text = (element.textContent || '').trim();
+      if (!text || !element.getClientRects().length) return;
+      var style = getComputedStyle(element);
+      if (style.visibility === 'hidden' || Number(style.opacity) === 0) return;
+      var label = text.slice(0, 24);
+      if (parseFloat(style.fontSize) < 10) add('文字过小：' + label);
+      if (style.textOverflow !== 'ellipsis' && style.webkitLineClamp === 'none' && ['hidden', 'clip'].indexOf(style.overflowX) >= 0 && element.scrollWidth > element.clientWidth + 4) add('文字被裁切：' + label);
+      var foreground = rgb(style.color), background = null, parent = element;
+      while (parent) {
+        var parentStyle = getComputedStyle(parent);
+        if (parentStyle.backgroundImage !== 'none') return;
+        background = rgb(parentStyle.backgroundColor);
+        if (background) break;
+        parent = parent.parentElement;
+      }
+      if (!foreground || !background) return;
+      var a = luminance(foreground), b = luminance(background);
+      var ratio = (Math.max(a, b) + 0.05) / (Math.min(a, b) + 0.05);
+      if (ratio < (parseFloat(style.fontSize) >= 24 ? 3 : 4.5)) add('文字对比度不足：' + label);
+    });
+    return issues;
+  }
+
   // 健康检查：加载后上报渲染情况，宿主据此判断白屏
   window.addEventListener('load', function () {
     setTimeout(function () {
@@ -244,7 +282,9 @@
         type: 'health',
         text: body ? (body.innerText || '').trim().length : 0,
         elements: body ? body.getElementsByTagName('*').length : 0,
-        height: document.documentElement.scrollHeight
+        height: document.documentElement.scrollHeight,
+        overflowX: Math.max(0, document.documentElement.scrollWidth - document.documentElement.clientWidth),
+        issues: body ? inspectLayout() : []
       });
     }, 1200);
   });

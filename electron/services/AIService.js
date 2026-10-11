@@ -6,6 +6,7 @@
 const { EventEmitter } = require('events');
 const { getInstance: getLogger } = require('./LoggerService');
 const { encryptValue, decryptValue, isEncryptedValue } = require('../utils/secureValue');
+const { extractTextResponse } = require('./aiResponse');
 
 const isEnabledSetting = (value) => value === true || value === 'true' || value === 1 || value === '1';
 
@@ -51,20 +52,22 @@ class AIService extends EventEmitter {
   }
 
   /**
-   * 带超时的 fetch 请求
+   * 超时覆盖响应头和正文读取的非流式请求
    */
-  async _fetchWithTimeout(url, options, timeoutMs) {
+  async _fetchTextWithTimeout(url, options, timeoutMs) {
     const effective = timeoutMs && timeoutMs > 0 ? timeoutMs : this._requestTimeoutMs;
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), effective);
     const dispatcher = this._getLongRequestDispatcher();
     try {
-      return await fetch(url, {
+      const response = await fetch(url, {
         ...options,
-        signal: controller.signal,
+        signal: options.signal ? AbortSignal.any([controller.signal, options.signal]) : controller.signal,
         ...(dispatcher ? { dispatcher } : {}),
       });
+      return { ok: response.ok, status: response.status, text: await response.text() };
     } catch (e) {
+      if (options.signal?.aborted) throw new Error('已停止生成');
       if (e.name === 'AbortError') throw new Error(`AI请求超时（${Math.round(effective / 1000)}秒），请检查网络或API服务状态`);
       // undici 把真实原因藏在 e.cause 里，原样 throw 会只剩 "fetch failed"
       const cause = e?.cause?.message || e?.cause?.code || '';
@@ -392,14 +395,16 @@ class AIService extends EventEmitter {
   /**
    * 通用 API 聊天（内部方法）
    */
-  async _chatAPI(url, apiKey, body, responseExtractor, timeoutMs) {
+  async _chatAPI(url, apiKey, body, responseExtractor, timeoutMs, signal) {
     // 网关瞬时故障（502/503/504）与限流（429）通常重试即可恢复：退避重试，不要一次失败就报错。
     const RETRYABLE = new Set([429, 502, 503, 504]);
     const MAX_ATTEMPTS = 3;
     let lastErr;
     for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
-      const response = await this._fetchWithTimeout(url, {
+      if (signal?.aborted) throw new Error('已停止生成');
+      const response = await this._fetchTextWithTimeout(url, {
         method: 'POST',
+        signal,
         headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${apiKey}` },
         body: JSON.stringify(body)
       }, timeoutMs);
@@ -407,7 +412,7 @@ class AIService extends EventEmitter {
       if (!response.ok) {
         let errorMessage = `请求失败 (${response.status})`;
         try {
-          const text = await response.text();
+          const text = response.text;
           if (text) { const e = JSON.parse(text); errorMessage = e.error?.message || e.message || errorMessage; }
         } catch (_) {}
         if (RETRYABLE.has(response.status) && attempt < MAX_ATTEMPTS) {
@@ -420,7 +425,7 @@ class AIService extends EventEmitter {
         throw new Error(errorMessage);
       }
 
-      const text = await response.text();
+      const text = response.text;
       if (!text) throw new Error('API 返回空响应');
       let data;
       try { data = JSON.parse(text); } catch (e) { throw new Error('解析 API 响应失败: ' + e.message); }
@@ -469,27 +474,21 @@ class AIService extends EventEmitter {
         }
       };
 
-      const openAIExtract = (data) => {
-        if (!data.choices?.[0]?.message) throw new Error('API 响应格式不正确');
-        return { content: data.choices[0].message.content, usage: data.usage };
-      };
-      const qwenExtract = (data) => {
-        if (!data.output?.text) throw new Error('API 响应格式不正确');
-        return { content: data.output.text, usage: data.usage };
-      };
+      const openAIExtract = (data) => extractTextResponse(data);
+      const qwenExtract = (data) => extractTextResponse(data, 'qwen');
 
       switch (config.provider) {
         case 'openai':
-          return await this._chatAPI('https://api.openai.com/v1/chat/completions', config.apiKey, stdBody, openAIExtract, customTimeoutMs);
+          return await this._chatAPI('https://api.openai.com/v1/chat/completions', config.apiKey, stdBody, openAIExtract, customTimeoutMs, options.signal);
         case 'deepseek':
-          return await this._chatAPI('https://api.deepseek.com/v1/chat/completions', config.apiKey, stdBody, openAIExtract, customTimeoutMs);
+          return await this._chatAPI('https://api.deepseek.com/v1/chat/completions', config.apiKey, stdBody, openAIExtract, customTimeoutMs, options.signal);
         case 'qwen':
           return await this._chatAPI(
             'https://dashscope.aliyuncs.com/api/v1/services/aigc/text-generation/generation',
-            config.apiKey, qwenBody, qwenExtract, customTimeoutMs
+            config.apiKey, qwenBody, qwenExtract, customTimeoutMs, options.signal
           );
         case 'custom':
-          return await this._chatAPI(this.normalizeApiUrl(config.apiUrl), config.apiKey, stdBody, openAIExtract, customTimeoutMs);
+          return await this._chatAPI(this.normalizeApiUrl(config.apiUrl), config.apiKey, stdBody, openAIExtract, customTimeoutMs, options.signal);
         default:
           return { success: false, error: '不支持的AI提供商' };
       }

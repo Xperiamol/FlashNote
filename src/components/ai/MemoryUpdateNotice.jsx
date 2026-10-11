@@ -29,7 +29,7 @@ export default function MemoryUpdateNotice({ updates, onUndo, variant = 'chip' }
 
   const label = reverted ? '已撤销记忆更新' : `记忆已更新：${summarize(changes)}`
   const pillSx = (theme) => ({
-    height: 22, px: 1, borderRadius: '7px', fontSize: 12, fontWeight: 600,
+    height: 22, px: 1, flexShrink: 0, whiteSpace: 'nowrap', borderRadius: '7px', fontSize: 12, fontWeight: 600,
     color: 'primary.main', bgcolor: alpha(theme.palette.primary.main, 0.1),
   })
 
@@ -44,10 +44,10 @@ export default function MemoryUpdateNotice({ updates, onUndo, variant = 'chip' }
               label={label}
               variant="outlined"
               onClick={reverted ? undefined : () => setExpanded((v) => !v)}
-              sx={{ height: 22, fontSize: '0.7rem', opacity: 0.75, maxWidth: '100%' }}
+              sx={{ height: 22, fontSize: '0.7rem', opacity: 0.75, minWidth: 0, flexShrink: 1, maxWidth: '100%' }}
             />
             {!reverted && (
-              <Chip size="small" label={undoing ? '撤销中…' : '撤销'} variant="outlined" onClick={undoing ? undefined : handleUndo} sx={{ height: 22, fontSize: '0.7rem' }} />
+              <Chip size="small" label={undoing ? '撤销中…' : '撤销'} variant="outlined" onClick={undoing ? undefined : handleUndo} sx={{ height: 22, fontSize: '0.7rem', flexShrink: 0, whiteSpace: 'nowrap' }} />
             )}
           </>
         ) : (

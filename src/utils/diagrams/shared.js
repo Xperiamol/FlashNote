@@ -4,30 +4,30 @@
  */
 
 export const DIAGRAM_THEME = {
-  canvas: '#fcfcfd',
-  text: '#243041',
-  textSecondary: '#52627a',
-  line: '#7c8aa5',
-  lifeline: '#bcc6d8',
+  canvas: '#f8fafc',
+  text: '#172033',
+  textSecondary: '#64748b',
+  line: '#94a3b8',
+  border: '#dce3ed',
+  surface: '#ffffff',
+  lifeline: '#cbd5e1',
   labelBg: '#ffffff',
   semantics: {
-    primary: { bg: '#dbeafe', stroke: '#2563eb' },
-    success: { bg: '#dcfce7', stroke: '#16a34a' },
-    warning: { bg: '#fef3c7', stroke: '#d97706' },
-    danger: { bg: '#fee2e2', stroke: '#dc2626' },
-    accent: { bg: '#ede9fe', stroke: '#7c3aed' },
-    info: { bg: '#cffafe', stroke: '#0891b2' },
-    neutral: { bg: '#eef2f7', stroke: '#5b6b82' },
+    primary: { bg: '#eef2ff', stroke: '#4f46e5' },
+    success: { bg: '#ecfdf5', stroke: '#047857' },
+    warning: { bg: '#fffbeb', stroke: '#b45309' },
+    danger: { bg: '#fff1f2', stroke: '#be123c' },
+    accent: { bg: '#faf5ff', stroke: '#7e22ce' },
+    info: { bg: '#ecfeff', stroke: '#0e7490' },
+    neutral: { bg: '#f8fafc', stroke: '#64748b' },
   },
   depthPalette: [
-    { bg: '#dbeafe', stroke: '#2563eb' },
-    { bg: '#dcfce7', stroke: '#16a34a' },
-    { bg: '#fef3c7', stroke: '#d97706' },
-    { bg: '#fee2e2', stroke: '#dc2626' },
-    { bg: '#ede9fe', stroke: '#7c3aed' },
-    { bg: '#cffafe', stroke: '#0891b2' },
-    { bg: '#fce7f3', stroke: '#db2777' },
-    { bg: '#d1fae5', stroke: '#0f766e' },
+    { bg: '#eef2ff', stroke: '#4f46e5' },
+    { bg: '#ecfdf5', stroke: '#047857' },
+    { bg: '#fffbeb', stroke: '#b45309' },
+    { bg: '#faf5ff', stroke: '#7e22ce' },
+    { bg: '#ecfeff', stroke: '#0e7490' },
+    { bg: '#fff1f2', stroke: '#be123c' },
   ],
 }
 
@@ -110,18 +110,40 @@ export const wrapTextToWidth = (text, maxWidth, fontSize = 16) => {
 }
 
 // ─── 文字可读性护栏 ──────────────────────────────────
-// 画布底色恒为浅色，LLM 有时会按"深色主题"思路输出近白/浅色文字 → 浅底浅字不可见。
-// 这里在引擎层兜底：按文字与其背景的对比度，必要时换成深色或白色，保证始终能看清。
-const _parseHex = (c) => {
-  if (typeof c !== 'string') return null
-  let s = c.trim().toLowerCase()
-  if (s === 'white') s = '#ffffff'
-  if (s === 'black') s = '#000000'
-  const m3 = /^#([0-9a-f]{3})$/.exec(s)
-  if (m3) return [0, 1, 2].map((i) => parseInt(m3[1][i] + m3[1][i], 16))
-  const m6 = /^#([0-9a-f]{6})$/.exec(s)
-  if (m6) return [0, 2, 4].map((i) => parseInt(m6[1].slice(i, i + 2), 16))
-  return null
+// 原生形状使用可移植的纯色；渐变应使用 SVG。渲染与对比度检查必须理解同一种颜色。
+export const normalizeDiagramColor = (value) => {
+  if (typeof value !== 'string') return null
+  let color = value.trim().toLowerCase()
+  if (color === 'transparent') return color
+  if (color === 'white') color = '#ffffff'
+  if (color === 'black') color = '#000000'
+  if (/^#[0-9a-f]{3}$/.test(color)) return '#' + [...color.slice(1)].map(c => c + c).join('')
+  if (/^#[0-9a-f]{6}$/.test(color)) return color
+  // rgb(15, 23, 42) and rgb(15 23 42), including percentage channels.
+  const rgb = /^rgb\(\s*([^()]+)\s*\)$/.exec(color)
+  if (!rgb) return null
+  const parts = rgb[1].trim().split(/\s*,\s*|\s+/)
+  if (parts.length !== 3 || parts.some(part => !/^\d+(?:\.\d+)?%?$/.test(part))) return null
+  const channels = parts.map(part => Number.parseFloat(part) * (part.endsWith('%') ? 2.55 : 1))
+  if (channels.some(channel => channel < 0 || channel > 255)) return null
+  return '#' + channels.map(channel => Math.round(channel).toString(16).padStart(2, '0')).join('')
+}
+export const coerceDiagramColor = (value, fallback = null) => {
+  const normalized = normalizeDiagramColor(value)
+  if (normalized) return normalized
+  // Legacy Composer scenes may contain CSS gradients. Excalidraw treats these
+  // as invalid canvas colors and paints the shape black; keep the first solid
+  // stop as a deterministic, editable fallback until SVG gradients are used.
+  if (typeof value === 'string' && /^(?:linear|radial)-gradient\(/i.test(value.trim())) {
+    const stop = value.match(/#[0-9a-f]{3,8}/i)?.[0]
+    if (stop) return normalizeDiagramColor(stop)
+  }
+  return fallback
+}
+
+const _parseColor = (color) => {
+  const hex = normalizeDiagramColor(color)
+  return hex && hex !== 'transparent' ? [1, 3, 5].map(i => parseInt(hex.slice(i, i + 2), 16)) : null
 }
 const _relLum = ([r, g, b]) => {
   const f = (v) => { const x = v / 255; return x <= 0.03928 ? x / 12.92 : Math.pow((x + 0.055) / 1.055, 2.4) }
@@ -132,12 +154,12 @@ const _contrast = (a, b) => {
   return (Math.max(la, lb) + 0.05) / (Math.min(la, lb) + 0.05)
 }
 export const ensureReadableTextColor = (color, bg = DIAGRAM_THEME.canvas) => {
-  const back = _parseHex(bg) || _parseHex(DIAGRAM_THEME.canvas)
-  const fg = _parseHex(color)
-  const darkOnLight = _relLum(back) > 0.5
-  if (!fg) return darkOnLight ? DIAGRAM_THEME.text : '#ffffff'
-  if (_contrast(fg, back) >= 2.6) return color
-  return darkOnLight ? DIAGRAM_THEME.text : '#ffffff'
+  const back = _parseColor(bg) || _parseColor(DIAGRAM_THEME.canvas)
+  const fg = _parseColor(color)
+  if (fg && _contrast(fg, back) >= 4.5) return normalizeDiagramColor(color)
+  if (_contrast(_parseColor(DIAGRAM_THEME.text), back) >= 4.5) return DIAGRAM_THEME.text
+  // 中间亮度底色也要满足 4.5:1，不能简单按亮/暗阈值选白字。
+  return _contrast([0, 0, 0], back) > _contrast([255, 255, 255], back) ? '#000000' : '#ffffff'
 }
 
 export const wrapLabel = (text, maxChars = null) => {
@@ -199,14 +221,14 @@ export const makeBase = (type) => ({
   locked: false,
 })
 
-export const makeText = ({ x, y, text, fontSize = 16, color, align = 'center', verticalAlign = 'middle', metrics, containerId = null, fontFamily = 1, bg = null }) => {
+export const makeText = ({ x, y, text, fontSize = 16, color, align = 'center', verticalAlign = 'middle', metrics, containerId = null, fontFamily = 2, bg = null }) => {
   const wrapped = String(text || '')
   const m = metrics || measureTextBlock(wrapped, fontSize)
   const safeColor = ensureReadableTextColor(color || DIAGRAM_THEME.text, bg || DIAGRAM_THEME.canvas)
   return {
     ...makeBase('text'),
-    x: snapToGrid(x),
-    y: snapToGrid(y),
+    x,
+    y,
     width: m.width,
     height: m.height,
     text: wrapped,
@@ -227,10 +249,10 @@ export const makeText = ({ x, y, text, fontSize = 16, color, align = 'center', v
 
 export const makeRect = ({ x, y, width, height, bg, stroke, strokeWidth = 1, rounded = true, dashed = false }) => ({
   ...makeBase('rectangle'),
-  x: snapToGrid(x),
-  y: snapToGrid(y),
-  width: snapToGrid(width),
-  height: snapToGrid(height),
+  x,
+  y,
+  width,
+  height,
   backgroundColor: bg || 'transparent',
   strokeColor: stroke || DIAGRAM_THEME.line,
   strokeWidth,
@@ -241,10 +263,10 @@ export const makeRect = ({ x, y, width, height, bg, stroke, strokeWidth = 1, rou
 
 export const makeEllipse = ({ x, y, width, height, bg, stroke, strokeWidth = 1 }) => ({
   ...makeBase('ellipse'),
-  x: snapToGrid(x),
-  y: snapToGrid(y),
-  width: snapToGrid(width),
-  height: snapToGrid(height),
+  x,
+  y,
+  width,
+  height,
   backgroundColor: bg || 'transparent',
   strokeColor: stroke || DIAGRAM_THEME.line,
   strokeWidth,
@@ -253,10 +275,10 @@ export const makeEllipse = ({ x, y, width, height, bg, stroke, strokeWidth = 1 }
 
 export const makeDiamond = ({ x, y, width, height, bg, stroke, strokeWidth = 1 }) => ({
   ...makeBase('diamond'),
-  x: snapToGrid(x),
-  y: snapToGrid(y),
-  width: snapToGrid(width),
-  height: snapToGrid(height),
+  x,
+  y,
+  width,
+  height,
   backgroundColor: bg || 'transparent',
   strokeColor: stroke || DIAGRAM_THEME.line,
   strokeWidth,
@@ -268,11 +290,11 @@ export const makeLine = ({ x, y, points, stroke, strokeWidth = 1, dashed = false
   const ys = points.map((p) => p[1])
   return {
     ...makeBase('line'),
-    x: snapToGrid(x),
-    y: snapToGrid(y),
+    x,
+    y,
     width: Math.max(...xs) - Math.min(...xs) || 0,
     height: Math.max(...ys) - Math.min(...ys) || 0,
-    points: points.map(([px, py]) => [snapToGrid(px), snapToGrid(py)]),
+    points: points.map(([px, py]) => [px, py]),
     strokeColor: stroke || DIAGRAM_THEME.line,
     strokeWidth,
     strokeStyle: dashed ? 'dashed' : 'solid',
@@ -304,11 +326,11 @@ export const makeArrow = ({
   const ys = safePoints.map((p) => p[1])
   return {
     ...makeBase('arrow'),
-    x: snapToGrid(fin(x)),
-    y: snapToGrid(fin(y)),
+    x: fin(x),
+    y: fin(y),
     width: Math.max(...xs) - Math.min(...xs) || 0,
     height: Math.max(...ys) - Math.min(...ys) || 0,
-    points: safePoints.map(([px, py]) => [snapToGrid(px), snapToGrid(py)]),
+    points: safePoints.map(([px, py]) => [px, py]),
     strokeColor: stroke || DIAGRAM_THEME.line,
     strokeWidth,
     strokeStyle: dashed ? 'dashed' : 'solid',
@@ -323,24 +345,12 @@ export const makeArrow = ({
 
 export const palette = (depth = 0) => DIAGRAM_THEME.depthPalette[depth % DIAGRAM_THEME.depthPalette.length]
 
-export const beautifyElements = (elements = []) => elements.map((el) => {
+// Layout already establishes relationships. Validate geometry without shifting elements onto a different grid.
+export const beautifyElements = (elements = []) => elements.map(el => {
   const next = { ...el }
-  if (typeof next.x === 'number') next.x = snapToGrid(next.x)
-  if (typeof next.y === 'number') next.y = snapToGrid(next.y)
-  // 文本尺寸来自真实字形测量，不能再吸附网格；四舍五入会把边界缩小，
-  // 向上吸附整个网格又会制造明显空白，两者都会让选框与文字不一致。
-  if (typeof next.width === 'number') {
-    next.width = next.type === 'text'
-      ? Math.max(1, Math.ceil(next.width))
-      : snapToGrid(next.width)
-  }
-  if (typeof next.height === 'number') {
-    next.height = next.type === 'text'
-      ? Math.max(1, Math.ceil(next.height))
-      : snapToGrid(next.height)
-  }
-  if (Array.isArray(next.points)) {
-    next.points = next.points.map(([x, y]) => [snapToGrid(x), snapToGrid(y)])
+  for (const key of ['x', 'y', 'width', 'height']) {
+    if (!Number.isFinite(next[key])) throw new Error(`画布元素 ${el.id} 的 ${key} 无效`)
+    next[key] = key === 'width' || key === 'height' ? Math.max(0, next[key]) : next[key]
   }
   return next
 })

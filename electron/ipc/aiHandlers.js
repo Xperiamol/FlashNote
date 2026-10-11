@@ -14,13 +14,30 @@ const AUTO_MEMORY_SCENES = new Set(['chat_panel', 'floating_panel']);
 
 const registerAIHandlers = (services, activeAIStreams) => {
   const logger = getLogger();
+  const activeGenerations = new Map();
   registerIpcHandlers([
     { channel: 'ai:get-config', handler: createTryCatchHandler(services, 'aiService', 'getConfig', '获取AI配置失败') },
     { channel: 'ai:save-config', handler: createTryCatchHandler(services, 'aiService', 'saveConfig', '保存AI配置失败') },
     { channel: 'ai:test-connection', handler: createTryCatchHandler(services, 'aiService', 'testConnection', '测试AI连接失败') },
     { channel: 'ai:test-web-search', handler: createTryCatchHandler(services, 'webSearchService', 'testConnection', '测试联网搜索失败') },
     { channel: 'ai:get-providers', handler: createTryCatchHandler(services, 'aiService', 'getProviders', '获取AI提供商列表失败') },
-    { channel: 'ai:chat', handler: createTryCatchHandler(services, 'aiService', 'chat', 'AI聊天失败') },
+    { channel: 'ai:chat', handler: async (event, messages, options = {}) => {
+      const key = options.requestId ? `${event.sender.id}:${options.requestId}` : null;
+      if (key && activeGenerations.has(key)) return { success: false, error: '请求正在执行' };
+      const controller = new AbortController();
+      if (key) activeGenerations.set(key, controller);
+      try {
+        return await services.aiService.chat(messages, { ...options, signal: controller.signal });
+      } catch (error) {
+        return { success: false, error: error.message };
+      } finally {
+        if (key) activeGenerations.delete(key);
+      }
+    } },
+    { channel: 'ai:cancel-chat', handler: async (event, requestId) => {
+      activeGenerations.get(`${event.sender.id}:${requestId}`)?.abort();
+      return { success: true };
+    } },
     {
       channel: 'ai:auto-annotate',
       handler: async (_event, payload) => {

@@ -19,6 +19,7 @@ import {
   DIAGRAM_THEME,
   beautifyElements,
   ensureReadableTextColor,
+  normalizeDiagramColor,
   makeArrow,
   makeEllipse,
   makeLine,
@@ -33,10 +34,10 @@ import { layoutGraph } from './graphLayout'
 
 // ─── 基础常量 ──────────────────────────────────────
 
-const PAD = 14
-const GAP = 12
+const PAD = 20
+const GAP = 20
 
-const LEVEL_FONT = { h1: 28, h2: 20, h3: 17, body: 15, caption: 13 }
+const LEVEL_FONT = { h1: 36, h2: 26, h3: 20, body: 16, caption: 13 }
 const levelFont = (level) => LEVEL_FONT[level] || LEVEL_FONT.body
 
 const DEVICE_W = { phone: 300, tablet: 480, desktop: 760, window: 560 }
@@ -58,8 +59,11 @@ const getDef = (type) => REGISTRY[type] || REGISTRY.__fallback
 
 // LLM 可能给 props 注入非数值（如 w:"auto"、h:NaN），measure 算出 NaN 尺寸后会一路污染
 // 布局 / 连线坐标，最终生成 `<path d="MNaN NaN…">` 让 Excalidraw 渲染崩溃。这里在所有节点
-// 必经的唯一出口把尺寸钳为有限非负数，从边界根治 NaN。
-const finiteSize = (v) => (Number.isFinite(v) ? Math.max(0, v) : 0)
+// 必经的出口拒绝无效尺寸，让模型修复规划，避免 NaN 进入渲染器。
+const finiteSize = (v) => {
+  if (!Number.isFinite(v) || v < 0) throw new Error('画布布局尺寸无效，请检查容器宽度与内边距')
+  return v
+}
 
 export const measureNode = (node, maxW = null) => {
   if (!node || typeof node !== 'object') return { w: 0, h: 0 }
@@ -90,13 +94,72 @@ export const placeNode = (node, x, y, w, out) => {
 
 const childList = (node) => Array.isArray(node.children) ? node.children.filter(Boolean) : []
 
+// Reject malformed plans before measurement; silent fallback used to hide missing content.
+export const validateComposerTree = (root, connectors = []) => {
+  const ids = new Set(), edges = [...(connectors || [])]
+  let count = 0
+  const visit = (node, depth) => {
+    if (++count > 300 || depth > 16) throw new Error('画布结构过于复杂，请减少节点或嵌套')
+    if (!node || !REGISTRY[node.type] || node.type === '__fallback') throw new Error(`不支持的画布节点：${node?.type}`)
+    const p = node.props || {}
+    if (p.id != null) {
+      if (typeof p.id !== 'string' || !p.id || ids.has(p.id)) throw new Error(`重复或无效的节点 id：${p.id}`)
+      ids.add(p.id)
+    }
+    for (const key of ['x', 'y', 'w', 'h', 'size', 'gap', 'padding', 'cols', 'fontSize', 'titleSize', 'bodySize', 'nodeMaxW', 'nodeGap', 'layerGap']) {
+      if (p[key] == null) continue
+      if (!Number.isFinite(p[key]) || p[key] < 0 || p[key] > 10000) throw new Error(`${node.type}.${key} 必须是合理的非负数值`)
+      if (['w', 'h', 'size'].includes(key) && p[key] < 16) throw new Error(`${key} 不能小于 16`)
+      if (['fontSize', 'titleSize', 'bodySize'].includes(key) && (p[key] < 12 || p[key] > 120)) throw new Error('字号必须在 12–120 之间')
+      if (key === 'cols' && (!Number.isInteger(p.cols) || p.cols < 1 || p.cols > 12)) throw new Error('网格列数必须为 1–12')
+    }
+    if (node.children != null && !Array.isArray(node.children)) throw new Error('children 必须为数组')
+    if (p.edges != null && !Array.isArray(p.edges)) throw new Error('edges 必须为数组')
+    edges.push(...(p.edges || []))
+    childList(node).forEach(child => visit(child, depth + 1))
+  }
+  visit(root, 0)
+  for (const edge of edges) {
+    if (!ids.has(edge?.from) || !ids.has(edge?.to)) throw new Error(`连线引用不存在的节点：${edge?.from} → ${edge?.to}`)
+  }
+}
+
+// Free composition is opt-in: children have local x/y coordinates, while their contents still auto-size.
+register('canvas', {
+  measure(node, maxW) {
+    const p = node.props || {}
+    const width = maxW ?? p.w ?? 1000
+    let height = p.h ?? 0
+    for (const child of childList(node)) {
+      const { x = 0, y = 0, w } = child.props || {}
+      if (x >= width) throw new Error('自由布局节点超出画布右边界')
+      const measured = measureNode(child, Math.min(w ?? width - x, width - x))
+      if (x + measured.w > width + 2) throw new Error('自由布局内容超出画布宽度')
+      height = Math.max(height, y + measured.h)
+    }
+    const kids = childList(node)
+    if (!p.allowOverlap) for (let i = 0; i < kids.length; i++) for (let j = i + 1; j < kids.length; j++) {
+      const a = kids[i], b = kids[j]
+      const overlapX = Math.min((a.props?.x ?? 0) + a._w, (b.props?.x ?? 0) + b._w) - Math.max(a.props?.x ?? 0, b.props?.x ?? 0)
+      const overlapY = Math.min((a.props?.y ?? 0) + a._h, (b.props?.y ?? 0) + b._h) - Math.max(a.props?.y ?? 0, b.props?.y ?? 0)
+      if (overlapX > 2 && overlapY > 2) throw new Error(`自由布局第 ${i + 1} 和 ${j + 1} 个元素重叠，请增大间距；有意叠放需设置 allowOverlap:true`)
+    }
+    return { w: width, h: height }
+  },
+  place(node, x, y, w, out) {
+    const p = node.props || {}
+    if (p.bg) out.push(makeRect({ x, y, width: w, height: node._h, bg: p.bg, stroke: 'transparent', strokeWidth: 0 }))
+    for (const child of childList(node)) placeNode(child, x + (child.props?.x ?? 0), y + (child.props?.y ?? 0), child._w, out)
+  },
+})
+
 // ─── 文字 ──────────────────────────────────────────
 
 register('text', {
   measure(node, maxW) {
     const props = node.props || {}
     const content = String(props.content ?? props.text ?? '')
-    const fs = levelFont(props.level)
+    const fs = props.fontSize ?? levelFont(props.level)
     const preferredW = Number.isFinite(Number(props.w)) && Number(props.w) > 0
       ? Number(props.w)
       : ({ h1: 720, h2: 640, h3: 560, body: 520, caption: 400 }[props.level] || 520)
@@ -195,26 +258,30 @@ register('card', {
   measure(node, maxW) {
     const p = node.props || {}
     const w = maxW != null ? maxW : (p.w || CARD_DEFAULT_W)
-    const innerW = w - PAD * 2
+    const pad = p.padding ?? PAD
+    node._pad = pad
+    node._titleFs = p.titleSize ?? 18
+    node._bodyFs = p.bodySize ?? 14
+    const innerW = w - pad * 2
     const title = String(p.title || '')
     const body = String(p.body ?? p.text ?? '')
-    let h = PAD
+    let h = pad
     if (title) {
-      const tw = wrapTextToWidth(title, innerW, 16)
-      const m = measureTextBlock(tw, 16)
+      const tw = wrapTextToWidth(title, innerW, node._titleFs)
+      const m = measureTextBlock(tw, node._titleFs)
       node._titleWrap = tw
       node._titleM = m
       h += m.height
     }
     if (body) {
-      if (title) h += 6
-      const bw = wrapTextToWidth(body, innerW, 14)
-      const m = measureTextBlock(bw, 14)
+      if (title) h += 10
+      const bw = wrapTextToWidth(body, innerW, node._bodyFs)
+      const m = measureTextBlock(bw, node._bodyFs)
       node._bodyWrap = bw
       node._bodyM = m
       h += m.height
     }
-    h += PAD
+    h += pad
     return { w, h: Math.max(h, 56) }
   },
   place(node, x, y, w, out) {
@@ -225,17 +292,18 @@ register('card', {
     out.push(makeRect({
       x, y, width: w, height: node._h,
       bg: cardBg,
-      stroke: accent.stroke,
-      strokeWidth: 1.2,
+      stroke: p.stroke || DIAGRAM_THEME.border,
+      strokeWidth: 1,
       rounded: true,
     }))
-    let cy = y + PAD
+    const pad = node._pad
+    let cy = y + pad
     if (node._titleWrap) {
-      out.push(makeText({ x: x + PAD, y: cy, text: node._titleWrap, fontSize: 16, color: accent.stroke, align: 'left', metrics: node._titleM, bg: cardBg }))
-      cy += node._titleM.height + 6
+      out.push(makeText({ x: x + pad, y: cy, text: node._titleWrap, fontSize: node._titleFs, color: p.titleColor || DIAGRAM_THEME.text, align: 'left', metrics: node._titleM, bg: cardBg }))
+      cy += node._titleM.height + 10
     }
     if (node._bodyWrap) {
-      out.push(makeText({ x: x + PAD, y: cy, text: node._bodyWrap, fontSize: 14, color: DIAGRAM_THEME.text, align: 'left', metrics: node._bodyM, bg: cardBg }))
+      out.push(makeText({ x: x + pad, y: cy, text: node._bodyWrap, fontSize: node._bodyFs, color: p.bodyColor || DIAGRAM_THEME.textSecondary, align: 'left', metrics: node._bodyM, bg: cardBg }))
     }
   },
 })
@@ -410,14 +478,14 @@ register('screen', {
     // 外壳
     out.push(makeRect({
       x, y, width: w, height: node._h,
-      bg: '#fbfdff', stroke: accent.stroke, strokeWidth: 1.6, rounded: true,
+      bg: DIAGRAM_THEME.surface, stroke: DIAGRAM_THEME.border, strokeWidth: 1, rounded: true,
     }))
     // 标题栏
     out.push(makeRect({
       x, y, width: w, height: node._titleH,
       bg: accent.bg, stroke: accent.stroke, strokeWidth: 0, rounded: true,
     }))
-    const title = `📱 ${p.title || ''}`.trim()
+    const title = String(p.title || '')
     const tm = measureTextBlock(title, 14)
     out.push(makeText({ x: x + 12, y: y + (node._titleH - tm.height) / 2, text: title, fontSize: 14, color: accent.stroke, align: 'left', metrics: tm }))
     // 内容
@@ -595,51 +663,39 @@ register('list', {
 
 // ─── table 表格 ────────────────────────────────────
 
-const TABLE_ROW_H = 36
-
 register('table', {
   measure(node, maxW) {
     const p = node.props || {}
     const headers = Array.isArray(p.headers) ? p.headers : []
-    const rows = Array.isArray(p.rows) ? p.rows : []
-    const cols = Math.max(headers.length, ...rows.map((r) => (Array.isArray(r) ? r.length : 0)), 1)
-    node._cols = cols; node._headers = headers; node._rows = rows
-    // 列宽：按内容估，再受 maxW 约束
-    const colContentW = new Array(cols).fill(40)
-    const scan = (cells) => cells.forEach((c, i) => {
-      const m = measureTextBlock(String(c ?? ''), 13)
-      colContentW[i] = Math.max(colContentW[i], m.width + 20)
+    const rows = (Array.isArray(p.rows) ? p.rows : []).map(row => Array.isArray(row) ? row : [row])
+    const cols = Math.max(headers.length, ...rows.map(row => row.length), 1)
+    const widths = Array.from({ length: cols }, (_, i) => Math.min(320, Math.max(100, ...[headers, ...rows].map(row => measureTextBlock(String(row[i] ?? ''), 14).width + 32))))
+    const natural = widths.reduce((sum, width) => sum + width, 0)
+    const target = maxW ?? p.w ?? natural
+    if (target / cols < 64) throw new Error('表格列数过多、列宽不足，请扩大表格或拆分内容')
+    node._colW = widths.map(width => width / natural * target)
+    node._tableRows = [...(headers.length ? [{ cells: headers, header: true }] : []), ...rows.map(cells => ({ cells, header: false }))].map(row => {
+      const cells = Array.from({ length: cols }, (_, i) => {
+        const text = wrapTextToWidth(String(row.cells[i] ?? ''), Math.max(20, node._colW[i] - 32), 14)
+        return { text, metrics: measureTextBlock(text, 14) }
+      })
+      return { ...row, cells, height: Math.max(44, ...cells.map(cell => cell.metrics.height + 24)) }
     })
-    scan(headers); rows.forEach(scan)
-    let totalW = colContentW.reduce((s, v) => s + v, 0)
-    if (maxW != null && totalW < maxW) {
-      const extra = (maxW - totalW) / cols
-      for (let i = 0; i < cols; i++) colContentW[i] += extra
-      totalW = maxW
-    }
-    node._colW = colContentW
-    node._w0 = totalW
-    const rowCount = (headers.length ? 1 : 0) + rows.length
-    return { w: totalW, h: rowCount * TABLE_ROW_H }
+    return { w: target, h: node._tableRows.reduce((sum, row) => sum + row.height, 0) }
   },
   place(node, x, y, w, out) {
-    const { _colW: colW, _headers: headers, _rows: rows } = node
-    out.push(makeRect({ x, y, width: w, height: node._h, bg: '#ffffff', stroke: '#d1d1d5', strokeWidth: 1.2, rounded: true }))
+    out.push(makeRect({ x, y, width: w, height: node._h, bg: DIAGRAM_THEME.surface, stroke: DIAGRAM_THEME.border, strokeWidth: 1, rounded: true }))
     let ry = y
-    const drawRow = (cells, isHeader) => {
-      if (isHeader) out.push(makeRect({ x, y: ry, width: w, height: TABLE_ROW_H, bg: '#f2f2f3', stroke: '#d1d1d5', strokeWidth: 0, rounded: false }))
-      else if (ry > y) out.push(makeLine({ x, y: ry, points: [[0, 0], [w, 0]], stroke: '#eef2f7', strokeWidth: 1 }))
+    for (const row of node._tableRows) {
+      if (row.header) out.push(makeRect({ x, y: ry, width: w, height: row.height, bg: DIAGRAM_THEME.semantics.neutral.bg, stroke: 'transparent', strokeWidth: 0, rounded: true }))
+      else if (ry > y) out.push(makeLine({ x: x + 12, y: ry, points: [[0, 0], [w - 24, 0]], stroke: DIAGRAM_THEME.border, strokeWidth: 1 }))
       let cx = x
-      for (let i = 0; i < node._cols; i++) {
-        const txt = String((cells && cells[i]) ?? '')
-        const m = measureTextBlock(txt, 13)
-        out.push(makeText({ x: cx + 10, y: ry + (TABLE_ROW_H - m.height) / 2, text: txt, fontSize: 13, color: isHeader ? DIAGRAM_THEME.text : DIAGRAM_THEME.textSecondary, align: 'left', metrics: m }))
-        cx += colW[i]
-      }
-      ry += TABLE_ROW_H
+      row.cells.forEach((cell, i) => {
+        out.push(makeText({ x: cx + 16, y: ry + 12, text: cell.text, fontSize: 14, color: row.header ? DIAGRAM_THEME.text : DIAGRAM_THEME.textSecondary, align: 'left', metrics: cell.metrics }))
+        cx += node._colW[i]
+      })
+      ry += row.height
     }
-    if (headers.length) drawRow(headers, true)
-    rows.forEach((r) => drawRow(Array.isArray(r) ? r : [r], false))
   },
 })
 
@@ -674,6 +730,13 @@ register('svg', {
     const width = maxW != null ? Math.min(naturalW, maxW) : naturalW
     const height = Math.max(24, Math.round(width * naturalH / Math.max(1, naturalW)))
     node._svgW = width
+    const kids = childList(node)
+    if (!p.allowOverlap) for (let i = 0; i < kids.length; i++) for (let j = i + 1; j < kids.length; j++) {
+      const a = kids[i], b = kids[j]
+      const overlapX = Math.min((a.props?.x ?? 0) + a._w, (b.props?.x ?? 0) + b._w) - Math.max(a.props?.x ?? 0, b.props?.x ?? 0)
+      const overlapY = Math.min((a.props?.y ?? 0) + a._h, (b.props?.y ?? 0) + b._h) - Math.max(a.props?.y ?? 0, b.props?.y ?? 0)
+      if (overlapX > 2 && overlapY > 2) throw new Error(`自由布局第 ${i + 1} 和 ${j + 1} 个元素重叠，请增大间距；有意叠放需设置 allowOverlap:true`)
+    }
     return { w: width, h: height }
   },
   place(node, x, y, w, out) {
@@ -714,14 +777,14 @@ register('avatar', {
 
 register('badge', {
   measure(node, maxW) {
-    const txt = String((node.props || {}).text ?? (node.props || {}).count ?? '')
+    const txt = wrapTextToWidth(String((node.props || {}).text ?? (node.props || {}).count ?? ''), maxW != null ? maxW - 20 : 300, 13)
     const m = measureTextBlock(txt, 13)
     node._txt = txt; node._m = m
     const w = m.width + 16
     return { w: maxW != null ? Math.min(w, maxW) : w, h: m.height + 6 }
   },
   place(node, x, y, w, out) {
-    const c = toColor((node.props || {}).tone) || DIAGRAM_THEME.semantics.danger
+    const c = toColor((node.props || {}).tone) || DIAGRAM_THEME.semantics.neutral
     out.push(makeRect({ x, y, width: w, height: node._h, bg: c.bg, stroke: c.stroke, strokeWidth: 1, rounded: true }))
     out.push(makeText({ x: x + (w - node._m.width) / 2, y: y + (node._h - node._m.height) / 2, text: node._txt, fontSize: 13, color: c.stroke, align: 'center', metrics: node._m, bg: c.bg }))
   },
@@ -766,9 +829,8 @@ register('callout', {
 register('group', {
   measure(node, maxW) {
     const p = node.props || {}
-    const pad = p.padding ?? 16
+    const pad = p.padding ?? 24
     const gap = p.gap ?? GAP
-    const titleH = p.title ? 28 : 0
     const innerMaxW = maxW != null ? maxW - pad * 2 : null
     const kids = childList(node)
     let maxChildW = 0, totalH = 0
@@ -778,7 +840,9 @@ register('group', {
       totalH += m.h
       if (i < kids.length - 1) totalH += gap
     })
-    const contentW = innerMaxW != null ? innerMaxW : maxChildW
+    const contentW = innerMaxW != null ? innerMaxW : Math.max(maxChildW, Math.min(420, measureTextBlock(p.title || '', 18).width))
+    node._title = wrapTextToWidth(p.title || '', contentW, 18)
+    const titleH = p.title ? measureTextBlock(node._title, 18).height + 20 : 0
     node._pad = pad; node._gap = gap; node._titleH = titleH; node._contentW = contentW
     return { w: contentW + pad * 2, h: titleH + totalH + pad * 2 }
   },
@@ -789,15 +853,15 @@ register('group', {
     out.push(makeRect({
       x, y, width: w, height: node._h,
       bg: groupBg,
-      stroke: c.stroke,
-      strokeWidth: 1.4,
+      stroke: p.stroke || DIAGRAM_THEME.border,
+      strokeWidth: 1,
       rounded: true,
       dashed: p.dashed === true,
     }))
     let cy = y + node._pad
     if (p.title) {
-      const m = measureTextBlock(p.title, 15)
-      out.push(makeText({ x: x + node._pad, y: cy, text: p.title, fontSize: 15, color: c.stroke, align: 'left', metrics: m, bg: groupBg }))
+      const m = measureTextBlock(node._title, 18)
+      out.push(makeText({ x: x + node._pad, y: cy, text: node._title, fontSize: 18, color: DIAGRAM_THEME.text, align: 'left', metrics: m, bg: groupBg }))
       cy += node._titleH
     }
     const contentW = w - node._pad * 2
@@ -1208,7 +1272,7 @@ const normalizeRoot = (tree) => {
     const layout = tree.layout || {}
     return {
       type: layout.type || 'stack.v',
-      props: { gap: layout.gap ?? 32, padding: layout.padding ?? 0, align: layout.align, cols: layout.cols },
+      props: { ...layout, gap: layout.gap ?? 32, padding: layout.padding ?? 0 },
       children: tree.children,
     }
   }
@@ -1227,17 +1291,29 @@ export const renderComposer = (tree, { offsetX = 100, offsetY = 100 } = {}) => {
   let oy = offsetY
 
   if (tree.title) {
-    const wrappedTitle = wrapTextToWidth(tree.title, 760, 26)
-    const m = measureTextBlock(wrappedTitle, 26)
-    out.push(makeText({ x: offsetX, y: oy, text: wrappedTitle, fontSize: 26, color: DIAGRAM_THEME.text, align: 'left', metrics: m }))
-    oy += m.height + 20
+    const wrappedTitle = wrapTextToWidth(tree.title, 900, 36)
+    const m = measureTextBlock(wrappedTitle, 36)
+    out.push(makeText({ x: offsetX, y: oy, text: wrappedTitle, fontSize: 36, color: DIAGRAM_THEME.text, align: 'left', metrics: m }))
+    oy += m.height + 32
   }
 
   const root = normalizeRoot(tree)
-  measureNode(root, null)
+  validateComposerTree(root, tree.connectors)
+  measureNode(root, root.props?.w ?? null)
   placeNode(root, offsetX, oy, root._w, out)
 
   renderConnectors(root, tree.connectors, out)
+
+  // Invalid Canvas fill styles can silently render black. Reject them before saving so
+  // the generator's repair round can use a portable solid color or an SVG gradient.
+  for (const element of out) {
+    for (const field of ['backgroundColor', 'strokeColor']) {
+      if (element[field] == null) continue
+      const color = normalizeDiagramColor(element[field])
+      if (!color) throw new Error(`不支持的原生画布颜色 ${element[field]}：请使用 #RGB、#RRGGBB、rgb() 或 transparent；渐变请用 SVG`)
+      element[field] = color
+    }
+  }
 
   // 文字可读性兜底（关键）：
   // 单个原语的 makeText 只知道自己传入的 bg，但文字常常落在「父容器/外层块」的填充色上

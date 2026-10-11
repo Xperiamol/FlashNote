@@ -1,3 +1,4 @@
+import { stripInternalActionAnnotations } from './pendingActions'
 // 统一消息模型（问题3）。
 //
 // 标准 schema：{ role, content, parts?, actions?, toolCalls?, steps?, metadata }
@@ -36,7 +37,7 @@ export const createAssistantMessage = ({
   stopped,
   metadata,
 } = {}) => {
-  const msg = { role: 'assistant', content }
+  const msg = { role: 'assistant', content: stripInternalActionAnnotations(content) }
   if (Array.isArray(actions) && actions.length > 0) msg.actions = actions
   if (Array.isArray(toolCalls) && toolCalls.length > 0) {
     // 剥离历史的内联 action，待确认动作只走 msg.actions
@@ -61,4 +62,17 @@ export const extractPendingActions = (toolCalls) => {
     result.push(action)
   })
   return result
+}
+
+// 消息展示、重试、取回输入使用同一种文本提取规则，保留多模态消息中的文本顺序。
+export const messageText = (content) => (Array.isArray(content)
+  ? content.filter((part) => part?.type === 'text').map((part) => part.text || '').join('\n')
+  : String(content || ''))
+
+export const parseToolResult = (result) => {
+  try {
+    return typeof result === 'string' ? JSON.parse(result) : result
+  } catch (_) {
+    return null
+  }
 }

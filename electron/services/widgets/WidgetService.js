@@ -301,11 +301,11 @@ class WidgetService extends EventEmitter {
    * @param {string} [options.widgetId] 修改哪个组件（用于权限与保存）
    * @param {string} [options.cloneDataFrom] 预览用哪个实例的数据副本（预览中的改动不影响原数据）
    */
-  createDraft(code, { widgetId = null, cloneDataFrom } = {}) {
+  createDraft(code, { widgetId = null, cloneDataFrom, baseVersion } = {}) {
     this.validateCode(code);
     this.pruneDrafts();
     const id = `${DRAFT_PREFIX}${crypto.randomUUID()}`;
-    this.drafts.set(id, { code, widgetId, createdAt: Date.now() });
+    this.drafts.set(id, { code, widgetId, baseVersion: baseVersion ?? (widgetId ? this.dao.latestVersion(widgetId) : null), createdAt: Date.now() });
     if (cloneDataFrom && this.dao.getInstance(cloneDataFrom)) this.dao.cloneRecords(cloneDataFrom, id);
     return id;
   }
@@ -343,6 +343,7 @@ class WidgetService extends EventEmitter {
     const draft = this.getDraft(draftId);
     if (!draft) throw new WidgetError('NOT_FOUND', '组件草稿已过期，请重新生成');
     if (draft.widgetId) {
+      if (this.dao.latestVersion(draft.widgetId) !== draft.baseVersion) throw new WidgetError('CONFLICT', '生成期间组件已有新版本，草稿已保留，请基于最新版本重新修改');
       const result = this.updateWidgetCode(draft.widgetId, draft.code, versionNote || 'AI 修改');
       this.discardDraft(draftId);
       return result;
@@ -494,6 +495,9 @@ class WidgetService extends EventEmitter {
 
   async handleRpc(ref, method, params = {}, context = {}) {
     const ctx = this.resolveContext(ref);
+    if (ctx.draft && ['notes.create', 'notes.update', 'todos.create', 'todos.update', 'ai.complete'].includes(method)) {
+      throw new WidgetError('PREVIEW_ONLY', '预览期间不能修改真实笔记、待办或调用 AI；请将操作放到用户点击事件中');
+    }
     switch (method) {
       case 'data.query': {
         const { scopeId, collection } = this.resolveDataTarget(ctx, params, 'read');

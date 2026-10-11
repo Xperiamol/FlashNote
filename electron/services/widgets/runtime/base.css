@@ -13,8 +13,8 @@
   --fl-danger: #ef4444;
   --fl-success: #16a34a;
   --fl-warning: #f59e0b;
-  --fl-radius: 12px;
-  --fl-radius-sm: 8px;
+  --fl-radius: 16px;
+  --fl-radius-sm: 10px;
   --fl-shadow: 0 1px 2px rgba(15, 23, 42, 0.06), 0 4px 14px rgba(15, 23, 42, 0.06);
   --fl-font: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "PingFang SC", "Microsoft YaHei", "Noto Sans SC", "Helvetica Neue", Arial, sans-serif;
   color-scheme: light;
@@ -57,7 +57,7 @@ button, input, select, textarea { font: inherit; color: inherit; }
   border: 1px solid var(--fl-border);
   border-radius: var(--fl-radius);
   box-shadow: var(--fl-shadow);
-  padding: 14px 16px;
+  padding: 20px;
 }
 
 .fl-btn {
@@ -65,7 +65,7 @@ button, input, select, textarea { font: inherit; color: inherit; }
   align-items: center;
   justify-content: center;
   gap: 6px;
-  min-height: 32px;
+  min-height: 36px;
   padding: 0 12px;
   border: 1px solid var(--fl-border);
   border-radius: var(--fl-radius-sm);
@@ -85,7 +85,7 @@ button, input, select, textarea { font: inherit; color: inherit; }
 
 .fl-input, .fl-select, .fl-textarea {
   width: 100%;
-  min-height: 34px;
+  min-height: 38px;
   padding: 6px 10px;
   border: 1px solid var(--fl-border);
   border-radius: var(--fl-radius-sm);
@@ -116,6 +116,16 @@ button, input, select, textarea { font: inherit; color: inherit; }
 .fl-grow { flex: 1; min-width: 0; }
 .fl-muted { color: var(--fl-text-2); }
 .fl-small { font-size: 12px; }
-.fl-title { font-size: 16px; font-weight: 650; margin: 0; }
+.fl-title { font-size: 18px; font-weight: 650; line-height: 1.35; letter-spacing: -0.025em; margin: 0; }
 .fl-divider { height: 1px; background: var(--fl-border); border: 0; margin: 10px 0; }
 .fl-empty { padding: 24px 12px; text-align: center; color: var(--fl-text-2); }
+
+/* A quiet default, with explicit interaction states; generated CSS can override it. */
+.fl-btn:focus-visible { outline: 2px solid var(--fl-primary); outline-offset: 3px; }
+.fl-btn:active:not(:disabled) { transform: translateY(1px); }
+.fl-row > *, .fl-col > * { min-width: 0; }
+.fl-card { overflow-wrap: anywhere; }
+:root[data-size="compact"] .fl-card { padding: 16px; }
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after { animation-duration: 0.01ms !important; transition-duration: 0.01ms !important; }
+}

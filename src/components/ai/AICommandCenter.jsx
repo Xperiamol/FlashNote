@@ -1,3 +1,6 @@
+import { AI_ATTACHMENT_ACCEPT, MAX_AI_ATTACHMENTS, readAIAttachment, buildAttachmentMessage } from '../../utils/aiAttachments'
+import { releasePopoverFocus } from '../../utils/popoverFocus'
+import { getUiLocation, getVisibleNoteId, noteWindowLocation } from '../../utils/aiCore/uiLocation'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
   Avatar,
@@ -11,7 +14,7 @@ import {
   Typography,
   alpha
 } from '@mui/material'
-import { useTheme } from '@mui/material/styles'
+
 import {
   Close as CloseIcon,
   DragIndicator as DragIcon,
@@ -50,11 +53,12 @@ import {
   isExplicitPendingActionConfirmation,
   supersedeStalePendingActions,
   toApiMessages,
+  stripInternalActionAnnotations,
 } from '../../utils/aiCore/pendingActions'
 import PendingActionCard from './PendingActionCard'
 import MemoryUpdateNotice from './MemoryUpdateNotice'
 import { useUndoMemoryUpdate } from '../../hooks/useAutoMemoryNotices'
-import { buildMessageMetadata, createUserMessage, createAssistantMessage } from '../../utils/aiCore/messageModel'
+import { messageText, parseToolResult, buildMessageMetadata, createUserMessage, createAssistantMessage } from '../../utils/aiCore/messageModel'
 import usePendingActionExecution from '../../hooks/usePendingActionExecution'
 import logger from '../../utils/logger'
 import { notifyAINoteIdsUpdated } from '../../utils/aiCore/noteRefresh'
@@ -90,14 +94,6 @@ const TASK_PLANNING_PROMPTS = [
     prompt: '请帮我整理积压的未完成待办：找出重复、长期逾期、描述模糊或优先级不合理的项目，给出保留、拆解、延期或删除建议，等我确认后再执行修改。'
   }
 ]
-
-const parseToolResult = (result) => {
-  try {
-    return typeof result === 'string' ? JSON.parse(result) : result
-  } catch (_) {
-    return null
-  }
-}
 
 const mdComponents = {
   p: ({ children }) => (
@@ -219,7 +215,8 @@ const AICommandCenter = ({
     loadNotes: storeLoadNotes
   } = useStore(useShallow((state) => ({
     notes: state.notes,
-    selectedNoteId: state.selectedNoteId,
+    // 只认主窗口正在显示的笔记：在待办、日历等页面打开时不关联任何笔记
+    selectedNoteId: getVisibleNoteId(state),
     setSelectedNoteId: state.setSelectedNoteId,
     userAvatar: state.userAvatar,
     aiConversations: state.aiConversations,
@@ -291,7 +288,58 @@ const AICommandCenter = ({
   useEffect(() => () => {
     if (activeToolClearTimerRef.current) window.clearTimeout(activeToolClearTimerRef.current)
   }, [])
-  const [loading, setLoading] = useState(false)
+  const [attachments, setAttachments] = useState([])
+  const [attachmentLoading, setAttachmentLoading] = useState(false)
+  const [attachmentError, setAttachmentError] = useState('')
+  const [visionEnabled, setVisionEnabled] = useState(false)
+  const attachmentEpochRef = useRef(0)
+  const attachmentReadingRef = useRef(false)
+  const attachmentInputRef = useRef(null)
+  useEffect(() => {
+    let disposed = false
+    window.electronAPI?.ai?.getConfig?.().then(result => {
+      if (!disposed) setVisionEnabled(result?.data?.visionEnabled === true || result?.data?.visionEnabled === 'true')
+    }).catch(() => {})
+    return () => { disposed = true }
+  }, [open])
+  const ingestAttachments = async (files) => {
+    if (attachmentReadingRef.current) { setAttachmentError('正在读取附件，请稍后再添加'); return }
+    const epoch = attachmentEpochRef.current
+    const incoming = Array.from(files || [])
+    if (!incoming.length) return
+    attachmentReadingRef.current = true
+    setAttachmentLoading(true)
+    setAttachmentError('')
+    const added = [], errors = []
+    const room = Math.max(0, MAX_AI_ATTACHMENTS - attachments.length)
+    if (incoming.length > room) errors.push(`最多添加 ${MAX_AI_ATTACHMENTS} 个附件`)
+    for (const file of incoming.slice(0, room)) {
+      try { added.push(await readAIAttachment(file, { visionEnabled })) }
+      catch (error) { errors.push(error.message) }
+    }
+    if (epoch !== attachmentEpochRef.current) return
+    setAttachments(previous => [...previous, ...added].slice(0, MAX_AI_ATTACHMENTS))
+    setAttachmentError(errors.join('；'))
+    attachmentReadingRef.current = false
+    setAttachmentLoading(false)
+  }
+  const handleAttachmentDrop = event => {
+    if (!event.dataTransfer?.files?.length) return
+    event.preventDefault()
+    event.stopPropagation()
+    ingestAttachments(event.dataTransfer.files)
+  }
+  const handleAttachmentPaste = event => {
+    const files = Array.from(event.clipboardData?.items || []).filter(item => item.kind === 'file').map(item => item.getAsFile()).filter(Boolean)
+    if (!files.length) return
+    event.preventDefault()
+    event.stopPropagation()
+    ingestAttachments(files)
+  }
+  const [streamingConversationIds, setStreamingConversationIds] = useState([])
+  const inFlightConversationsRef = useRef(new Set())
+  const streamDraftsRef = useRef(new Map())
+  const loading = streamingConversationIds.includes(currentConversationId)
   const [position, setPosition] = useState(null)
   const [panelSize, setPanelSize] = useState(() => readStoredPanelSize(positionPersistKey))
   const [resizing, setResizing] = useState(false)
@@ -385,17 +433,21 @@ const AICommandCenter = ({
         pendingConversationIdRef.current &&
         pendingConversationIdRef.current === currentConversationId
       )
+      attachmentEpochRef.current += 1
+      attachmentReadingRef.current = false
+      setAttachments([])
+      setAttachmentError('')
+      setAttachmentLoading(false)
       previousConversationIdRef.current = currentConversationId
       conversationIdRef.current = currentConversationId
       if (isSendInitiatedSwitch) {
+        pendingConversationIdRef.current = null
         return
       }
-      cancel()
       setMessages(currentConversation?.messages || [])
       messagesRef.current = currentConversation?.messages || []
-      setStreamContent('')
+      setStreamContent(streamDraftsRef.current.get(currentConversationId) || '')
       setInput('')
-      setLoading(false)
     }
   }, [cancel, currentConversation, currentConversationId])
 
@@ -491,8 +543,8 @@ const AICommandCenter = ({
   }, [currentConversationId, open, scrollToBottom])
 
   const handleCancel = useCallback(() => {
-    if (loading) cancel()
-  }, [cancel, loading])
+    if (loading) cancel(currentConversationId)
+  }, [cancel, loading, currentConversationId])
 
   const { execute: handleExecuteAction, dismiss: handleDismissAction } = usePendingActionExecution({
     conversationIdRef, messagesRef, setMessages,
@@ -501,7 +553,6 @@ const AICommandCenter = ({
   })
 
   const handleNewChat = useCallback(() => {
-    if (loading) return
     if (selectedNoteId == null) {
       aiNewChat()
       return
@@ -512,11 +563,12 @@ const AICommandCenter = ({
     })
   }, [aiNewChat, currentNote, loading, selectedNoteId])
 
-  const handleSend = useCallback(async (overridePrompt) => {
+  const handleSend = useCallback(async (overridePrompt, retryAttachments = null) => {
+    const sentAttachments = retryAttachments ?? attachments
     const text = (overridePrompt ?? input).trim()
-    if (!text || loading) return
+    if ((!text && !sentAttachments.length) || loading || attachmentLoading || attachmentReadingRef.current) return
 
-    const pendingAction = isExplicitPendingActionConfirmation(text)
+    const pendingAction = !sentAttachments.length && isExplicitPendingActionConfirmation(text)
       ? getLatestConfirmableAction(messagesRef.current)
       : null
     if (pendingAction) {
@@ -544,8 +596,10 @@ const AICommandCenter = ({
     const isActiveView = () => conversationIdRef.current === conversationId
     const readLatestMessages = () => useStore.getState().aiConversations.find(c => c.id === conversationId)?.messages
 
+    if (inFlightConversationsRef.current.has(conversationId)) return
+    inFlightConversationsRef.current.add(conversationId)
     const userMsg = createUserMessage({
-      content: text,
+      content: buildAttachmentMessage(text, sentAttachments),
       metadata: buildMessageMetadata({
         conversationId,
         ...noteScope,
@@ -555,11 +609,13 @@ const AICommandCenter = ({
     messagesRef.current = nextMessages
     setMessages(nextMessages)
     setInput('')
+    setAttachments([])
+    setAttachmentError('')
     setStreamContent('')
     // 自己发出的消息总要看得到：回到底部并恢复自动跟随
     window.requestAnimationFrame(() => scrollToBottom())
     setThinkingPhrase(pickThinkingPhrase())
-    setLoading(true)
+    setStreamingConversationIds(ids => [...ids, conversationId])
     persistConversation(conversationId, nextMessages)
 
     let shouldReloadNotes = false
@@ -568,12 +624,14 @@ const AICommandCenter = ({
 
     try {
       const apiMessages = toApiMessages(nextMessages)
-      const contextPackage = await buildContext({ notes, selectedNoteId, query: text, contextEnabled: CONTEXT_PROFILES.floating_panel })
+      // 独立笔记窗口只有这一篇笔记；主窗口按当前页面判断
+      const location = selectedNoteIdOverride !== undefined ? noteWindowLocation(selectedNoteIdOverride) : getUiLocation(useStore.getState())
+      const prepareContext = () => buildContext({ notes, selectedNoteId, query: text, contextEnabled: CONTEXT_PROFILES.floating_panel, location })
 
-      const { result, content, cancelledByUser, requestId } = await runStream({
+      const { result, content, cancelledByUser, requestId, contextPackage } = await runStream({
         conversationId,
         messages: apiMessages,
-        contextPackage,
+        prepareContext,
         requestPrefix: 'aicc',
         options: {
           scene: 'floating_panel',
@@ -584,14 +642,14 @@ const AICommandCenter = ({
             source: noteScope.source,
           },
         },
-        onContent: (c) => { if (isActiveView()) setStreamContent(c) },
+        onContent: (c) => { streamDraftsRef.current.set(conversationId, c); if (isActiveView()) setStreamContent(c) },
         onChunk: (chunk) => {
           if (chunk?.type === 'tool_start') {
-            showActiveTool(chunk.name || null)
+            if (isActiveView()) showActiveTool(chunk.name || null)
             return
           }
           if (chunk?.type !== 'tool_end') return
-          clearActiveTool()
+          if (isActiveView()) clearActiveTool()
           const parsed = parseToolResult(chunk.result)
           if (parsed?.error || parsed?.success === false) {
             logger.warn('[AICommandCenter] tool failed', { name: chunk.name, result: parsed })
@@ -667,12 +725,14 @@ const AICommandCenter = ({
       }
       persistConversation(conversationId, errorMessages)
     } finally {
-      pendingConversationIdRef.current = null
-      setActiveTool(null)
-      setLoading(false)
+      if (pendingConversationIdRef.current === conversationId) pendingConversationIdRef.current = null
+      inFlightConversationsRef.current.delete(conversationId)
+      streamDraftsRef.current.delete(conversationId)
+      setStreamingConversationIds(ids => ids.filter(id => id !== conversationId))
+      if (isActiveView()) setActiveTool(null)
       if (isActiveView()) window.setTimeout(() => inputRef.current?.focus(), 30)
     }
-  }, [aiEnsureNoteChat, aiNewChat, aiSetActiveConv, clearActiveTool, currentConversationId, currentNote, handleExecuteAction, input, loadNotes, loading, noteScope, notes, persistConversation, runStream, scrollToBottom, selectedNoteId, showActiveTool])
+  }, [aiEnsureNoteChat, aiNewChat, aiSetActiveConv, clearActiveTool, currentConversationId, currentNote, handleExecuteAction, input, attachments, attachmentLoading, loadNotes, loading, noteScope, notes, persistConversation, runStream, scrollToBottom, selectedNoteId, selectedNoteIdOverride, showActiveTool])
 
   // 重新生成最后一条回复：去掉最后一轮的回复，用同一个问题再问一次
   const handleRetry = useCallback(() => {
@@ -684,15 +744,14 @@ const AICommandCenter = ({
     }
     if (lastUserIndex < 0) return
     const lastUser = list[lastUserIndex]
-    const text = Array.isArray(lastUser.content)
-      ? lastUser.content.filter((part) => part?.type === 'text').map((part) => part.text || '').join('\n')
-      : String(lastUser.content || '')
+    const text = messageText(lastUser.content)
     if (!text.trim()) return
     const trimmed = list.slice(0, lastUserIndex)
     messagesRef.current = trimmed
     setMessages(trimmed)
     if (currentConversationId) persistConversation(currentConversationId, trimmed)
-    handleSend(text)
+    const images = Array.isArray(lastUser.content) ? lastUser.content.filter(part => part?.type === 'image_url').map((part, index) => ({ id: `retry-${index}`, kind: 'image', name: '图片', dataUrl: part.image_url.url })) : []
+    handleSend(text, images)
   }, [currentConversationId, handleSend, loading, persistConversation])
 
   useEffect(() => {
@@ -721,9 +780,7 @@ const AICommandCenter = ({
     // 输入框为空时按 ↑ 取回上一条自己发的内容，方便改一改再问
     if (event.key === 'ArrowUp' && !input) {
       const lastUser = [...messages].reverse().find((message) => message.role === 'user')
-      const text = Array.isArray(lastUser?.content)
-        ? lastUser.content.filter((part) => part?.type === 'text').map((part) => part.text || '').join('\n')
-        : lastUser?.content
+      const text = messageText(lastUser?.content)
       if (text) {
         event.preventDefault()
         setInput(String(text))
@@ -738,6 +795,7 @@ const AICommandCenter = ({
 
   // 历史对话：只列当前范围（当前笔记的对话，或没选笔记时的通用对话）
   const [historyAnchor, setHistoryAnchor] = useState(null)
+  const closeHistory = () => { releasePopoverFocus(); setHistoryAnchor(null) }
   const scopedConversations = useMemo(() => aiConversations
     .filter((conversation) => (selectedNoteId == null
       ? conversation.noteId == null
@@ -758,6 +816,10 @@ const AICommandCenter = ({
 
   return (
     <FloatingGlassSurface
+      onDrop={handleAttachmentDrop}
+      onDragOver={event => {
+        if (Array.from(event.dataTransfer?.types || []).includes('Files')) { event.preventDefault(); event.stopPropagation(); event.dataTransfer.dropEffect = 'copy' }
+      }}
       ref={panelRef}
       open={open}
       layer="aiPanel"
@@ -820,10 +882,10 @@ const AICommandCenter = ({
           />
         )}
         <Box sx={{ flex: 1 }} />
-        <PanelIconButton title="历史对话" onClick={(event) => setHistoryAnchor(event.currentTarget)} disabled={loading} sx={{ mr: 0.25 }}>
+        <PanelIconButton title="历史对话" onClick={(event) => setHistoryAnchor(event.currentTarget)} sx={{ mr: 0.25 }}>
           <HistoryIcon />
         </PanelIconButton>
-        <PanelIconButton title="新建对话" onClick={handleNewChat} disabled={loading || messages.length === 0} sx={{ mr: 0.25 }}>
+        <PanelIconButton title="新建对话" onClick={handleNewChat} disabled={messages.length === 0} sx={{ mr: 0.25 }}>
           <AddIcon />
         </PanelIconButton>
         <PanelIconButton title="关闭" onClick={onClose}>
@@ -954,7 +1016,7 @@ const AICommandCenter = ({
               lineHeight: 1.65
             })}>
               {streamContent
-                ? <ReactMarkdown remarkPlugins={[remarkGfm]} components={mdComponents}>{streamContent}</ReactMarkdown>
+                ? <ReactMarkdown remarkPlugins={[remarkGfm]} components={mdComponents}>{stripInternalActionAnnotations(streamContent)}</ReactMarkdown>
                 : (
                   <Box sx={{ display: 'flex', alignItems: 'center' }}>
                     <TypewriterText text={thinkingPhrase} />
@@ -1014,6 +1076,14 @@ const AICommandCenter = ({
         </Box>
       )}
 
+      <Box sx={{ px: 1.5, display: 'flex', gap: 0.5, flexWrap: 'wrap' }}>
+        {attachments.map(item => <Chip key={item.id} size="small" label={item.name}
+          avatar={item.kind === 'image' ? <Avatar src={item.dataUrl} /> : undefined}
+          onDelete={() => setAttachments(items => items.filter(value => value.id !== item.id))}
+          sx={{ maxWidth: '100%' }} />)}
+        {attachmentLoading && <Typography variant="caption">正在读取附件…</Typography>}
+        {attachmentError && <Typography role="alert" variant="caption" color="error" sx={{ width: '100%' }}>{attachmentError}</Typography>}
+      </Box>
       {/* 输入区：一个圆角输入框，发送按钮放在框内右下角 */}
       <Box sx={{ px: 1.25, pt: 0.75, pb: 1.25 }}>
       <Box sx={(theme) => {
@@ -1038,7 +1108,13 @@ const AICommandCenter = ({
           },
         }
       }}>
+        <input ref={attachmentInputRef} type="file" hidden multiple accept={AI_ATTACHMENT_ACCEPT}
+          onChange={event => { ingestAttachments(event.target.files); event.target.value = '' }} />
+        <IconButton size="small" aria-label="添加图片或文本文件" onClick={() => attachmentInputRef.current?.click()} disabled={attachmentLoading}>
+          <AddIcon sx={{ fontSize: 18 }} />
+        </IconButton>
         <TextField
+          onPaste={handleAttachmentPaste}
           inputRef={inputRef}
           fullWidth
           multiline
@@ -1062,7 +1138,7 @@ const AICommandCenter = ({
           centerRipple={false}
           size="small"
           onClick={loading ? handleCancel : () => handleSend()}
-          disabled={loading ? false : !input.trim()}
+          disabled={loading ? false : (attachmentLoading || (!input.trim() && !attachments.length))}
           aria-label={loading ? '停止生成' : '发送'}
           sx={(theme) => ({
             flexShrink: 0,
@@ -1095,7 +1171,7 @@ const AICommandCenter = ({
       <Popover
         open={Boolean(historyAnchor)}
         anchorEl={historyAnchor}
-        onClose={() => setHistoryAnchor(null)}
+        onClose={closeHistory}
         container={portalContainer || undefined}
         // AI 小窗本身在 1340 层，弹出的历史列表要在它上面
         sx={{ zIndex: 1400 }}
@@ -1114,7 +1190,7 @@ const AICommandCenter = ({
             const active = conversation.id === currentConversationId
             return (
               <ButtonBase key={conversation.id}
-                onClick={() => { setHistoryAnchor(null); if (!active) aiSwitchConv(conversation.id) }}
+                onClick={() => { closeHistory(); if (!active) aiSwitchConv(conversation.id) }}
                 sx={(theme) => ({
                   width: '100%', justifyContent: 'flex-start', gap: 1, px: 1, py: 0.75, borderRadius: '8px', textAlign: 'left',
                   bgcolor: active ? alpha(theme.palette.primary.main, 0.1) : 'transparent',
@@ -1130,7 +1206,7 @@ const AICommandCenter = ({
             )
           })}
         </Box>
-        <ButtonBase onClick={() => { setHistoryAnchor(null); onClose?.(); setCurrentView('ai') }}
+        <ButtonBase onClick={() => { closeHistory(); onClose?.(); setCurrentView('ai') }}
           sx={(theme) => ({ mt: 0.5, pt: 0.75, pb: 0.25, gap: 0.5, fontSize: 12.5, color: 'primary.main', borderTop: `1px solid ${theme.palette.divider}`, borderRadius: 0 })}>
           <OpenFullIcon sx={{ fontSize: 14 }} />在 AI 页面查看全部对话
         </ButtonBase>
@@ -1181,10 +1257,6 @@ const formatConversationTime = (value) => {
   if (date.toDateString() === yesterday.toDateString()) return '昨天'
   return `${date.getMonth() + 1}/${date.getDate()}`
 }
-
-const messageText = (content) => (Array.isArray(content)
-  ? content.filter((part) => part?.type === 'text').map((part) => part.text || '').join('\n')
-  : String(content || ''))
 
 // 回复被截断 / 手动停止时，给一个「继续」的快捷入口
 const looksUnfinished = (msg) => msg.stopped || /回复达到.*(上限|限制)/.test(messageText(msg.content))
@@ -1273,7 +1345,7 @@ const ChatBubble = ({ msg, userAvatar, executingActionIds, onExecuteAction, onDi
             </>
           ) : (
             <Box sx={{ '& > *:first-of-type': { mt: 0 }, '& > *:last-child': { mb: 0 } }}>
-              <ReactMarkdown remarkPlugins={[remarkGfm]} components={mdComponents}>{text}</ReactMarkdown>
+              <ReactMarkdown remarkPlugins={[remarkGfm]} components={mdComponents}>{stripInternalActionAnnotations(text)}</ReactMarkdown>
               {/* 待确认动作卡（统一读取 msg.actions 与历史 toolCalls[].action） */}
               {getMessagePendingActions(msg).map((action) => (
                 <PendingActionCard

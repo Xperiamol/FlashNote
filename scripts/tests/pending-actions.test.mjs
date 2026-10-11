@@ -6,7 +6,7 @@ import test from 'node:test'
 const source = await readFile(new URL('../../src/utils/aiCore/pendingActions.js', import.meta.url), 'utf8')
 const {
   dismissConversationAction, executeConversationAction, getLatestConfirmableAction,
-  isExplicitPendingActionConfirmation, supersedeStalePendingActions, toApiMessages,
+  isExplicitPendingActionConfirmation, supersedeStalePendingActions, toApiMessages, stripInternalActionAnnotations,
 } =
   await import(`data:text/javascript;base64,${Buffer.from(source).toString('base64')}`)
 
@@ -62,7 +62,8 @@ test('执行失败标记失败；删除会话后不恢复会话', async () => {
     execute: async () => { throw new Error('生成失败') },
   })
   assert.equal(messages[0].actions[0].status, 'failed')
-  assert.match(messages[1].content, /生成失败/)
+  assert.equal(messages.length, 1)
+  assert.match(messages[0].actions[0].error, /生成失败/)
   messages = initial()
   const pending = deferred()
   const task = executeConversationAction({
@@ -142,4 +143,31 @@ test('发给模型的历史标出每条回复实际生成的确认卡，空口�
   assert.match(api[1].content, /实际生成的确认卡：修改组件：美化（done）/)
   assert.match(api[2].content, /并未生成确认卡/)
   assert.deepEqual(api[3], { role: 'assistant', content: '普通回答' })
+})
+
+test('历史携带成功结果 ID 和真实失败原因，失败卡片不暴露旧结果 ID', () => {
+  const [done, failed] = toApiMessages([
+    { role: 'assistant', content: '请确认', actions: [{ ...action, status: 'done', resultNoteId: 42 }] },
+    { role: 'assistant', content: '请确认', actions: [{ ...action, status: 'failed', resultNoteId: 42, error: '模型仅返回推理过程' }] },
+  ])
+  assert.match(done.content, /结果笔记 ID：42/)
+  assert.match(failed.content, /失败原因：模型仅返回推理过程/)
+  assert.doesNotMatch(failed.content, /结果笔记 ID/)
+})
+
+
+test('内部执行注释从旧回复和模型回显中剥离，但不删除正常方括号内容', () => {
+  const raw = '请确认。\n[本条回复实际生成的确认卡：创建画布（failed）]\n其他说明 [NTU]'
+  assert.equal(stripInternalActionAnnotations(raw), '请确认。\n\n其他说明 [NTU]')
+  const result = toApiMessages([{ role: 'assistant', content: raw, actions: [{ ...action, status: 'failed', error: '空正文' }] }])
+  assert.equal(result[0].content.match(/本条回复实际生成的确认卡/g).length, 1)
+})
+test('取消保留在原卡片且可重试，失败提示不追加到另一个位置', async () => {
+  let messages = initial()
+  const request = { actionId: action.actionId, read: () => messages, write: value => { messages = value } }
+  await executeConversationAction({ ...request, execute: async () => ({ success: false, cancelled: true, message: '已停止生成' }) })
+  assert.equal(messages.length, 1)
+  assert.equal(messages[0].actions[0].status, 'cancelled')
+  await executeConversationAction({ ...request, execute: async () => ({ success: true, message: '已创建', resultNoteId: 42 }) })
+  assert.equal(messages[0].actions[0].status, 'done')
 })

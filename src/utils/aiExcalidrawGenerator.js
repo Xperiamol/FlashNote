@@ -62,8 +62,8 @@ const buildComposerRepairMessages = (userRequest, brokenOutput) => [
   },
 ]
 
-const repairComposerJSON = async (userRequest, brokenOutput) => {
-  const res = await window.electronAPI.ai.chat(
+const repairComposerJSON = async (userRequest, brokenOutput, task) => {
+  const res = await (task ? task.chat : window.electronAPI.ai.chat)(
     buildComposerRepairMessages(userRequest, brokenOutput),
     { temperature: 0, timeoutMs: 600000, bypassTokenLimit: true },
   )
@@ -73,11 +73,11 @@ const repairComposerJSON = async (userRequest, brokenOutput) => {
   return res.data.content
 }
 
-const parseComposerCanvasResponse = async (userRequest, rawContent) => {
+const parseComposerCanvasResponse = async (userRequest, rawContent, task) => {
   const parsed = safeJsonExtract(rawContent)
   if (parsed) return parsed
   logger.warn('[composer] 首次 JSON 解析失败，尝试二次 AI 修复')
-  const repairedContent = await repairComposerJSON(userRequest, rawContent)
+  const repairedContent = await repairComposerJSON(userRequest, rawContent, task)
   const repaired = safeJsonExtract(repairedContent)
   if (!repaired) {
     throw new Error('Composer JSON 二次修复后仍不合法')
@@ -94,6 +94,7 @@ const isNetworkError = (error) => /fetch failed|network|网络|ECONN|ENOTFOUND|E
 const isGatewayError = (error) => /请求失败 \((?:429|502|503|504)\)|\b(?:502|503|504)\b|bad gateway|gateway timeout|service unavailable|too many requests|rate limit/i.test(String(error?.message || error || ''))
 
 const normalizeWhiteboardError = (error) => {
+  if (error?.name === 'AbortError') return error
   if (isContentBlockedError(error)) return new Error('模型内容审核拦截，无法生成该画布')
   if (isGatewayError(error)) return new Error('AI 服务暂时不可用（网关繁忙），请稍后重试')
   if (isNetworkError(error)) return new Error('网络请求失败，请检查网络或 AI 配置后重试')
@@ -101,6 +102,7 @@ const normalizeWhiteboardError = (error) => {
 }
 
 const shouldUseModelReflection = (error) => (
+  error?.name !== 'AbortError' &&
   !isContentBlockedError(error) &&
   !isGatewayError(error) &&
   !isNetworkError(error)
@@ -138,6 +140,18 @@ const inferDiagramIntentHeuristically = (text) => {
   if (/组织架构|层级图|树状图|分类树|栏目结构|目录结构|架构层级|父子关系|分层结构/.test(s)) {
     return { mode: 'single', blockType: 'hierarchy', reason: '层级结构关键词' }
   }
+  if (/时序图|交互时序|请求链路|调用链/.test(s)) {
+    return { mode: 'single', blockType: 'sequence', reason: '时序关键词' }
+  }
+  if (/类图|对象关系|类关系|继承关系/.test(s)) {
+    return { mode: 'single', blockType: 'class', reason: '类图关键词' }
+  }
+  if (/ER图|实体关系|数据库表|表结构/.test(s)) {
+    return { mode: 'single', blockType: 'er', reason: 'ER 关键词' }
+  }
+  if (/状态图|状态机|状态流转/.test(s)) {
+    return { mode: 'single', blockType: 'state', reason: '状态图关键词' }
+  }
   if (/流程图|流程|步骤|审批|决策树|流转|SOP/.test(s)) {
     return { mode: 'single', blockType: 'flowchart', reason: '流程关键词' }
   }
@@ -158,18 +172,6 @@ const inferDiagramIntentHeuristically = (text) => {
   }
   if (/饼图|占比|份额|比例构成/.test(s)) {
     return { mode: 'single', blockType: 'pie', reason: '饼图关键词' }
-  }
-  if (/时序图|交互时序|请求链路|调用链/.test(s)) {
-    return { mode: 'single', blockType: 'sequence', reason: '时序关键词' }
-  }
-  if (/类图|对象关系|类关系|继承关系/.test(s)) {
-    return { mode: 'single', blockType: 'class', reason: '类图关键词' }
-  }
-  if (/ER图|实体关系|数据库表|表结构/.test(s)) {
-    return { mode: 'single', blockType: 'er', reason: 'ER 关键词' }
-  }
-  if (/状态图|状态机|状态流转/.test(s)) {
-    return { mode: 'single', blockType: 'state', reason: '状态图关键词' }
   }
   if (/架构图|技术架构|系统架构|分层架构|能力地图/.test(s)) {
     return { mode: 'single', blockType: 'architecture', reason: '架构关键词' }
@@ -205,19 +207,21 @@ const classifyCanvasRoute = (diagramIntent) => {
 const buildComposerMessages = (userRequest) => [
   {
     role: 'system',
-    content: `你是 Flota 白板设计器。只返回严格 JSON，不要 Markdown、注释、Mermaid、坐标或解释。
+    content: `你是 Flota 白板设计器。只返回严格 JSON，不要 Markdown、注释、Mermaid 或解释。
 
 格式：
 {"title":"可选","layout":{"type":"stack.v","gap":32},"children":[],"connectors":[{"from":"id","to":"id","label":"可选"}]}
 
 容器：
-- stack.v / stack.h / grid：props 可含 gap、padding、align、cols
+- stack.v / stack.h / grid：props 可含 gap、padding、align、cols、w、bg；stack.h 还可用 justify(start|center|end|between)
+- canvas：自由构图，props {w,h?,bg?,allowOverlap?}，children 的 props 可含局部 x,y,w。适合海报、杂志式信息图，内容仍自动测量，不得重叠或越界。结构图优先 graph 或 stack/grid。
 - graph：props 含 direction("TB"|"LR")、edges；children 中节点必须有 props.id
 - group：props 含 title、tone、padding、gap、dashed
 - screen：props 含 device、title；适合界面原型
 
 内容：
-- text {content,level}；card {title,body,tone}；list {items}
+- text {content,level,fontSize?,color?,align?,w?}；card {title,body,tone?,fill?,stroke?,titleColor?,bodyColor?,titleSize?,bodySize?,padding?,w?}；list {items}
+- rect {w,h,fill,stroke,strokeWidth?,rounded?}；ellipse {w,h,fill,stroke} 用作克制的视觉装饰
 - callout {text,tone}；badge {text,tone}；icon {symbol,size}
 - table {headers,rows}；input {label,placeholder}；button {label,variant}
 - avatar {label,size}；divider；image {label,ratio}
@@ -226,9 +230,10 @@ const buildComposerMessages = (userRequest) => [
 原则：
 1. 结构、步骤和关系用可编辑原生节点；局部插画、场景图、装饰性视觉可穿插 svg，不必二选一。
 2. 流程、依赖和层级关系放进 graph，不手算位置；其余用容器自动排版。
-3. 大胆但有秩序：用分区、色彩、图标和 10-30 个信息节点形成层次，避免整图只有卡片或只有文字。
-4. SVG 最多 2 个；prompt 只描述该局部画面及风格，不写 SVG 源码。纯结构图或用户要求可拆分时可不用 SVG。
-5. 文字简短、具体、深色可读，来自用户素材；没有的数据不要编造。
+3. 先在内部确定信息层级与构图，再输出：一个清晰主视觉，标题/关键数字/正文有明显尺度差异；统一对齐轴与留白节奏。按内容选择节点数量，不凑卡片。默认现代编辑设计：中性底色、一个强调色、细边框、充足留白；用户指定风格优先，不强制蓝紫配色或圆角卡片。
+4. SVG 最多 4 个；prompt 只描述该局部画面及风格，不写 SVG 源码。纯结构图或用户要求可拆分时可不用 SVG。
+5. 文字简短、具体，来自用户素材；没有的数据不要编造。浅底用深字、深底用浅字，正文对比度至少 4.5:1。
+6. 原生 fill/stroke/bg/color 使用 #RGB、#RRGGBB、rgb() 或 transparent；不能填 CSS 渐变、变量或颜色对象。渐变使用 svg 原语。
 
 混合示例：
 {"title":"急救处置","layout":{"type":"grid","cols":2,"gap":32},"children":[{"type":"svg","props":{"prompt":"中性医学科教风格的人体急救姿势抽象插画，蓝绿色，无血腥","w":420,"h":360}},{"type":"group","props":{"title":"处置流程","tone":"primary","padding":20,"gap":16},"children":[{"type":"graph","props":{"direction":"TB","edges":[{"from":"a","to":"b"},{"from":"b","to":"c"}]},"children":[{"type":"card","props":{"id":"a","title":"评估环境"}},{"type":"card","props":{"id":"b","title":"呼叫支援","tone":"warning"}},{"type":"card","props":{"id":"c","title":"持续观察","tone":"success"}}]}]}]}`,
@@ -244,20 +249,20 @@ const validateComposerCanvasTree = (parsed) => {
   return parsed
 }
 
-const planComposerCanvas = async (userRequest) => {
+const planComposerCanvas = async (userRequest, task) => {
   const messages = buildComposerMessages(userRequest)
-  const res = await window.electronAPI.ai.chat(
+  const res = await (task ? task.chat : window.electronAPI.ai.chat)(
     messages,
     { temperature: 0.4, timeoutMs: 600000, bypassTokenLimit: true },
   )
   if (!res?.success || !res.data?.content) {
     throw new Error(res?.error || 'Composer 画布规划失败')
   }
-  const parsed = await parseComposerCanvasResponse(userRequest, res.data.content)
+  const parsed = await parseComposerCanvasResponse(userRequest, res.data.content, task)
   return validateComposerCanvasTree(parsed)
 }
 
-const replanComposerCanvasWithFeedback = async (userRequest, previousTree, generationError) => {
+const replanComposerCanvasWithFeedback = async (userRequest, previousTree, generationError, task) => {
   const messages = [
     ...buildComposerMessages(userRequest),
     {
@@ -271,14 +276,14 @@ const replanComposerCanvasWithFeedback = async (userRequest, previousTree, gener
       content: `上一版画布生成/渲染失败，错误如下：\n\n${String(generationError?.message || generationError || '')}\n\n请反思失败原因，重新输出一份**完整且可渲染**的 composer JSON。要求：\n1. 只输出 JSON，不要 Markdown 代码块、解释或注释\n2. 保留原始用户意图，但修复导致失败的结构/字段/连线/id/节点类型问题\n3. children 必须非空；如果有 connectors/graph.edges，from/to 必须引用真实存在的 props.id\n4. 不要输出 Mermaid、SVG、伪代码或自然语言说明`,
     },
   ]
-  const res = await window.electronAPI.ai.chat(
+  const res = await (task ? task.chat : window.electronAPI.ai.chat)(
     messages,
     { temperature: 0.2, timeoutMs: 600000, bypassTokenLimit: true },
   )
   if (!res?.success || !res.data?.content) {
     throw new Error(res?.error || 'Composer 画布反思重写失败')
   }
-  const parsed = await parseComposerCanvasResponse(userRequest, res.data.content)
+  const parsed = await parseComposerCanvasResponse(userRequest, res.data.content, task)
   return validateComposerCanvasTree(parsed)
 }
 
@@ -322,8 +327,8 @@ const buildSvgMessages = (description) => [
   { role: 'user', content: description },
 ]
 
-const generateSvgArtwork = async (description, offsets, size = {}) => {
-  const res = await window.electronAPI.ai.chat(
+const generateSvgArtwork = async (description, offsets, size = {}, task) => {
+  const res = await (task ? task.chat : window.electronAPI.ai.chat)(
     buildSvgMessages(description),
     { temperature: 0.6, timeoutMs: 600000, bypassTokenLimit: true },
   )
@@ -351,7 +356,7 @@ const generateSvgArtwork = async (description, offsets, size = {}) => {
         content: `上面的 SVG 无法解析或未通过安全校验：${String(firstError?.message || firstError)}\n请修复后重新输出完整 SVG。只输出 <svg>…</svg>，确保 XML 标签闭合、& 写成 &amp;，不使用 script、foreignObject、动画、外链或 <style> 标签。`,
       },
     ]
-    const repaired = await window.electronAPI.ai.chat(
+    const repaired = await (task ? task.chat : window.electronAPI.ai.chat)(
       repairMessages,
       { temperature: 0.2, timeoutMs: 600000, bypassTokenLimit: true },
     )
@@ -366,7 +371,7 @@ const generateSvgArtwork = async (description, offsets, size = {}) => {
   }
 }
 
-const MAX_COMPOSER_SVGS = 2
+const MAX_COMPOSER_SVGS = 4
 
 const collectComposerSvgNodes = (node, list = []) => {
   if (!node || typeof node !== 'object') return list
@@ -381,24 +386,27 @@ const fallbackSvgNodeToCard = (node) => {
   const props = node.props || {}
   node.type = 'card'
   node.props = {
+    id: props.id,
     title: props.title || '视觉补充',
     body: String(props.prompt || '').slice(0, 100),
     tone: 'info',
   }
 }
 
-const hydrateComposerSvgNodes = async (tree, userRequest) => {
+const hydrateComposerSvgNodes = async (tree, userRequest, task) => {
   const nodes = collectComposerSvgNodes(tree)
   const warnings = []
   for (let index = 0; index < nodes.length; index += 1) {
     const node = nodes[index]
     if (index >= MAX_COMPOSER_SVGS) {
+      warnings.push('局部 SVG 超过 4 个，超出部分已替换为文字卡片')
       fallbackSvgNodeToCard(node)
       continue
     }
     const props = node.props || {}
     const prompt = String(props.prompt || props.title || '').trim()
     if (!prompt) {
+      warnings.push('局部 SVG 缺少描述，已替换为文字卡片')
       fallbackSvgNodeToCard(node)
       continue
     }
@@ -409,10 +417,12 @@ const hydrateComposerSvgNodes = async (tree, userRequest) => {
         `${prompt}\n整体画布主题：${String(userRequest || '').slice(0, 600)}`,
         { offsetX: 0, offsetY: 0 },
         { maxWidth, maxHeight },
+        task,
       )
       Object.defineProperty(node, '_asset', { value: asset.elements[0], configurable: true })
       Object.defineProperty(node, '_files', { value: asset.files, configurable: true })
     } catch (error) {
+      if (error?.name === 'AbortError') throw error
       warnings.push(`局部 SVG 未生成：${error.message}`)
       fallbackSvgNodeToCard(node)
     }
@@ -420,18 +430,18 @@ const hydrateComposerSvgNodes = async (tree, userRequest) => {
   return warnings
 }
 
-const generateDsl = async (blockType, summary) => {
-  const res = await window.electronAPI.ai.chat(
+const generateDsl = async (blockType, summary, task) => {
+  const res = await (task ? task.chat : window.electronAPI.ai.chat)(
     buildDslMessages(blockType, summary),
     { temperature: 0.4, timeoutMs: 600000 },
   )
   if (!res?.success || !res.data?.content) {
-    throw new Error(`${blockType} DSL 生成失败`)
+    throw new Error(res?.error || `${blockType} DSL 生成失败：模型未返回正文`)
   }
   return stripCodeFence(res.data.content)
 }
 
-const regenerateDslWithFeedback = async (blockType, summary, previousDsl, generationError) => {
+const regenerateDslWithFeedback = async (blockType, summary, previousDsl, generationError, task) => {
   const messages = [
     ...buildDslMessages(blockType, summary),
     { role: 'assistant', content: previousDsl },
@@ -440,7 +450,7 @@ const regenerateDslWithFeedback = async (blockType, summary, previousDsl, genera
       content: `上一版 DSL 生成/渲染失败，错误如下：\n\n${String(generationError?.message || generationError || '')}\n\n请根据错误信息反思并修正语法，重新输出**完整** DSL。要求：\n1. 只输出 DSL，不要解释、不要 Markdown 代码块\n2. 保留原始用户意图和图表类型\n3. 优先修复报错行附近的语法、保留字、字段格式、节点 id、关系写法问题\n4. 不要输出与该图型无关的语法`,
     },
   ]
-  const res = await window.electronAPI.ai.chat(
+  const res = await (task ? task.chat : window.electronAPI.ai.chat)(
     messages,
     { temperature: 0.2, timeoutMs: 600000 },
   )
@@ -457,14 +467,14 @@ const renderMermaidBlock = async (dsl, offsets) => {
   return { elements: result.elements, files: result.files || {} }
 }
 
-const renderSimpleBlockWithReflection = async (blockType, description, offsets) => {
-  const dsl = await generateDsl(blockType, description)
+const renderSimpleBlockWithReflection = async (blockType, description, offsets, task) => {
+  const dsl = await generateDsl(blockType, description, task)
   try {
     return await renderMermaidBlock(dsl, offsets)
   } catch (firstError) {
     if (!shouldUseModelReflection(firstError)) throw firstError
     logger.warn(`[aiExcalidrawGenerator] ${blockType} 首次渲染失败，触发模型反思重写:`, firstError.message)
-    const fixedDsl = await regenerateDslWithFeedback(blockType, description, dsl, firstError)
+    const fixedDsl = await regenerateDslWithFeedback(blockType, description, dsl, firstError, task)
     try {
       const result = await renderMermaidBlock(fixedDsl, offsets)
       logger.log(`[aiExcalidrawGenerator] ${blockType} 反思重写后渲染成功`)
@@ -483,19 +493,19 @@ const renderComposerTree = (tree, offsets) => {
   throw new Error('composer 渲染结果为空')
 }
 
-const renderComposerWithReflection = async (description, offsets) => {
+const renderComposerWithReflection = async (description, offsets, task) => {
   let tree = null
   try {
-    tree = await planComposerCanvas(description)
-    const warnings = await hydrateComposerSvgNodes(tree, description)
+    tree = await planComposerCanvas(description, task)
+    const warnings = await hydrateComposerSvgNodes(tree, description, task)
     logger.log('[aiExcalidrawGenerator] 命中 composer 路径')
     return { ...renderComposerTree(tree, offsets), warnings }
   } catch (firstError) {
     if (!shouldUseModelReflection(firstError)) throw firstError
     logger.warn('[aiExcalidrawGenerator] composer 首次生成/渲染失败，触发模型反思重写:', firstError.message)
     try {
-      const fixedTree = await replanComposerCanvasWithFeedback(description, tree, firstError)
-      const warnings = await hydrateComposerSvgNodes(fixedTree, description)
+      const fixedTree = await replanComposerCanvasWithFeedback(description, tree, firstError, task)
+      const warnings = await hydrateComposerSvgNodes(fixedTree, description, task)
       const result = { ...renderComposerTree(fixedTree, offsets), warnings }
       logger.log('[aiExcalidrawGenerator] composer 反思重写后渲染成功')
       return result
@@ -507,7 +517,7 @@ const renderComposerWithReflection = async (description, offsets) => {
 
 // ─── 对外主入口 ────────────────────────────────────
 
-export async function aiGenerateExcalidrawElements(description, existingElements = []) {
+async function generateCanvasOnce(description, existingElements = [], task) {
   const offsets = computeOffset(existingElements)
   logger.log('[aiExcalidrawGenerator] 输入:', description, 'offset:', offsets)
 
@@ -520,7 +530,7 @@ export async function aiGenerateExcalidrawElements(description, existingElements
   if (route === 'svg') {
     try {
       logger.log('[aiExcalidrawGenerator] 命中 SVG 矢量视觉路径')
-      return await generateSvgArtwork(description, offsets)
+      return await generateSvgArtwork(description, offsets, {}, task)
     } catch (err) {
       logger.warn('[aiExcalidrawGenerator] SVG 生成失败:', err.message)
       throw normalizeWhiteboardError(err)
@@ -531,7 +541,7 @@ export async function aiGenerateExcalidrawElements(description, existingElements
   // 失败就明确报错，绝不退回 composer「勉强渲染」（那会画出缠绕错乱的图）。
   if (route === 'flowchart') {
     try {
-      return await renderSimpleBlockWithReflection(blockType, description, offsets)
+      return await renderSimpleBlockWithReflection(blockType, description, offsets, task)
     } catch (err) {
       logger.warn(`[aiExcalidrawGenerator] ${blockType} 生成失败:`, err.message)
       throw normalizeWhiteboardError(err)
@@ -540,10 +550,25 @@ export async function aiGenerateExcalidrawElements(description, existingElements
 
   // ── 路由 2（默认）：composer 通用合成引擎（原语 + 布局容器）──
   try {
-    return await renderComposerWithReflection(description, offsets)
+    return await renderComposerWithReflection(description, offsets, task)
   } catch (err) {
     logger.warn('[aiExcalidrawGenerator] composer 路径失败:', err.message)
     throw normalizeWhiteboardError(err)
+  }
+}
+
+export async function aiGenerateExcalidrawElements(description, existingElements = [], task) {
+  const result = await generateCanvasOnce(description, existingElements, task)
+  if (!window.electronAPI?.ai?.getConfig) return result
+  try {
+    const { reviewCanvas } = await import('./diagrams/visualReview')
+    const issues = await reviewCanvas(result, description, task)
+    if (!issues?.length) return result
+    const prior = result.elements?.length === 1 ? result.elements[0]?.customData?.svgSource : null
+    return await generateCanvasOnce(`${description}\n\n上一稿渲染后的视觉复核要求（保持原需求与事实，仅修正这些问题）：\n${issues.join('\n')}${prior ? `\n上一稿 SVG：\n${prior}` : ''}`, existingElements, task)
+  } catch (error) {
+    if (task?.signal.aborted || error?.name === 'AbortError') throw error
+    return { ...result, warnings: [...(result.warnings || []), `视觉复核未完成，保留已生成的版本：${error.message}`] }
   }
 }
 
@@ -561,7 +586,7 @@ export async function aiConvertMarkdownToWhiteboard(markdownContent) {
     elements,
     appState: {
       viewBackgroundColor: DIAGRAM_THEME.canvas,
-      currentItemFontFamily: 1,
+      currentItemFontFamily: 2,
       gridSize: null,
     },
     fileMap,

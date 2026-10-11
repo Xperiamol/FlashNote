@@ -1,3 +1,4 @@
+const { referencesFromMessages } = require('../aiReferences');
 /**
  * AI Chat Service - 为 AI 助手提供带工具调用的流式聊天
  *
@@ -109,7 +110,7 @@ class AIChatService {
     const limitMaxTokensEnabled = isEnabledSetting(config.limitMaxTokens);
     const maxTk = Number(opts.maxTokens) > 0
       ? Math.floor(opts.maxTokens)
-      : (limitMaxTokensEnabled ? config.maxTokens : DEFAULT_CHAT_MAX_TOKENS);
+      : (opts.bypassTokenLimit ? undefined : (limitMaxTokensEnabled ? config.maxTokens : DEFAULT_CHAT_MAX_TOKENS));
     const onToken = typeof opts.onToken === 'function' ? opts.onToken : null;
 
     const innerOnChunk = (chunk) => {
@@ -129,8 +130,15 @@ class AIChatService {
     };
   }
 
-  /** 把工具 dispatcher 需要的 services 容器组装出来 */
-  _toolServices() {
+  /**
+   * 把工具 dispatcher 需要的 services 容器组装出来。
+   * 对话请求带有上下文时，“当前笔记”就是上下文里注入的那篇（没有则视为未打开笔记），
+   * 不再向主窗口询问——发起请求的可能是待办页、AI 页或独立笔记窗口。
+   */
+  _toolServices(contextPackage) {
+    const getCurrentNote = contextPackage
+      ? async () => (contextPackage.currentNote?.id != null ? this.noteDAO.findById(contextPackage.currentNote.id) : null)
+      : this._currentNoteGetter
     return {
       aiService: this.aiService,
       noteDAO: this.noteDAO,
@@ -139,7 +147,7 @@ class AIChatService {
       webSearchService: this.webSearchService,
       longDocPipeline: this._getLongDocPipeline(),
       logger: this.logger,
-      getCurrentNote: this._currentNoteGetter,
+      getCurrentNote,
       widgetService: this._widgetService || null
     };
   }
@@ -154,12 +162,15 @@ class AIChatService {
       });
     }
     if (options.requireConfirmation !== false && WRITE_TOOL_NAMES.has(name)) {
-      return JSON.stringify(await this._pendingActions.create(name, args, options.actionContext || null));
+      const { referenceImages, ...targetContext } = options.actionContext || {};
+      const usesReferences = ['create_whiteboard', 'update_whiteboard', 'create_widget', 'update_widget'].includes(name);
+      const context = options.actionContext ? (usesReferences ? options.actionContext : targetContext) : null;
+      return JSON.stringify(await this._pendingActions.create(name, args, context));
     }
     const result = await dispatchTool(name, args, {
       onChunk: typeof options.onChunk === 'function' ? options.onChunk : null,
       abortSignal: options.abortSignal
-    }, this._toolServices());
+    }, this._toolServices(options.contextPackage));
     this._notifyNotesChanged(name, args, result);
     return result;
   }
@@ -249,6 +260,8 @@ class AIChatService {
 
   /** 流式聊天，支持工具调用 */
   async chatStream(messages, onChunk, options = {}) {
+    const referenceImages = referencesFromMessages(messages);
+    options = { ...options, actionContext: { ...options.actionContext, referenceImages } };
     let accumulatedContent = '';
     let pendingActionCreated = false;
     let memoryToolUsed = false;
@@ -314,7 +327,7 @@ class AIChatService {
         abortSignal: options.abortSignal,
         options,
         streamRequest: stream,
-        executeTool: (name, args, opts) => this._executeTool(name, args, opts),
+        executeTool: (name, args, opts) => this._executeTool(name, args, { ...opts, contextPackage: options.contextPackage }),
         logger: this.logger
       });
       const toFinalResult = (streamResult) => ({

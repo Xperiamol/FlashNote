@@ -110,6 +110,10 @@ export default function WidgetHost({
   }, [])
 
   const handleUiCall = useCallback(async (method, params) => {
+    if (surface === 'probe') {
+      if (method === 'ui.toast' && params?.type === 'error') onEventRef.current?.({ type: 'error', message: String(params.message || '组件操作失败') })
+      return method === 'ui.confirm' ? false : true
+    }
     switch (method) {
       case 'ui.openNote':
         return openNoteByRef(params?.id)
@@ -126,7 +130,7 @@ export default function WidgetHost({
       default:
         return undefined
     }
-  }, [info])
+  }, [info, surface])
 
   const handleRpc = useCallback(async ({ id, method, params }) => {
     try {
@@ -173,7 +177,7 @@ export default function WidgetHost({
           onEventRef.current?.({ type: 'console', level: message.level, text: message.text })
           break
         case 'health':
-          onEventRef.current?.({ type: 'health', text: message.text, elements: message.elements, height: message.height })
+          onEventRef.current?.({ type: 'health', text: message.text, elements: message.elements, height: message.height, overflowX: message.overflowX, issues: message.issues })
           break
         default:
           break

@@ -52,12 +52,15 @@ const registerWidgetHandlers = (getWidgetService, getWidgetGenerator, getPluginM
   handle('widget:generate', async (service, event, requestId, payload = {}) => {
     const generator = getWidgetGenerator?.();
     if (!generator) throw Object.assign(new Error('AI 服务尚未就绪'), { code: 'NOT_READY' });
-    const draft = payload.draftId ? service.getDraft(payload.draftId) : null;
+    let draft = payload.draftId ? service.getDraft(payload.draftId) : null;
     const widgetId = payload.widgetId || draft?.widgetId || null;
+    if (draft?.widgetId && service.dao.latestVersion(draft.widgetId) !== draft.baseVersion) draft = null;
     // 继续修草稿时以草稿代码为基础；修改已有组件时以组件当前代码为基础
     const baseCode = draft?.code || (widgetId ? service.getWidget(widgetId, { withCode: true }).code : '');
+    const baseVersion = draft?.baseVersion ?? (widgetId ? service.dao.latestVersion(widgetId) : null);
     const { code, sizes, explanation } = await generator.generate({
       instruction: payload.instruction || '',
+      referenceImages: payload.referenceImages,
       baseCode,
       widgetId,
       instanceId: payload.instanceId || null,
@@ -70,7 +73,7 @@ const registerWidgetHandlers = (getWidgetService, getWidgetGenerator, getPluginM
     });
     const draftId = draft
       ? service.updateDraft(payload.draftId, code)
-      : service.createDraft(code, { widgetId, cloneDataFrom: payload.instanceId || undefined });
+      : service.createDraft(code, { widgetId, baseVersion, cloneDataFrom: payload.instanceId || undefined });
     return { code, draftId, sizes, explanation };
   }, { withEvent: true });
   handle('widget:generate-cancel', (service, requestId) => getWidgetGenerator?.()?.cancel(requestId) || false);

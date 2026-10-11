@@ -67,20 +67,33 @@ export const isExplicitPendingActionConfirmation = (text) => {
 }
 
 // 回复里声称“已生成确认卡”的说法（与主进程 aichat/index.js 的判定保持一致）。
+
+// 防止模型回显仅供上下文使用的执行注释；同时兼容已经持久化的旧回复。
+export const stripInternalActionAnnotations = (content) => typeof content === 'string'
+  ? content.replace(/[\[［]\s*(?:本条回复实际生成的确认卡|注意[：:]\s*本条回复没有调用任何写入工具)[\s\S]*?[\]］]/g, '').trim()
+  : content
+
 const CONFIRMATION_CLAIM_RE = /确认卡|确认执行|点(?:击)?确认/
 
 // 发送给模型的历史只有 role + content，模型看不到哪一轮真的调用了写入工具，
 // 会照着之前“已准备好，请确认执行”的文字继续空口声称发起了操作。
 // 这里把每条 assistant 消息实际产生的确认卡（或没有产生）写回文本里。
 export const toApiMessages = (messages) => (Array.isArray(messages) ? messages : []).map((msg) => {
-  const apiMessage = { role: msg.role, content: msg.content }
+  const content = msg.role === 'assistant' ? stripInternalActionAnnotations(msg.content) : msg.content
+  const apiMessage = { role: msg.role, content }
   if (msg.role !== 'assistant' || typeof msg.content !== 'string') return apiMessage
   const actions = getMessagePendingActions(msg)
   if (actions.length > 0) {
-    const labels = actions.map((action) => `${action.summary || action.name}（${action.status || 'pending'}）`)
-    apiMessage.content = `${msg.content}\n\n[本条回复实际生成的确认卡：${labels.join('；')}]`
+    const labels = actions.map((action) => {
+      const result = action.status === 'done' && action.resultNoteId != null
+        ? `，结果笔记 ID：${action.resultNoteId}` : ''
+      const failure = action.status === 'failed' && action.error
+        ? `，失败原因：${action.error}` : ''
+      return `${action.summary || action.name}（${action.status || 'pending'}）${result}${failure}`
+    })
+    apiMessage.content = `${content}\n\n[本条回复实际生成的确认卡：${labels.join('；')}]`
   } else if (CONFIRMATION_CLAIM_RE.test(msg.content)) {
-    apiMessage.content = `${msg.content}\n\n[注意：本条回复没有调用任何写入工具，并未生成确认卡，用户看不到卡片]`
+    apiMessage.content = `${content}\n\n[注意：本条回复没有调用任何写入工具，并未生成确认卡，用户看不到卡片]`
   }
   return apiMessage
 })
@@ -99,7 +112,7 @@ export const getLatestConfirmableAction = (messages) => {
 
 // 卡片状态：pending → running → done / failed；pending 也可能被用户忽略（dismissed）
 // 或被 AI 后续给出的新方案替代（superseded）。failed 允许重试。
-export const RETRYABLE_ACTION_STATUSES = new Set(['pending', 'failed'])
+export const RETRYABLE_ACTION_STATUSES = new Set(['pending', 'failed', 'cancelled'])
 const canExecute = (action) => !action.status || RETRYABLE_ACTION_STATUSES.has(action.status)
 
 // read/write 必须绑定发起会话；每次写入前读取最新消息，保留执行期间的新消息。
@@ -117,14 +130,14 @@ export const executeConversationAction = async ({ actionId, read, write, execute
   }
   const latest = read()
   if (!latest) return result // 执行期间会话已删除。
-  const { success, message, error, resultNoteId, resultData } = result
+  const { success, cancelled, message, error, resultNoteId, resultData } = result
   write([
     ...latest.map(msg => patchMessagePendingAction(msg, actionId, {
-      status: success ? 'done' : 'failed', resultMessage: message, error,
+      status: success ? 'done' : cancelled ? 'cancelled' : 'failed', resultMessage: message, error,
       ...(resultNoteId != null ? { resultNoteId } : {}),
       ...(resultData ? { resultData } : {}),
     })),
-    { role: 'assistant', content: message },
+    ...(success ? [{ role: 'assistant', content: message, actionResultFor: actionId }] : []),
   ])
   return result
 }

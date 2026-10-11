@@ -1,40 +1,72 @@
-import { useEffect, useState } from 'react'
-import { Box, Typography, alpha } from '@mui/material'
+import { useEffect, useRef, useState } from 'react'
+import { Box, Typography, alpha, useMediaQuery } from '@mui/material'
 
 /**
  * AI 「思考中」的提示语与动画：AI 页面、AI 小窗和执行中的动作卡片共用。
- * - TypewriterText：切换短语时淡入，不出现整段空白
+ * - TypewriterText：逐字输入、停顿、回删；短语切换等待本轮结束
  * - ThinkingDots：三个依次跳动的点
  * - pickThinkingPhrase：从短语表里随机取一句，最近用过的不重复
  */
 
 export const TypewriterText = ({ text, fontSize = 12 }) => {
-  const [display, setDisplay] = useState(text || '')
-  const [animKey, setAnimKey] = useState(0)
+  const reducedMotion = useMediaQuery('(prefers-reduced-motion: reduce)')
+  const latestText = useRef(text || '')
+  latestText.current = text || ''
+  const [display, setDisplay] = useState('')
+
   useEffect(() => {
-    const next = text || ''
-    if (next === display) return
-    setDisplay(next)
-    setAnimKey((k) => k + 1)
-  }, [text, display])
+    if (reducedMotion) return
+    let timer
+    let characters = []
+    let count = 0
+    let erasing = false
+    const segmenter = typeof Intl.Segmenter === 'function'
+      ? new Intl.Segmenter(undefined, { granularity: 'grapheme' }) : null
+    const tick = () => {
+      if (!erasing && count === 0) {
+        const phrase = latestText.current
+        characters = segmenter ? Array.from(segmenter.segment(phrase), part => part.segment) : Array.from(phrase)
+      }
+      count += erasing ? -1 : 1
+      count = Math.max(0, Math.min(count, characters.length))
+      setDisplay(characters.slice(0, count).join(''))
+      let delay = erasing ? 38 : 85
+      if (!erasing && count === characters.length) {
+        erasing = true
+        delay = 1100
+      } else if (erasing && count === 0) {
+        erasing = false
+        delay = 260
+      }
+      timer = setTimeout(tick, delay)
+    }
+    setDisplay('')
+    timer = setTimeout(tick, 120)
+    return () => clearTimeout(timer)
+  }, [reducedMotion])
+
   return (
     <Typography
-      key={animKey}
       component="span"
       variant="caption"
+      aria-label={text || ''}
       sx={(theme) => ({
+        display: 'inline-block',
+        minHeight: '1.4em',
         fontSize,
         lineHeight: 1.4,
         color: alpha(theme.palette.text.primary, 0.7),
-        animation: 'flota-thinking-fade 280ms ease',
-        '@keyframes flota-thinking-fade': {
-          '0%': { opacity: 0, transform: 'translateY(2px)' },
-          '100%': { opacity: 1, transform: 'translateY(0)' }
-        }
       })}
     >
-      {display}
-      <Box component="span" sx={{ opacity: 0.5, ml: 0.25 }}>…</Box>
+      <Box component="span" aria-hidden="true">
+        {reducedMotion ? text : display}
+        <Box component="span" sx={{
+          display: 'inline-block', ml: 0.3, width: '1px', height: '0.9em',
+          bgcolor: 'currentColor', verticalAlign: '-0.05em', opacity: 0.5,
+          animation: reducedMotion ? 'none' : 'flota-thinking-caret 1s step-end infinite',
+          '@keyframes flota-thinking-caret': { '50%': { opacity: 0 } },
+        }} />
+      </Box>
     </Typography>
   )
 }
