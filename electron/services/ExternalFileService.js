@@ -1,6 +1,12 @@
 const fs = require('fs')
+const ExternalFileDraftStore = require('./ExternalFileDraftStore')
 const path = require('path')
 const { pathToFileURL } = require('url')
+const { createHash } = require('crypto')
+const { writeFileAtomicSync } = require('../utils/atomicFile')
+const { convertDocumentIsolated } = require('./documents')
+
+const fileRevision = buffer => createHash('sha256').update(buffer).digest('hex')
 
 // 从系统（双击 / 打开方式 / 拖到 Dock）或「打开文件…」打开的外部文件。
 //
@@ -11,43 +17,44 @@ const { pathToFileURL } = require('url')
 // - 兼容：自动识别 UTF-8 / UTF-8 BOM / UTF-16 / GB18030 编码，统一换行符；
 //   Markdown 中引用的本地图片内联为 data URL（CSP 不允许 file://），导入时再落盘。
 
-const FORMAT_BY_EXT = {
-  '.md': 'markdown',
-  '.markdown': 'markdown',
-  '.mdown': 'markdown',
-  '.mkd': 'markdown',
-  '.txt': 'text',
-  '.text': 'text',
-  '.log': 'text',
-  '.excalidraw': 'whiteboard'
-}
-
 // 设置 → 笔记与文件：Flota 接受哪些文件（系统打开方式、打开对话框、拖进笔记列表）。
-// html 只能导入为笔记，不能作为外部文件在独立窗口里编辑。
+// format=document 的类型转换成 Markdown 只读预览，可导入为笔记，不写回原文件。
 const FILE_TYPES = [
-  { id: 'markdown', name: 'Markdown', extensions: ['md', 'markdown', 'mdown', 'mkd'] },
-  { id: 'text', name: '纯文本', extensions: ['txt', 'text', 'log'] },
-  { id: 'html', name: '网页', extensions: ['html', 'htm'], importOnly: true },
-  { id: 'whiteboard', name: 'Excalidraw 画布', extensions: ['excalidraw'] },
+  { id: 'markdown', name: 'Markdown', format: 'markdown', extensions: ['md', 'markdown', 'mdown', 'mkd'] },
+  { id: 'text', name: '纯文本', format: 'text', extensions: ['txt', 'text', 'log'] },
+  { id: 'whiteboard', name: 'Excalidraw 画布', format: 'whiteboard', extensions: ['excalidraw'] },
+  { id: 'html', name: '网页', format: 'document', extensions: ['html', 'htm', 'xhtml', 'mht', 'mhtml'] },
+  { id: 'word', name: 'Word / WPS 文字', format: 'document', extensions: ['docx', 'doc', 'docm', 'dotx', 'dot', 'wps', 'wpt', 'rtf', 'odt'] },
+  { id: 'spreadsheet', name: 'Excel / WPS 表格', format: 'document', extensions: ['xlsx', 'xlsm', 'xls', 'et', 'ett', 'ods', 'csv', 'tsv'] },
+  { id: 'presentation', name: 'PowerPoint / WPS 演示', format: 'document', extensions: ['pptx', 'ppsx', 'ppt', 'pps', 'dps', 'dpt', 'odp'] },
+  { id: 'pdf', name: 'PDF', format: 'document', extensions: ['pdf'] },
+  { id: 'ebook', name: 'EPUB 电子书', format: 'document', extensions: ['epub'] },
 ]
+const TYPE_BY_EXT = new Map(FILE_TYPES.flatMap((type) => type.extensions.map((ext) => [`.${ext}`, type])))
 const DEFAULT_FILE_TYPES = FILE_TYPES.map((type) => type.id)
 const FILE_TYPES_SETTING_KEY = 'openable_file_types'
+// 用户保存设置时已见过的类型；之后新增的类型默认开启，不被旧的开启列表关掉
+const FILE_TYPES_KNOWN_KEY = 'openable_file_types_known'
+const LEGACY_KNOWN_TYPES = ['markdown', 'text', 'html', 'whiteboard']
 let enabledFileTypes = new Set(DEFAULT_FILE_TYPES)
 
-const setEnabledFileTypes = (ids) => {
+const setEnabledFileTypes = (ids, known = DEFAULT_FILE_TYPES) => {
+  const knownList = Array.isArray(known) ? known : String(known || '').split(',').map((id) => id.trim())
   const list = (Array.isArray(ids) ? ids : String(ids || '').split(','))
     .map((id) => String(id).trim())
     .filter((id) => DEFAULT_FILE_TYPES.includes(id))
-  enabledFileTypes = new Set(list)
+  const added = DEFAULT_FILE_TYPES.filter((id) => !knownList.includes(id))
+  enabledFileTypes = new Set([...list, ...added])
   return [...enabledFileTypes]
 }
 const getEnabledFileTypes = () => [...enabledFileTypes]
-/** 当前允许在独立窗口打开的扩展名（打开对话框的过滤器用） */
+/** 当前允许打开的扩展名（打开对话框的过滤器用） */
 const getEnabledExtensions = () => FILE_TYPES
-  .filter((type) => !type.importOnly && enabledFileTypes.has(type.id))
+  .filter((type) => enabledFileTypes.has(type.id))
   .flatMap((type) => type.extensions)
 
 const MAX_TEXT_BYTES = 20 * 1024 * 1024
+const MAX_DOCUMENT_BYTES = 100 * 1024 * 1024
 const MAX_WHITEBOARD_BYTES = 60 * 1024 * 1024
 const MAX_INLINE_IMAGE_BYTES = 15 * 1024 * 1024
 const MAX_INLINE_IMAGES_TOTAL = 60 * 1024 * 1024
@@ -64,8 +71,8 @@ const IMAGE_MIME = {
 }
 
 const getFormat = (filePath) => {
-  const format = FORMAT_BY_EXT[path.extname(String(filePath || '')).toLowerCase()] || null
-  return format && enabledFileTypes.has(format) ? format : null
+  const type = TYPE_BY_EXT.get(path.extname(String(filePath || '')).toLowerCase())
+  return type && enabledFileTypes.has(type.id) ? type.format : null
 }
 
 const isSupportedFile = (filePath) => {
@@ -225,7 +232,8 @@ const encodeText = (text, { encoding, eol }) => {
 }
 
 class ExternalFileService {
-  constructor() {
+  constructor({ draftDirectory } = {}) {
+    this.drafts = new ExternalFileDraftStore(draftDirectory)
     this.allowedPaths = new Set()
     this.pendingPaths = []
     this.deliver = null
@@ -271,18 +279,76 @@ class ExternalFileService {
     return resolved
   }
 
-  read(filePath) {
+  stageDraft(filePath, draft) {
     const resolved = this.resolveAllowed(filePath)
-    const format = getFormat(resolved)
-    if (!format) throw new Error('不支持的文件格式')
+    if (draft?.format !== getFormat(resolved)) throw new Error('草稿与文件类型不匹配')
+    return this.drafts.stage(resolved, draft)
+  }
 
+  clearDraft(filePath, token) { return this.drafts.clear(this.resolveAllowed(filePath), token) }
+
+  // Office / PDF / 网页等需要异步转换，返回 Promise；可编辑格式同步返回
+  read(filePath) {
+    if (getFormat(this.resolveAllowed(filePath)) === 'document') return this.readDocument(filePath)
+    const data = this.readFile(filePath)
+    try {
+      return { ...data, draft: this.drafts.read(data.path) }
+    } catch (error) {
+      if (error.code === 'ENOENT') throw error
+      return { ...data, draft: null, draftError: `恢复草稿已损坏，已另存为 ${this.drafts.quarantine(data.path)}` }
+    }
+  }
+
+  // 读取文件字节和通用信息（大小、修订、时间）
+  loadFile(resolved, limit) {
     const stat = fs.statSync(resolved)
-    const limit = format === 'whiteboard' ? MAX_WHITEBOARD_BYTES : MAX_TEXT_BYTES
     if (stat.size > limit) {
       throw new Error(`文件过大（${(stat.size / 1024 / 1024).toFixed(1)} MB），最多支持 ${limit / 1024 / 1024} MB`)
     }
+    const buffer = fs.readFileSync(resolved)
+    return {
+      buffer,
+      base: {
+        path: resolved,
+        name: path.basename(resolved),
+        title: path.basename(resolved, path.extname(resolved)),
+        ext: path.extname(resolved).toLowerCase(),
+        format: getFormat(resolved),
+        size: stat.size,
+        modifiedAt: stat.mtimeMs,
+        revision: fileRevision(buffer),
+        // 复制过的文件创建时间是复制那一刻，修改时间通常保留，取较早的那个
+        createdAt: stat.birthtimeMs > 0 ? Math.min(stat.birthtimeMs, stat.mtimeMs) : stat.mtimeMs,
+        fileUrl: pathToFileURL(resolved).href
+      }
+    }
+  }
 
-    const { text: rawText, encoding } = decodeText(fs.readFileSync(resolved))
+  // Office / WPS / PDF / 网页：转换为 Markdown 只读预览（图片内联），导入为笔记后可编辑
+  async readDocument(filePath) {
+    const resolved = this.resolveAllowed(filePath)
+    const { buffer, base } = this.loadFile(resolved, MAX_DOCUMENT_BYTES)
+    const result = await convertDocumentIsolated({ buffer, name: base.name, baseDir: path.dirname(resolved) })
+    return {
+      ...base,
+      title: result.title || base.title,
+      sourceType: result.sourceType,
+      sourceLabel: result.sourceLabel,
+      skippedImages: result.skippedImages,
+      writable: false,
+      raw: result.markdown,
+      content: result.markdown,
+      draft: null
+    }
+  }
+
+  readFile(filePath) {
+    const resolved = this.resolveAllowed(filePath)
+    const format = getFormat(resolved)
+    if (!format || format === 'document') throw new Error('不支持的文件格式')
+
+    const { buffer, base: info } = this.loadFile(resolved, format === 'whiteboard' ? MAX_WHITEBOARD_BYTES : MAX_TEXT_BYTES)
+    const { text: rawText, encoding } = decodeText(buffer)
     const eol = /\r\n/.test(rawText) ? '\r\n' : '\n'
     const text = rawText.replace(/\r\n?/g, '\n')
     let writable = false
@@ -291,21 +357,7 @@ class ExternalFileService {
       writable = true
     } catch {}
 
-    const base = {
-      path: resolved,
-      name: path.basename(resolved),
-      title: path.basename(resolved, path.extname(resolved)),
-      ext: path.extname(resolved).toLowerCase(),
-      format,
-      size: stat.size,
-      modifiedAt: stat.mtimeMs,
-      // 复制过的文件创建时间是复制那一刻，修改时间通常保留，取较早的那个
-      createdAt: stat.birthtimeMs > 0 ? Math.min(stat.birthtimeMs, stat.mtimeMs) : stat.mtimeMs,
-      encoding,
-      eol,
-      writable,
-      fileUrl: pathToFileURL(resolved).href
-    }
+    const base = { ...info, encoding, eol, writable }
 
     if (format === 'whiteboard') {
       return { ...base, whiteboard: parseWhiteboard(text) }
@@ -337,36 +389,56 @@ class ExternalFileService {
   }
 
   // 写盘前检查：可写、且没有在外部被改过（expectedMtime 为打开 / 上次保存时的修改时间）
-  checkWritable(resolved, { expectedMtime, force } = {}) {
+  checkWritable(resolved, { expectedMtime, expectedRevision, force } = {}, previous) {
     try {
       fs.accessSync(resolved, fs.constants.W_OK)
     } catch {
       throw new Error('文件是只读的，无法保存')
     }
     const stat = fs.statSync(resolved)
-    if (!force && expectedMtime && Math.abs(stat.mtimeMs - expectedMtime) > 1) {
+    if (!force && (expectedRevision
+      ? fileRevision(previous || fs.readFileSync(resolved)) !== expectedRevision
+      : expectedMtime != null && Math.abs(stat.mtimeMs - expectedMtime) > 1)) {
       return { conflict: true, modifiedAt: stat.mtimeMs }
     }
     return null
   }
 
+  // 保留符号链接，替换真实目标；临时写入失败时原文件仍完整。
+  // 强制覆盖只接受用户已确认的旧冲突，写入期间出现的新改动仍须重试。
+  replaceFile(resolved, previous, buffer) {
+    const target = fs.realpathSync(resolved)
+    const original = fs.statSync(target)
+    if (original.nlink > 1) throw new Error('文件有多个硬链接，无法安全替换；请另存为独立文件后编辑')
+    writeFileAtomicSync(target, buffer, {
+      mode: original.mode & 0o777,
+      beforeCommit: () => {
+        const current = fs.statSync(resolved)
+        if (fs.realpathSync(resolved) !== target || current.ino !== original.ino || current.dev !== original.dev ||
+          !fs.readFileSync(resolved).equals(previous)) {
+          throw new Error('文件在保存期间被其他程序修改，请重新载入或重试')
+        }
+      }
+    })
+    const stat = fs.statSync(target)
+    return { modifiedAt: stat.mtimeMs, size: stat.size, revision: fileRevision(buffer) }
+  }
+
   write(filePath, text, options = {}) {
     const resolved = this.resolveAllowed(filePath)
     const format = getFormat(resolved)
-    if (!format || format === 'whiteboard') throw new Error('不支持的文件格式')
-    const conflict = this.checkWritable(resolved, options)
+    if (!format || format === 'whiteboard' || format === 'document') throw new Error('不支持的文件格式')
+    const previous = fs.readFileSync(resolved)
+    const conflict = this.checkWritable(resolved, options, previous)
     if (conflict) return conflict
 
     // 按磁盘上当前文件的编码和换行符写回
-    const current = decodeText(fs.readFileSync(resolved))
+    const current = decodeText(previous)
     const eol = /\r\n/.test(current.text) ? '\r\n' : '\n'
     const normalized = String(text ?? '').replace(/\r\n?/g, '\n')
     const { buffer, encoding } = encodeText(normalized, { encoding: current.encoding, eol })
-    fs.writeFileSync(resolved, buffer)
-    const stat = fs.statSync(resolved)
     return {
-      modifiedAt: stat.mtimeMs,
-      size: stat.size,
+      ...this.replaceFile(resolved, previous, buffer),
       encoding,
       convertedFrom: encoding !== current.encoding ? current.encoding : null
     }
@@ -376,36 +448,39 @@ class ExternalFileService {
   writeWhiteboard(filePath, scene = {}, options = {}) {
     const resolved = this.resolveAllowed(filePath)
     if (getFormat(resolved) !== 'whiteboard') throw new Error('不是白板文件')
-    const conflict = this.checkWritable(resolved, options)
+    const previous = fs.readFileSync(resolved)
+    const conflict = this.checkWritable(resolved, options, previous)
     if (conflict) return conflict
 
-    let data = {}
-    try {
-      data = JSON.parse(decodeText(fs.readFileSync(resolved)).text) || {}
-    } catch {}
+    if (!Array.isArray(scene.elements) || !scene.files || typeof scene.files !== 'object' || Array.isArray(scene.files)) {
+      throw new Error('白板保存数据不完整')
+    }
+    const text = decodeText(previous).text
+    parseWhiteboard(text)
+    const data = JSON.parse(text)
     const next = {
       ...data,
       type: data.type || 'excalidraw',
       version: data.version || 2,
       source: data.source || 'Flota',
-      elements: Array.isArray(scene.elements) ? scene.elements : [],
+      elements: scene.elements,
       appState: {
         ...(data.appState && typeof data.appState === 'object' ? data.appState : {}),
         ...(scene.appState?.viewBackgroundColor ? { viewBackgroundColor: scene.appState.viewBackgroundColor } : {})
       },
-      files: scene.files && typeof scene.files === 'object' ? scene.files : {}
+      files: scene.files
     }
-    fs.writeFileSync(resolved, JSON.stringify(next, null, 2))
-    const stat = fs.statSync(resolved)
-    return { modifiedAt: stat.mtimeMs, size: stat.size }
+    return this.replaceFile(resolved, previous, Buffer.from(JSON.stringify(next, null, 2)))
   }
 }
 
 module.exports = {
   ExternalFileService,
-  SUPPORTED_EXTENSIONS: Object.keys(FORMAT_BY_EXT).map((ext) => ext.slice(1)),
+  SUPPORTED_EXTENSIONS: [...TYPE_BY_EXT.keys()].map((ext) => ext.slice(1)),
   FILE_TYPES,
   FILE_TYPES_SETTING_KEY,
+  FILE_TYPES_KNOWN_KEY,
+  LEGACY_KNOWN_TYPES,
   setEnabledFileTypes,
   getEnabledFileTypes,
   getEnabledExtensions,

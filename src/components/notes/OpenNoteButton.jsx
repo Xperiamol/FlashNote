@@ -3,10 +3,13 @@ import { Alert, IconButton, Snackbar, Tooltip } from '@mui/material'
 import { FolderOpen } from '../common/AppIcons'
 import { createTransitionString, ANIMATIONS } from '../../utils/animationConfig'
 import { useStore } from '../../store/useStore'
-import { sanitizeMarkdownHtml } from '../../markdown/sanitizeHtml'
+import { replaceDataImagesInMarkdown } from '../../utils/dataUrlImage'
 
-// 与主进程同一份类型表（设置 → 笔记与文件 可以关掉某些类型）
-const DEFAULT_EXTENSIONS = ['md', 'markdown', 'mdown', 'mkd', 'txt', 'text', 'log', 'html', 'htm', 'excalidraw']
+// 与主进程同一份类型表（设置 → 笔记与文件 可以关掉某些类型）；读取失败时的兜底
+const DEFAULT_EXTENSIONS = ['md', 'markdown', 'mdown', 'mkd', 'txt', 'text', 'log', 'excalidraw']
+// 直接按文本读入的格式；其余（网页、Office、WPS、PDF 等）交给主进程转换成 Markdown
+const PLAIN_EXTENSIONS = new Set(DEFAULT_EXTENSIONS)
+const MAX_PLAIN_BYTES = 20 * 1024 * 1024
 let enabledExtensions = DEFAULT_EXTENSIONS
 export const refreshOpenableExtensions = async () => {
   try {
@@ -45,18 +48,27 @@ export default function OpenNoteButton() {
       for (const file of files) {
         try {
           if (!supported(file)) throw new Error('这种文件没有在「设置 → 笔记与文件」里开启')
-          if (file.size > 20 * 1024 * 1024) throw new Error('文件超过 20 MB')
-          let content = (await file.text()).replace(/^\uFEFF/, '')
           const whiteboard = /\.excalidraw$/i.test(file.name)
-          if (whiteboard) {
-            const data = JSON.parse(content)
-            if (!Array.isArray(data.elements)) throw new Error('画布格式无效')
+          let content
+          let title = file.name.replace(/\.[^.]+$/, '')
+          if (PLAIN_EXTENSIONS.has(extensionOf(file.name))) {
+            if (file.size > MAX_PLAIN_BYTES) throw new Error('文件超过 20 MB')
+            content = (await file.text()).replace(/^\uFEFF/, '')
+            if (whiteboard) {
+              const data = JSON.parse(content)
+              if (!Array.isArray(data.elements)) throw new Error('画布格式无效')
+            }
+          } else {
+            const converted = await window.electronAPI?.externalFiles?.convert?.(new Uint8Array(await file.arrayBuffer()), file.name)
+            if (!converted?.success) throw new Error(converted?.error || '无法解析这个文件')
+            // 文档内的图片保存进应用图片目录，笔记里不留 data URL
+            content = await replaceDataImagesInMarkdown(converted.data.markdown)
+            title = converted.data.title || title
           }
-          if (/\.html?$/i.test(file.name)) content = sanitizeMarkdownHtml(content)
           // 用文件的修改时间作为创建时间，批量导入的笔记按原来的日子分布在日历上，而不是全堆在今天
           const fileTime = file.lastModified > 0 ? new Date(file.lastModified).toISOString() : undefined
           const result = await useStore.getState().createNote({
-            title: file.name.replace(/\.[^.]+$/, ''), content,
+            title, content,
             note_type: whiteboard ? 'whiteboard' : 'markdown',
             created_at: fileTime, updated_at: fileTime,
             selectAfterCreate: false,

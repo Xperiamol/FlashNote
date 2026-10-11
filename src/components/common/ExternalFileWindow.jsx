@@ -37,6 +37,7 @@ import {
 import AppContextMenu from './AppContextMenu'
 import MarkdownPreview from '../editor/MarkdownPreview'
 import { useError } from './ErrorProvider'
+import { registerEditorSaver } from '../../utils/editorSaveRegistry'
 import { replaceDataImagesInMarkdown } from '../../utils/dataUrlImage'
 import { usePrefsStore } from '../../store/usePrefsStore'
 import { editorScrollbarSx, segmentedButtonSx, segmentedControlSx } from '../../styles/commonStyles'
@@ -53,12 +54,26 @@ const formatSize = (bytes = 0) => {
   return `${(bytes / 1024 / 1024).toFixed(1)} MB`
 }
 
-const countChars = (text = '') => text.replace(/\s/g, '').length
+// 内联图片的 data URL 不计入字数
+const countChars = (text = '') => text.replace(/\(data:[^)]*\)/g, '').replace(/\s/g, '').length
 
-// 白板内容签名：元素版本之和 + 元素数 + 背景色，用来判断是否有未保存的修改
+// 顺序、元素身份和内容都参与比较；版本求和会漏掉重排和等版本替换。
 const sceneSignature = (elements = [], appState = {}) => {
   const live = elements.filter((el) => !el.isDeleted)
-  return `${live.reduce((sum, el) => sum + (el.version || 0), 0)}:${live.length}:${appState.viewBackgroundColor || ''}`
+  return JSON.stringify([live, appState.viewBackgroundColor || ''])
+}
+
+const captureBoard = board => {
+  if (!board) throw new Error('白板尚未加载完成')
+  const elements = board.getSceneElements()
+  const usedFiles = new Set(elements.map(el => el.fileId).filter(Boolean))
+  const allFiles = board.getFiles() || {}
+  if ([...usedFiles].some(id => !allFiles[id]?.dataURL)) throw new Error('白板图片尚未加载完成，请稍后保存')
+  return {
+    elements,
+    appState: { viewBackgroundColor: board.getAppState().viewBackgroundColor },
+    files: Object.fromEntries(Object.entries(allFiles).filter(([id]) => usedFiles.has(id)))
+  }
 }
 
 const api = () => window.electronAPI?.externalFiles
@@ -92,13 +107,21 @@ export default function ExternalFileWindow({ filePath }) {
   const whiteboardApiRef = useRef(null)
   const boardBaselineRef = useRef(null)
   const mtimeRef = useRef(null)
+  const revisionRef = useRef(null)
+  const draftRef = useRef(draft)
+  const savePromiseRef = useRef(null)
   const allowCloseRef = useRef(false)
   const dirtyRef = useRef(false)
+  const draftTimerRef = useRef(null)
+  const draftWriteRef = useRef(Promise.resolve())
+  const draftTokenRef = useRef(null)
+  const checkpointRef = useRef(null)
 
   const isBoard = file?.format === 'whiteboard'
   const dirty = isBoard ? boardDirty : draft !== savedText
   const fileName = file?.name || filePath.split(/[\\/]/).pop()
   dirtyRef.current = dirty
+  draftRef.current = draft
 
   const load = useCallback(async () => {
     setLoading(true)
@@ -107,15 +130,24 @@ export default function ExternalFileWindow({ filePath }) {
       const result = await api()?.read?.(filePath)
       if (!result?.success) throw new Error(result?.error || '无法读取文件')
       const data = result.data
-      setFile(data)
+      const recovered = data.draft?.format === data.format ? data.draft : null
+      setFile(recovered?.scene ? { ...data, whiteboard: recovered.scene } : data)
       // 只读文件不能进入编辑模式（即使设置为默认编辑）
       if (!data.writable) setMode('preview')
-      setDraft(data.raw ?? '')
+      setDraft(recovered?.text ?? data.raw ?? '')
       setSavedText(data.raw ?? '')
       setPreviewContent(data.content ?? '')
-      setBoardDirty(false)
-      boardBaselineRef.current = null
+      setBoardDirty(Boolean(recovered?.scene))
+      boardBaselineRef.current = recovered?.scene ? sceneSignature(data.whiteboard.elements, data.whiteboard.appState) : null
       mtimeRef.current = data.modifiedAt
+      revisionRef.current = recovered?.baseRevision || data.revision
+      draftTokenRef.current = recovered?.token || null
+      dirtyRef.current = Boolean(recovered)
+      if (data.draftError) showError?.(new Error(data.draftError), '恢复草稿已损坏')
+      if (recovered) {
+        if (data.writable) setMode('edit')
+        showSuccess?.('已恢复上次未保存的修改，原文件未被覆盖')
+      }
     } catch (error) {
       setLoadError(error.message || '无法读取文件')
     } finally {
@@ -153,62 +185,116 @@ export default function ExternalFileWindow({ filePath }) {
   const switchMode = useCallback(async (next) => {
     if (next === mode || !file) return
     if (next === 'edit' && !file.writable) return
-    if (next === 'preview' && !isBoard && draft !== savedText) await refreshPreview(draft)
+    if (next === 'preview' && !isBoard) await refreshPreview(draft)
     setMode(next)
     if (next === 'edit' && !isBoard) requestAnimationFrame(() => textareaRef.current?.focus())
-  }, [draft, file, isBoard, mode, refreshPreview, savedText])
+  }, [draft, file, isBoard, mode, refreshPreview])
 
-  const save = useCallback(async ({ force = false } = {}) => {
-    if (!file || saving || !dirtyRef.current) return true
-    setSaving(true)
+  // 固定最长 750ms 暂存一次，连续输入不会不断推迟。队列保证清理排在暂存之后。
+  checkpointRef.current = () => {
+    draftTimerRef.current = null
+    if (!dirtyRef.current || !file || !api()?.stageDraft) return
     try {
-      let result
-      if (isBoard) {
-        const board = whiteboardApiRef.current
-        if (!board) return false
-        const elements = board.getSceneElements()
-        const usedFiles = new Set(elements.map((el) => el.fileId).filter(Boolean))
-        const allFiles = board.getFiles() || {}
-        const files = Object.fromEntries(Object.entries(allFiles).filter(([id]) => usedFiles.has(id)))
-        result = await api()?.writeWhiteboard?.(filePath, {
-          elements,
-          appState: { viewBackgroundColor: board.getAppState().viewBackgroundColor },
-          files
-        }, { expectedMtime: mtimeRef.current, force })
-      } else {
-        result = await api()?.write?.(filePath, draft, { expectedMtime: mtimeRef.current, force })
-      }
-      if (!result?.success) throw new Error(result?.error || '保存失败')
-      if (result.data.conflict) {
-        setConflict(result.data)
+      const token = crypto.randomUUID()
+      const payload = { token, format: file.format, baseRevision: revisionRef.current,
+        ...(isBoard ? { scene: captureBoard(whiteboardApiRef.current) } : { text: draftRef.current }) }
+      draftTokenRef.current = token
+      draftWriteRef.current = draftWriteRef.current.catch(() => {}).then(async () => {
+        const result = await api().stageDraft(filePath, payload)
+        if (!result?.success) throw new Error(result?.error || '恢复草稿暂存失败')
+      })
+      draftWriteRef.current.catch(error => showError?.(error, '恢复草稿暂存失败，请手动保存'))
+    } catch (error) { showError?.(error, '恢复草稿暂存失败，请手动保存') }
+  }
+  const scheduleCheckpoint = useCallback(() => {
+    if (!draftTimerRef.current) draftTimerRef.current = setTimeout(() => checkpointRef.current?.(), 750)
+  }, [])
+  const clearCheckpoint = useCallback(async () => {
+    clearTimeout(draftTimerRef.current)
+    draftTimerRef.current = null
+    const token = draftTokenRef.current
+    await draftWriteRef.current.catch(() => {})
+    if (token && api()?.clearDraft) {
+      const result = await api().clearDraft(filePath, token)
+      if (!result?.success) throw new Error(result?.error || '恢复草稿清理失败')
+      if (draftTokenRef.current === token) draftTokenRef.current = null
+    }
+  }, [filePath])
+  useEffect(() => () => { clearTimeout(draftTimerRef.current) }, [])
+
+  const save = useCallback(({ force = false } = {}) => {
+    if (savePromiseRef.current) return savePromiseRef.current
+    if (!file || !dirtyRef.current) return Promise.resolve(true)
+    setSaving(true)
+    const pending = (async () => {
+      try {
+        // 一次只提交一个快照；保存期间的新输入继续排入同一次保存。
+        do {
+          const text = draftRef.current
+          let result, signature
+          const options = { expectedMtime: mtimeRef.current, expectedRevision: revisionRef.current, force }
+          if (isBoard) {
+            const scene = captureBoard(whiteboardApiRef.current)
+            signature = sceneSignature(scene.elements, scene.appState)
+            result = await api()?.writeWhiteboard?.(filePath, scene, options)
+          } else {
+            result = await api()?.write?.(filePath, text, options)
+          }
+          if (!result?.success) throw new Error(result?.error || '保存失败')
+          if (result.data.conflict) {
+            setConflict(result.data)
+            return false
+          }
+          // 后续快照不能沿用“覆盖外部冲突”的授权。
+          force = false
+          mtimeRef.current = result.data.modifiedAt
+          revisionRef.current = result.data.revision
+          setFile(prev => ({ ...prev, size: result.data.size, encoding: result.data.encoding || prev.encoding }))
+          if (isBoard) {
+            const board = whiteboardApiRef.current
+            boardBaselineRef.current = signature
+            dirtyRef.current = !board || signature !== sceneSignature(board.getSceneElements(), board.getAppState())
+            setBoardDirty(dirtyRef.current)
+          } else {
+            dirtyRef.current = draftRef.current !== text
+            setSavedText(text)
+          }
+          if (!dirtyRef.current) await clearCheckpoint()
+          if (result.data.convertedFrom) showSuccess?.(`已保存，编码从 ${result.data.convertedFrom} 转为 UTF-8`)
+        } while (dirtyRef.current)
+        return true
+      } catch (error) {
+        showError?.(error, '保存失败')
         return false
       }
-      mtimeRef.current = result.data.modifiedAt
-      setFile((prev) => ({ ...prev, size: result.data.size, encoding: result.data.encoding || prev.encoding }))
-      if (isBoard) {
-        const board = whiteboardApiRef.current
-        boardBaselineRef.current = sceneSignature(board.getSceneElements(), board.getAppState())
-        setBoardDirty(false)
-      } else {
-        setSavedText(draft)
-        refreshPreview(draft)
-      }
-      if (result.data.convertedFrom) showSuccess?.(`已保存，编码从 ${result.data.convertedFrom} 转为 UTF-8`)
-      return true
-    } catch (error) {
-      showError?.(error, '保存失败')
-      return false
-    } finally {
+    })()
+    savePromiseRef.current = pending
+    pending.finally(() => {
+      savePromiseRef.current = null
       setSaving(false)
+    })
+    return pending
+  }, [file, filePath, isBoard, showError, showSuccess, clearCheckpoint])
+
+  // 外部文件保留手动保存语义。退出必须等待在途保存，未保存时显示原有确认框。
+  useEffect(() => registerEditorSaver(async ({ reason } = {}) => {
+    const pending = savePromiseRef.current
+    if (pending && !await pending) throw new Error('外部文件保存失败，窗口已保留')
+    if (reason !== 'sync' && dirtyRef.current && !allowCloseRef.current) {
+      setConfirmClose(true)
+      throw new Error('外部文件有未保存修改，请先保存或选择不保存')
     }
-  }, [draft, file, filePath, isBoard, refreshPreview, saving, showError, showSuccess])
+  }), [])
 
   const closeWindow = useCallback(() => window.electronAPI?.window?.close?.(), [])
 
-  const closeWithoutGuard = useCallback(() => {
-    allowCloseRef.current = true
-    closeWindow()
-  }, [closeWindow])
+  const closeWithoutGuard = useCallback(async () => {
+    try {
+      await clearCheckpoint()
+      allowCloseRef.current = true
+      await closeWindow()
+    } catch (error) { allowCloseRef.current = false; showError?.(error, '关闭失败，窗口已保留') }
+  }, [closeWindow, clearCheckpoint, showError])
 
   const copyText = useCallback(async (text) => {
     const result = await api()?.copyText?.(text)
@@ -293,8 +379,10 @@ export default function ExternalFileWindow({ filePath }) {
       boardBaselineRef.current = signature
       return
     }
-    setBoardDirty(signature !== boardBaselineRef.current)
-  }, [])
+    dirtyRef.current = signature !== boardBaselineRef.current
+    setBoardDirty(dirtyRef.current)
+    if (dirtyRef.current) scheduleCheckpoint()
+  }, [scheduleCheckpoint])
 
   const handleTextareaKeyDown = (event) => {
     if (event.key === 'Tab' && !event.metaKey && !event.ctrlKey && !event.altKey) {
@@ -393,7 +481,16 @@ export default function ExternalFileWindow({ filePath }) {
 
   const renderBody = () => {
     if (loading) {
-      return <Box sx={{ flex: 1, display: 'grid', placeItems: 'center' }}><CircularProgress size={26} /></Box>
+      return (
+        <Box sx={{ flex: 1, display: 'grid', placeItems: 'center' }}>
+          <Stack spacing={1.25} alignItems="center">
+            <CircularProgress size={26} />
+            {/\.(docx?|wps|wpt|xlsx?|et|pptx?|dps|pdf|epub|odt|odp|ods|rtf|mht|mhtml)$/i.test(filePath) && (
+              <Typography variant="body2" color="text.secondary">正在解析文档…</Typography>
+            )}
+          </Stack>
+        </Box>
+      )
     }
     if (loadError) {
       return (
@@ -430,7 +527,7 @@ export default function ExternalFileWindow({ filePath }) {
             ref={textareaRef}
             value={draft}
             spellCheck={false}
-            onChange={(event) => setDraft(event.target.value)}
+            onChange={(event) => { draftRef.current = event.target.value; dirtyRef.current = event.target.value !== savedText; setDraft(event.target.value); scheduleCheckpoint() }}
             onKeyDown={handleTextareaKeyDown}
             sx={{
               display: 'block',
@@ -485,12 +582,14 @@ export default function ExternalFileWindow({ filePath }) {
     )
   }
 
+  const isDocument = file?.format === 'document'
   const statusParts = file ? [
-    FORMAT_LABELS[file.format] || file.format,
+    isDocument ? file.sourceLabel : (FORMAT_LABELS[file.format] || file.format),
     !isBoard ? `${countChars(draft).toLocaleString()} 字` : null,
     formatSize(file.size),
     file.encoding && !String(file.encoding).startsWith('UTF-8') ? file.encoding : null,
     file.missingImages > 0 && mode === 'preview' ? `${file.missingImages} 张图片未找到` : null,
+    file.skippedImages > 0 ? `${file.skippedImages} 张图片过大未显示` : null,
   ].filter(Boolean) : []
 
   return (
@@ -521,7 +620,7 @@ export default function ExternalFileWindow({ filePath }) {
             </Tooltip>
           )}
           {file && !file.writable && (
-            <Typography sx={{ fontSize: 11.5, color: 'text.secondary', flexShrink: 0 }}>只读</Typography>
+            <Typography sx={{ fontSize: 11.5, color: 'text.secondary', flexShrink: 0 }}>{isDocument ? '仅预览' : '只读'}</Typography>
           )}
         </Box>
 
@@ -550,7 +649,7 @@ export default function ExternalFileWindow({ filePath }) {
             </Tooltip>
           )}
 
-          <Tooltip title={file && !file.writable ? '文件是只读的，无法编辑' : ''}>
+          <Tooltip title={file && !file.writable ? (isDocument ? `${file.sourceLabel}只能预览，导入为笔记后可以编辑` : '文件是只读的，无法编辑') : ''}>
             <Box sx={[segmentedControlSx, { height: 32, boxSizing: 'border-box', p: '2px', gap: '2px', borderRadius: '10px' }]}>
               {[{ value: 'preview', label: '预览', Icon: Visibility }, { value: 'edit', label: '编辑', Icon: Edit }].map((item) => (
                 <Button
@@ -662,12 +761,13 @@ export default function ExternalFileWindow({ filePath }) {
           <Typography variant="body2" color="text.secondary">不保存的话，修改会丢失。</Typography>
         </DialogContent>
         <DialogActions sx={{ px: 3, pb: 2 }}>
-          <Button onClick={closeWithoutGuard} color="inherit">不保存</Button>
+          <Button disabled={saving} onClick={closeWithoutGuard} color="inherit">不保存</Button>
           <Box sx={{ flex: 1 }} />
           <Button onClick={() => setConfirmClose(false)} color="inherit">取消</Button>
           <Button
             variant="contained"
             disableElevation
+            disabled={saving}
             onClick={async () => {
               setConfirmClose(false)
               if (await save()) closeWithoutGuard()

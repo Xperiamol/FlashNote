@@ -1,11 +1,12 @@
 const { ipcMain, dialog, shell, BrowserWindow, clipboard } = require('electron')
 const {
-  FILE_TYPES, FILE_TYPES_SETTING_KEY, setEnabledFileTypes, getEnabledFileTypes, getEnabledExtensions
+  FILE_TYPES, FILE_TYPES_SETTING_KEY, FILE_TYPES_KNOWN_KEY, setEnabledFileTypes, getEnabledFileTypes, getEnabledExtensions
 } = require('../services/ExternalFileService')
+const { convertDocumentIsolated, MAX_DOCUMENT_BYTES } = require('../services/documents')
 
-const wrap = (fn) => (...args) => {
+const wrap = (fn) => async (...args) => {
   try {
-    return { success: true, data: fn(...args) }
+    return { success: true, data: await fn(...args) }
   } catch (error) {
     return { success: false, error: error.message }
   }
@@ -13,7 +14,17 @@ const wrap = (fn) => (...args) => {
 
 // 外部文件窗口：只允许读写由系统或打开对话框登记过的路径
 const registerExternalFileHandlers = ({ externalFileService, getMainWindow }) => {
+  ipcMain.handle('external-file:stage-draft', wrap((_event, filePath, draft) => externalFileService.stageDraft(filePath, draft)))
+  ipcMain.handle('external-file:clear-draft', wrap((_event, filePath, token) => externalFileService.clearDraft(filePath, token)))
+
   ipcMain.handle('external-file:read', wrap((_event, filePath) => externalFileService.read(filePath)))
+
+  // 导入为笔记（笔记列表的打开按钮、拖放）：渲染层交来文件内容，不涉及路径
+  ipcMain.handle('external-file:convert', wrap((_event, bytes, name) => {
+    if (!(bytes instanceof Uint8Array)) throw new Error('文件内容无效')
+    if (bytes.length > MAX_DOCUMENT_BYTES) throw new Error(`文件过大，最多支持 ${MAX_DOCUMENT_BYTES / 1024 / 1024} MB`)
+    return convertDocumentIsolated({ buffer: Buffer.from(bytes.buffer, bytes.byteOffset, bytes.length), name: String(name || '') })
+  }))
 
   ipcMain.handle('external-file:render', wrap((_event, filePath, text) => externalFileService.render(filePath, text)))
 
@@ -35,7 +46,7 @@ const registerExternalFileHandlers = ({ externalFileService, getMainWindow }) =>
       filters: [
         { name: '支持的文件', extensions: getEnabledExtensions() },
         ...FILE_TYPES
-          .filter((type) => !type.importOnly && getEnabledFileTypes().includes(type.id))
+          .filter((type) => getEnabledFileTypes().includes(type.id))
           .map((type) => ({ name: type.name, extensions: type.extensions })),
       ]
     })
@@ -53,7 +64,9 @@ const registerExternalFileHandlers = ({ externalFileService, getMainWindow }) =>
     try {
       const enabled = setEnabledFileTypes(ids)
       const SettingDAO = require('../dao/SettingDAO')
-      new SettingDAO().set(FILE_TYPES_SETTING_KEY, enabled.join(','), 'string', '可以用 Flota 打开的文件类型')
+      const settings = new SettingDAO()
+      settings.set(FILE_TYPES_SETTING_KEY, enabled.join(','), 'string', '可以用 Flota 打开的文件类型')
+      settings.set(FILE_TYPES_KNOWN_KEY, FILE_TYPES.map((type) => type.id).join(','), 'string', '保存文件类型设置时已有的类型')
       return { success: true, data: enabled }
     } catch (error) {
       return { success: false, error: error.message }
