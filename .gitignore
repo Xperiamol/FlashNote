@@ -86,3 +86,7 @@ app/
 !docs/RELEASE_FLOW.md
 *_导出_*.json
 Flota_导出_*.json
+
+# 第三方许可清单（dev / build 前由 scripts/generate-third-party-licenses.cjs 生成）
+src/generated/
+build/THIRD_PARTY_NOTICES.txt
