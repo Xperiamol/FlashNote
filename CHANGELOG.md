@@ -2,6 +2,17 @@
 
 本项目遵循 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/) 规范。
 
+## [4.3.0] - 2026-10-11
+
+### Changed / 更新内容
+- feat(import): open and import Word, WPS, Excel, PowerPoint, PDF, EPUB, RTF and web pages as notes, web pages keep only the article, and unsaved edits to opened files survive a crash
+- feat(ai): AI knows which page you are on instead of assuming the last note is open, AI whiteboards and widgets can be stopped and retried, and whiteboard edits keep the rest of the drawing intact
+- feat(about): open source licenses list every bundled component with its full license text, generated on each build
+- fix(sync): settings and todos no longer bounce between phone and computer on every sync, an interrupted or crashed sync recovers on its own, and another device's newer cloud data is never silently overwritten
+- fix(editor): note and whiteboard edits are saved safely before closing, syncing or converting, a failed conversion keeps the original, and images are never lost on save
+- fix(ui): closing windows and quitting wait for unsaved edits, menus and popovers release focus cleanly, and file associations cover the new document formats
+
+
 ## [4.2.2] - 2026-10-05
 
 ### Changed / 更新内容
