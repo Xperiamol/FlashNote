@@ -30,6 +30,7 @@ test('真实 HTTP 条件写入：两个读取者只能一个提交，首次创�
         (req.headers['if-none-match'] === '*' && entry)) {
       res.writeHead(412); res.end(); return
     }
+    if (req.method === 'DELETE') { entries.delete(req.url); res.writeHead(204); res.end(); return }
     let body = ''; for await (const chunk of req) body += chunk
     const next = { body, version: (entry?.version || 0) + 1 }
     entries.set(req.url, next)
@@ -79,9 +80,80 @@ test('真实 HTTP 条件写入：两个读取者只能一个提交，首次创�
     await assert.rejects(engine.executeUpload(task), error => error.code === 'SYNC_CONCURRENT_WRITE')
     assert.equal(entries.get('/note.md').body, 'another device')
 
+    // 服务器只给弱 ETag（nginx gzip 会把强 ETag 改成 W/）：不能拒绝同步，改为写前重读比对。
     weakGET = true
     const d = create(); await d.downloadText('/manifest.json')
-    await assert.rejects(d.uploadText('/manifest.json', 'D'), /强 ETag/)
+    await d.uploadText('/manifest.json', 'D')
+    assert.equal(entries.get('/manifest.json').body, 'D')
+    // 读取之后、写入之前另一设备改了云端：内容比对拒绝覆盖。
+    const e = create(), f = create()
+    await Promise.all([e.downloadText('/manifest.json'), f.downloadText('/manifest.json')])
+    await f.uploadText('/manifest.json', 'F')
+    await assert.rejects(e.uploadText('/manifest.json', 'E'), /发生变化|其他设备修改/)
+    assert.equal(entries.get('/manifest.json').body, 'F')
+    // 删除同理：未变化可删除，变化后拒绝
+    const g = create(); await g.downloadText('/new.md'); await g.delete('/new.md')
+    assert.equal(entries.has('/new.md'), false)
+  } finally { await new Promise(resolve => server.close(resolve)) }
+})
+
+test('完全不返回 ETag、也不支持条件请求的服务器（如部分 dufs / nginx 配置）仍能同步并拦截并发覆盖', async () => {
+  const entries = new Map([['/manifest.json', 'base']])
+  const seenEncodings = []
+  const server = http.createServer(async (req, res) => {
+    if (req.method === 'GET') {
+      seenEncodings.push(req.headers['accept-encoding'])
+      if (!entries.has(req.url)) { res.writeHead(404); res.end(); return }
+      res.end(entries.get(req.url)); return
+    }
+    if (req.method === 'DELETE') { entries.delete(req.url); res.writeHead(204); res.end(); return }
+    let body = ''; for await (const chunk of req) body += chunk
+    entries.set(req.url, body); res.writeHead(201); res.end()
+  })
+  await new Promise(resolve => server.listen(0, '127.0.0.1', resolve))
+  const create = () => { const c = new Client({ baseUrl: `http://127.0.0.1:${server.address().port}`, retryAttempts: 1 }); c.beginSync(); return c }
+  try {
+    const a = create(), b = create()
+    await Promise.all([a.downloadText('/manifest.json'), b.downloadText('/manifest.json')])
+    await a.uploadText('/manifest.json', 'A')
+    await a.uploadText('/manifest.json', 'A2')
+    assert.equal(entries.get('/manifest.json'), 'A2')
+    await assert.rejects(b.uploadText('/manifest.json', 'B'), /发生变化|其他设备修改/)
+    assert.equal(entries.get('/manifest.json'), 'A2')
+    // 不压缩：避免反向代理把强 ETag 弱化
+    assert.ok(seenEncodings.every((value) => value === 'identity'), JSON.stringify(seenEncodings))
+  } finally { await new Promise(resolve => server.close(resolve)) }
+})
+
+test('返回强 ETag 但忽略 If-Match 的服务器（实测 flota.cn 的 dufs）：覆盖前仍按内容比对拦截并发写入', async () => {
+  const entries = new Map([['/manifest.json', { body: 'base', version: 1 }]])
+  let gets = 0
+  const server = http.createServer(async (req, res) => {
+    const entry = entries.get(req.url)
+    if (req.method === 'GET') {
+      gets++
+      if (!entry) { res.writeHead(404); res.end(); return }
+      res.setHeader('ETag', `"v${entry.version}"`); res.end(entry.body); return
+    }
+    // 不处理 If-Match / If-None-Match，直接写
+    let body = ''; for await (const chunk of req) body += chunk
+    const next = { body, version: (entry?.version || 0) + 1 }
+    entries.set(req.url, next); res.setHeader('ETag', `"v${next.version}"`); res.writeHead(201); res.end()
+  })
+  await new Promise(resolve => server.listen(0, '127.0.0.1', resolve))
+  const create = () => { const c = new Client({ baseUrl: `http://127.0.0.1:${server.address().port}`, retryAttempts: 1 }); c.beginSync(); return c }
+  try {
+    const a = create(), b = create()
+    await Promise.all([a.downloadText('/manifest.json'), b.downloadText('/manifest.json')])
+    await a.uploadText('/manifest.json', 'A')
+    await assert.rejects(b.uploadText('/manifest.json', 'B'), /发生变化|其他设备修改/)
+    assert.equal(entries.get('/manifest.json').body, 'A')
+    // prepareWrite 刚校验过的路径，紧接着的上传不再重复读取
+    const c = create(); await c.downloadText('/manifest.json')
+    await c.prepareWrite('/manifest.json')
+    const before = gets
+    await c.uploadText('/manifest.json', 'C')
+    assert.equal(gets, before)
     assert.equal(entries.get('/manifest.json').body, 'C')
   } finally { await new Promise(resolve => server.close(resolve)) }
 })

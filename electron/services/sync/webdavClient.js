@@ -434,12 +434,8 @@ class WebDAVClient {
    */
   async uploadText(remotePath, content, contentType = 'text/plain; charset=utf-8') {
     // 未读过的路径只允许创建；初始化时 HEAD 与 PUT 之间也可能有另一设备写入。
-    if (this._writeVersions?.get(remotePath) === '' && this._writtenBodies?.has(remotePath)) {
-      const ownBody = this._writtenBodies.get(remotePath);
-      await this.prepareWrite(remotePath, value => value === ownBody);
-    }
+    await this.verifyUnchangedBeforeOverwrite(remotePath);
     const expected = this._writeVersions ? (this._writeVersions.get(remotePath) ?? null) : undefined;
-    if (expected === '') throw new Error('服务器未提供强 ETag，无法安全提交并发同步；已保留本地数据');
     let response;
     try {
       response = await this.request({
@@ -447,6 +443,7 @@ class WebDAVClient {
         url: this.getFullPath(remotePath),
         headers: {
           'Content-Type': contentType,
+          // 有强 ETag 仍带 If-Match（支持的服务器多一层保护）；'' 表示没有强 ETag，只靠上面的内容比对
           ...(expected === null ? { 'If-None-Match': '*' } : expected ? { 'If-Match': expected } : {}),
         },
         data: content,
@@ -464,16 +461,35 @@ class WebDAVClient {
     }
   }
 
-  beginSync() { this._writeVersions = new Map(); this._readBodies = new Map(); this._writtenBodies = new Map(); }
+  beginSync() { this._writeVersions = new Map(); this._readBodies = new Map(); this._writtenBodies = new Map(); this._justVerified = new Set(); }
+
+  /**
+   * 覆盖或删除云端已有文件前，重读并比对内容：必须仍是本轮读到的版本（或本机刚写入的版本）。
+   * 不能只靠 If-Match：有的服务器不给强 ETag（不返回，或经 nginx 压缩变成 W/ 弱 ETag），
+   * 有的给了强 ETag 却不处理条件请求（实测 dufs 会直接覆盖）。重读与写入之间仍有极短的竞争窗口。
+   * prepareWrite 刚读过的路径不再重复读取。新建文件（没有已知版本）不在此处理。
+   */
+  async verifyUnchangedBeforeOverwrite(remotePath) {
+    const expected = this._writeVersions?.get(remotePath);
+    if (typeof expected !== 'string') return;
+    if (this._justVerified?.delete(remotePath)) return;
+    const ownBody = this._writtenBodies?.get(remotePath);
+    const readBefore = this._readBodies?.has(remotePath);
+    await this.prepareWrite(remotePath, readBefore || ownBody === undefined ? undefined : value => value === ownBody);
+    this._justVerified?.delete(remotePath);
+  }
 
   async prepareWrite(remotePath, validate) {
     const previous = this._readBodies?.get(remotePath);
     try {
       const content = await this.downloadText(remotePath);
+      // 与服务器返回 412 同一种冲突：调用方按 SYNC_CONCURRENT_WRITE 统一处理
+      const conflict = (message) => Object.assign(new Error(message), { code: 'SYNC_CONCURRENT_WRITE' });
       if (previous !== undefined && content !== previous && content !== this._writtenBodies?.get(remotePath)) {
-        throw new Error('读取后云端内容发生变化，已停止覆盖，请重新同步');
+        throw conflict('读取后云端内容发生变化，已停止覆盖，请重新同步');
       }
-      if (validate && !validate(content)) throw new Error('云端正文已被其他设备修改，已停止覆盖并等待重新合并');
+      if (validate && !validate(content)) throw conflict('云端正文已被其他设备修改，已停止覆盖并等待重新合并');
+      this._justVerified?.add(remotePath);
     } catch (error) {
       if (!/^WebDAV 资源不存在/.test(error.message || '')) throw error;
       this._writeVersions.set(remotePath, null);
@@ -520,6 +536,8 @@ class WebDAVClient {
       method: 'GET',
       url: this.getFullPath(remotePath),
       responseType: 'text',
+      // 不要压缩：nginx 等反向代理压缩响应时会把强 ETag 改成弱 ETag，条件写入就用不了
+      headers: { 'Accept-Encoding': 'identity' },
     }); } catch (error) {
       if (this._writeVersions && /^WebDAV 资源不存在/.test(error.message || '')) this._writeVersions.set(remotePath, null);
       throw error;
@@ -566,13 +584,13 @@ class WebDAVClient {
    * @returns {Promise<void>}
    */
   async delete(remotePath) {
+    await this.verifyUnchangedBeforeOverwrite(remotePath);
     const expected = this._writeVersions?.get(remotePath);
-    if (expected === '') throw new Error('服务器未提供强 ETag，无法安全删除并发资源；已保留云端文件');
     try {
       await this.request({
         method: 'DELETE',
         url: this.getFullPath(remotePath),
-        headers: expected === null || expected === undefined ? {} : { 'If-Match': expected },
+        headers: expected ? { 'If-Match': expected } : {},
       });
       if (this._writeVersions) this._writeVersions.delete(remotePath);
     } catch (error) {
