@@ -333,45 +333,6 @@ function StandaloneWindow() {
     }
   }, [isLoading, error, windowType, isElectronEnvironment])
 
-  // 窗口关闭前保存数据
-  useEffect(() => {
-    if (!isElectronEnvironment) return;
-
-    // 暴露保存函数供WindowManager调用
-    window.__saveBeforeClose = async () => {
-      logger.log('[StandaloneWindow] 执行窗口关闭前保存...');
-      try {
-        // 触发store中的保存逻辑
-        if (store.saveNow) {
-          await store.saveNow();
-          logger.log('[StandaloneWindow] 保存完成');
-        }
-      } catch (error) {
-        console.error('[StandaloneWindow] 保存失败:', error);
-      }
-    };
-
-    // 监听beforeunload事件（备用保护）
-    const handleBeforeUnload = async (e) => {
-      if (store.hasUnsavedChanges && store.hasUnsavedChanges()) {
-        e.preventDefault();
-        e.returnValue = '';
-        
-        // 尝试保存
-        if (store.saveNow) {
-          await store.saveNow();
-        }
-      }
-    };
-
-    window.addEventListener('beforeunload', handleBeforeUnload);
-
-    return () => {
-      window.removeEventListener('beforeunload', handleBeforeUnload);
-      delete window.__saveBeforeClose;
-    };
-  }, [isElectronEnvironment, store]);
-
   // 如果不在Electron环境中，显示提示信息
   if (!isElectronEnvironment) {
     return (

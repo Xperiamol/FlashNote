@@ -1,3 +1,4 @@
+import { releasePopoverFocus } from '../../utils/popoverFocus'
 import { useCallback, useEffect, useRef, useState } from 'react';
 import {
   Box,
@@ -225,6 +226,7 @@ const SecondarySidebar = ({ open, width = 304, onTodoSelect, onViewModeChange, o
   };
 
   const closeAiContextMenu = () => {
+    releasePopoverFocus();
     setAiContextMenu(null);
   };
 

@@ -1,3 +1,4 @@
+const { saveAllWindows } = require('./utils/saveWindows')
 const { app, BrowserWindow, Notification, shell, Tray, Menu, nativeImage, protocol, nativeTheme, net, session } = require('electron')
 const path = require('path')
 
@@ -440,6 +441,7 @@ function createWindow() {
         if (row && row.value === false) closeToTray = false
       } catch {}
       if (!closeToTray) {
+        event.preventDefault()
         app.isQuiting = true
         setImmediate(() => app.quit())
         return
@@ -693,6 +695,9 @@ async function initializeServices() {
     // 初始化数据库
     const dbManager = DatabaseManager.getInstance()
     await dbManager.initialize()
+    services.editorDraftService = new (require('./services/EditorDraftService'))(dbManager)
+    const recoveredDrafts = services.editorDraftService.recover()
+    if (recoveredDrafts) console.log(`[Drafts] 已恢复 ${recoveredDrafts} 篇草稿副本`)
 
     // 将 dbManager 加入 services，供 PluginManager 等使用
     services.dbManager = dbManager
@@ -721,9 +726,9 @@ async function initializeServices() {
     // 回收站自动清理：启动时清一次，之后每 6 小时检查
     // 设置里启用的可打开文件类型
     try {
-      const { FILE_TYPES_SETTING_KEY, setEnabledFileTypes } = require('./services/ExternalFileService')
+      const { FILE_TYPES_SETTING_KEY, FILE_TYPES_KNOWN_KEY, LEGACY_KNOWN_TYPES, setEnabledFileTypes } = require('./services/ExternalFileService')
       const saved = settingDAO.get(FILE_TYPES_SETTING_KEY)?.value
-      if (saved !== undefined && saved !== null) setEnabledFileTypes(saved)
+      if (saved !== undefined && saved !== null) setEnabledFileTypes(saved, settingDAO.get(FILE_TYPES_KNOWN_KEY)?.value ?? LEGACY_KNOWN_TYPES)
     } catch (error) {
       console.warn('[Main] 读取可打开文件类型失败:', error.message)
     }
@@ -850,10 +855,11 @@ async function initializeServices() {
       services.aiChatService.setCurrentNoteGetter(async () => {
         // 通过 IPC 向渲染进程请求当前笔记ID，再从DAO获取
         try {
-          const win = BrowserWindow.getAllWindows()[0]
+          // 主窗口里正在显示的笔记；不在笔记页时为 null（第一个窗口不一定是主窗口）
+          const win = mainWindow && !mainWindow.isDestroyed() ? mainWindow : null
           if (!win) return null
           const noteId = await win.webContents.executeJavaScript(
-            'window.__currentSelectedNoteId || null'
+            'window.__flotaVisibleNoteId ?? null'
           )
           if (!noteId) return null
           return services.noteDAO.findById(noteId)
@@ -1490,8 +1496,11 @@ registerExternalFileHandlers({ externalFileService, getMainWindow: () => mainWin
 
 // 应用退出时清理资源
 let isQuittingApp = false;
+let quitReady = false;
 app.on('before-quit', async (event) => {
   app.isQuiting = true;
+  if (!quitReady) event.preventDefault();
+  if (isQuittingApp) return;
 
   if (!isQuittingApp) {
     event.preventDefault();
@@ -1500,37 +1509,11 @@ app.on('before-quit', async (event) => {
     try {
       console.log('[App] 开始应用退出流程...');
 
-      // 0. 清理托盘；记忆索引不在退出时跑（会调用 LLM 摘要，和关闭数据库抢时间），
-      //    失焦和每小时的索引已经覆盖
+      // 先完成保存屏障；失败时不销毁窗口，也不提前停掉后台服务。
+      await saveAllWindows(BrowserWindow.getAllWindows());
       if (tray) { tray.destroy(); tray = null; }
-      services.ingressService?.stop()
-      services.migrationService?.stopAutoMigration()
-
-      // 1. 通知所有窗口保存数据
-      const allWindows = BrowserWindow.getAllWindows();
-      const savePromises = allWindows.map(async (window) => {
-        if (!window.isDestroyed()) {
-          try {
-            await window.webContents.executeJavaScript(`
-              (async () => {
-                if (window.__saveBeforeClose) {
-                  await window.__saveBeforeClose();
-                  return true;
-                }
-                return false;
-              })();
-            `);
-          } catch (error) {
-            console.error('[App] 窗口保存失败:', error);
-          }
-        }
-      });
-
-      await Promise.all(savePromises);
-      console.log('[App] 所有窗口数据已保存');
-
-      // 2. 等待一些额外时间确保保存完成
-      await new Promise(resolve => setTimeout(resolve, 500));
+      services.ingressService?.stop();
+      services.migrationService?.stopAutoMigration();
 
       // 3. 强制销毁所有窗口（使用 destroy 而不是 close，避免 close 事件的 preventDefault 阻止关闭）
       const remainingWindows = BrowserWindow.getAllWindows();
@@ -1547,11 +1530,13 @@ app.on('before-quit', async (event) => {
       console.log('[App] 应用资源清理完成');
 
       // 5. 真正退出应用
+      quitReady = true;
       app.quit();
     } catch (error) {
       console.error('[App] 应用退出清理失败:', error);
-      // 即使失败也强制退出
-      app.exit(0);
+      isQuittingApp = false;
+      app.isQuiting = false;
+      require('electron').dialog.showErrorBox('尚未退出 Flota', `保存没有完成，请重试。\n${error.message}`);
     }
   }
 });

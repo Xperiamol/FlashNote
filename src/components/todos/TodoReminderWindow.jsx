@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import { Box, Button, IconButton, Paper, Typography } from '@mui/material';
-import { alpha } from '@mui/material/styles';
+
 import {
   CheckRounded as CompleteIcon,
   CloseRounded as CloseIcon,

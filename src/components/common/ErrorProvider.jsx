@@ -100,7 +100,7 @@ export function ErrorProvider({ children }) {
           variant="filled"
           sx={{ width: '100%', alignItems: 'center' }}
           action={actionToast?.action ? (
-            <Button color="inherit" size="small" sx={{ fontWeight: 700 }}
+            <Button color="inherit" size="small" sx={{ fontWeight: 700, flexShrink: 0, whiteSpace: 'nowrap' }}
               onClick={() => { actionToast.action.onClick?.(); setActionToast(null); }}>
               {actionToast.action.label}
             </Button>

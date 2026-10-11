@@ -5,7 +5,9 @@
   "main": "electron/main.js",
   "homepage": "./",
   "scripts": {
+    "predev": "node scripts/generate-third-party-licenses.cjs",
     "dev": "vite",
+    "prebuild": "node scripts/generate-third-party-licenses.cjs",
     "build": "vite build",
     "preview": "vite preview",
     "electron": "electron .",
@@ -18,13 +20,16 @@
     "mcp:server": "node scripts/manage-sqlite.js node && node electron/mcp-server.js",
     "sqlite:electron": "node scripts/manage-sqlite.js electron",
     "sqlite:node": "node scripts/manage-sqlite.js node",
-    "test": "echo \"Error: no test specified\" && exit 1",
+    "test": "node scripts/tests/run-unit-tests.cjs",
     "test:ai-actions": "node --test scripts/tests/pending-actions.test.mjs",
+    "test:whiteboard": "node --test scripts/tests/whiteboard-ai.test.mjs scripts/tests/whiteboard-generator.test.mjs scripts/tests/generation-task.test.mjs",
     "test:widgets": "node --test scripts/tests/widget-runtime.test.mjs",
     "test:notes": "node --test scripts/tests/note-reuse.test.mjs",
     "test:editor": "node scripts/tests/editor-regression.cjs",
-    "test:sync": "node --test scripts/tests/sync-e2e.test.mjs",
+    "test:sync": "node --test scripts/tests/sync-e2e.test.mjs && node scripts/tests/run-electron-node.cjs scripts/tests/sync-lock.cjs",
+    "test:webdav": "node --test scripts/tests/webdav-concurrency.test.mjs",
     "test:backup": "node scripts/tests/run-electron-node.cjs scripts/tests/backup-roundtrip.cjs",
+    "test:attachments": "node --test scripts/tests/ai-attachments.test.mjs",
     "test:images": "node --test scripts/tests/image-references.test.mjs",
     "build:clipper": "node scripts/build-clipper-extension.js",
     "release:notes": "node scripts/extract-release-notes.js",
@@ -34,7 +39,8 @@
     "version": "node scripts/auto-changelog.js && git add CHANGELOG.md",
     "release:patch:push": "npm run release:patch && git push origin main && git push origin --tags",
     "release:minor:push": "npm run release:minor && git push origin main && git push origin --tags",
-    "release:major:push": "npm run release:major && git push origin main && git push origin --tags"
+    "release:major:push": "npm run release:major && git push origin main && git push origin --tags",
+    "licenses": "node scripts/generate-third-party-licenses.cjs"
   },
   "keywords": [
     "electron",
@@ -76,6 +82,7 @@
     "adm-zip": "^0.6.1",
     "axios": "^1.12.2",
     "better-sqlite3": "^12.6.0",
+    "cfb": "^1.2.2",
     "chart.js": "^4.5.1",
     "compute-cosine-similarity": "^1.1.0",
     "date-fns": "^4.1.0",
@@ -90,12 +97,14 @@
     "katex": "^0.16.25",
     "linkedom": "^0.18.13",
     "lucide-react": "^0.542.0",
+    "mammoth": "^1.13.0",
     "markdown-it": "^14.1.0",
     "markdown-it-container": "^4.0.0",
     "markdown-it-highlightjs": "^4.2.0",
     "markdown-it-mark": "^4.0.0",
     "marked": "^18.0.14",
     "p-limit": "^7.2.0",
+    "pdfjs-dist": "^6.4.299",
     "preact": "^10.29.8",
     "react": "^18.3.1",
     "react-dom": "^18.3.1",
@@ -112,7 +121,9 @@
     "turndown": "^7.2.4",
     "turndown-plugin-gfm": "^1.0.2",
     "vite": "^6.3.5",
+    "word-extractor": "^1.0.4",
     "ws": "^8.19.0",
+    "xlsx": "https://cdn.sheetjs.com/xlsx-0.20.3/xlsx-0.20.3.tgz",
     "yup": "^1.7.1",
     "zustand": "^5.0.8"
   },
@@ -161,6 +172,110 @@
         "name": "Excalidraw Drawing",
         "description": "Excalidraw 白板",
         "mimeType": "application/vnd.excalidraw+json",
+        "role": "Viewer",
+        "rank": "Alternate"
+      },
+      {
+        "ext": "html",
+        "name": "HTML Document",
+        "description": "网页",
+        "mimeType": "text/html",
+        "role": "Viewer",
+        "rank": "Alternate"
+      },
+      {
+        "ext": "docx",
+        "name": "Word Document",
+        "description": "Word 文档",
+        "mimeType": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+        "role": "Viewer",
+        "rank": "Alternate"
+      },
+      {
+        "ext": "doc",
+        "name": "Word 97-2003 Document",
+        "description": "Word 97-2003 文档",
+        "mimeType": "application/msword",
+        "role": "Viewer",
+        "rank": "Alternate"
+      },
+      {
+        "ext": "wps",
+        "name": "WPS Writer Document",
+        "description": "WPS 文字",
+        "mimeType": "application/wps-office.wps",
+        "role": "Viewer",
+        "rank": "Alternate"
+      },
+      {
+        "ext": "xlsx",
+        "name": "Excel Workbook",
+        "description": "Excel 表格",
+        "mimeType": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        "role": "Viewer",
+        "rank": "Alternate"
+      },
+      {
+        "ext": "xls",
+        "name": "Excel 97-2003 Workbook",
+        "description": "Excel 97-2003 表格",
+        "mimeType": "application/vnd.ms-excel",
+        "role": "Viewer",
+        "rank": "Alternate"
+      },
+      {
+        "ext": "et",
+        "name": "WPS Spreadsheet",
+        "description": "WPS 表格",
+        "mimeType": "application/wps-office.et",
+        "role": "Viewer",
+        "rank": "Alternate"
+      },
+      {
+        "ext": "csv",
+        "name": "CSV",
+        "description": "CSV 表格",
+        "mimeType": "text/csv",
+        "role": "Viewer",
+        "rank": "Alternate"
+      },
+      {
+        "ext": "pptx",
+        "name": "PowerPoint Presentation",
+        "description": "PowerPoint 演示",
+        "mimeType": "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+        "role": "Viewer",
+        "rank": "Alternate"
+      },
+      {
+        "ext": "ppt",
+        "name": "PowerPoint 97-2003 Presentation",
+        "description": "PowerPoint 97-2003 演示",
+        "mimeType": "application/vnd.ms-powerpoint",
+        "role": "Viewer",
+        "rank": "Alternate"
+      },
+      {
+        "ext": "dps",
+        "name": "WPS Presentation",
+        "description": "WPS 演示",
+        "mimeType": "application/wps-office.dps",
+        "role": "Viewer",
+        "rank": "Alternate"
+      },
+      {
+        "ext": "pdf",
+        "name": "PDF Document",
+        "description": "PDF 文档",
+        "mimeType": "application/pdf",
+        "role": "Viewer",
+        "rank": "Alternate"
+      },
+      {
+        "ext": "epub",
+        "name": "EPUB Book",
+        "description": "EPUB 电子书",
+        "mimeType": "application/epub+zip",
         "role": "Viewer",
         "rank": "Alternate"
       }
@@ -220,7 +335,22 @@
       "!node_modules/7zip-bin",
       "!node_modules/rxjs",
       "!node_modules/zod",
-      "!node_modules/sass"
+      "!node_modules/sass",
+      "!node_modules/pdfjs-dist/build",
+      "!node_modules/pdfjs-dist/web",
+      "!node_modules/pdfjs-dist/types",
+      "!node_modules/pdfjs-dist/image_decoders",
+      "!node_modules/pdfjs-dist/**/*.map",
+      "!node_modules/pdfjs-dist/legacy/build/pdf.mjs",
+      "!node_modules/pdfjs-dist/legacy/build/pdf.worker.mjs",
+      "!node_modules/pdfjs-dist/legacy/build/pdf.sandbox*",
+      "!node_modules/pdfjs-dist/legacy/web",
+      "!node_modules/pdfjs-dist/legacy/image_decoders",
+      "!node_modules/xlsx/dist/xlsx.*",
+      "!node_modules/xlsx/dist/*.map",
+      "!node_modules/xlsx/dist/cpexcel.full.mjs",
+      "!node_modules/xlsx/dist/*.d.ts",
+      "!node_modules/xlsx/types"
     ],
     "asarUnpack": [
       "node_modules/better-sqlite3/**/*",
@@ -252,6 +382,10 @@
         "filter": [
           "**/*"
         ]
+      },
+      {
+        "from": "build/THIRD_PARTY_NOTICES.txt",
+        "to": "THIRD_PARTY_NOTICES.txt"
       }
     ],
     "beforePack": "./scripts/before-pack.js",

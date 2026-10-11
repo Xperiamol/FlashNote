@@ -917,8 +917,10 @@ const NoteList = ({ showDeleted = false, onMultiSelectChange, onMultiSelectRefCh
             sx: (theme) => ({
               backdropFilter: theme?.custom?.glass?.backdropFilter || 'blur(6px)',
               backgroundColor: theme?.custom?.glass?.background || (theme.palette.mode === 'dark' ? 'rgba(255,255,255,0.05)' : 'rgba(255,255,255,0.4)'),
+              backgroundImage: theme?.custom?.glass?.backgroundImage || 'none',
               border: theme?.custom?.glass?.border || `1px solid ${theme.palette.divider}`,
-              borderRadius: 1
+              boxShadow: theme?.custom?.glass?.boxShadow,
+              borderRadius: 1.75
             })
           }
         }}

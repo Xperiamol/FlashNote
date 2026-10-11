@@ -21,7 +21,7 @@ import {
   Add as AddIcon,
   Label as LabelIcon
 } from '../common/AppIcons';
-import { parseTags, formatTags } from '../../utils/tagUtils';
+
 import { isImeComposing } from '../../utils/imeUtils'
 
 /**

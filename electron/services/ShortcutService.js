@@ -1,4 +1,4 @@
-const { globalShortcut, BrowserWindow } = require('electron');
+const { globalShortcut } = require('electron');
 const { DEFAULT_SHORTCUTS } = require('../utils/shortcutUtils');
 
 const PLUGIN_SHORTCUT_SETTING_KEY = 'pluginShortcuts';

@@ -125,7 +125,6 @@ const zhCN = {
     saveTooltip: '保存 (Ctrl+S)',
     saveWhiteboardTooltip: '保存画布 (Ctrl+S)',
     exportPngTooltip: '导出 PNG（高清）',
-    dragImageHere: '拖拽图片到这里'
   },
   settings: {
     general: '通用',
@@ -168,7 +167,6 @@ const zhCN = {
     change: '更换',
     select: '选择',
     delete: '删除',
-    shortcuts: '快捷键',
     resetAll: '重置所有',
     shortcutConflict: '快捷键冲突：与"{name}"冲突',
     shortcutDisabled: '快捷键设置暂时不可更改',

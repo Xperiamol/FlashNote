@@ -1,6 +1,6 @@
 const { calendar } = require('@googleapis/calendar');
 const { OAuth2Client } = require('google-auth-library');
-const { ipcMain, BrowserWindow, shell, app } = require('electron');
+const { ipcMain, shell, app } = require('electron');
 const http = require('http');
 const url = require('url');
 const TodoDAO = require('../dao/TodoDAO');

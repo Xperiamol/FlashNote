@@ -1,3 +1,4 @@
+const { saveWindow } = require('../utils/saveWindows');
 const { app, BrowserWindow, screen, shell } = require('electron');
 const { EventEmitter } = require('events');
 const path = require('path');
@@ -1060,49 +1061,21 @@ class WindowManager extends EventEmitter {
       }
 
       // 设置窗口事件
+      let closing = false;
+      let savedForClose = false;
       noteWindow.on('close', async (event) => {
-        // 阻止窗口立即关闭
+        if (savedForClose) return;
         event.preventDefault();
-
+        if (closing) return;
+        closing = true;
         try {
-          console.log('笔记窗口关闭，执行保存前操作');
-
-          // 使用 Promise 等待保存完成通知
-          const savePromise = noteWindow.webContents.executeJavaScript(`
-            new Promise((resolve) => {
-              console.log('[窗口关闭] 开始执行保存');
-              
-              // 监听保存完成事件
-              const handleComplete = () => {
-                console.log('[窗口关闭] 收到保存完成通知');
-                window.removeEventListener('standalone-save-complete', handleComplete);
-                resolve(true);
-              };
-              window.addEventListener('standalone-save-complete', handleComplete);
-              
-              // 触发保存事件
-              const saveEvent = new CustomEvent('standalone-window-save');
-              window.dispatchEvent(saveEvent);
-              
-              // 500ms超时保护
-              setTimeout(() => {
-                console.log('[窗口关闭] 保存超时，强制完成');
-                window.removeEventListener('standalone-save-complete', handleComplete);
-                resolve(false);
-              }, 500);
-            })
-          `);
-
-          await savePromise;
-          console.log('保存执行完成，准备关闭窗口');
-
-        } catch (error) {
-          console.error('窗口关闭时保存失败:', error);
-        } finally {
-          // 移除事件监听器，允许窗口真正关闭
-          noteWindow.removeAllListeners('close');
+          await saveWindow(noteWindow);
+          savedForClose = true;
           noteWindow.close();
-        }
+        } catch (error) {
+          console.error('保存失败，保留笔记窗口:', error);
+          require('electron').dialog.showErrorBox('尚未关闭笔记', error.message);
+        } finally { closing = false; }
       });
 
       noteWindow.on('closed', () => {
@@ -1577,36 +1550,10 @@ class WindowManager extends EventEmitter {
    */
   async closeWindow(id) {
     const window = this.windows.get(id);
-    if (window && !window.isDestroyed()) {
-      try {
-        // 在关闭前触发保存
-        console.log('[WindowManager] 关闭窗口前触发保存:', id);
-        await window.webContents.executeJavaScript(`
-          (async () => {
-            if (window.__saveBeforeClose) {
-              await window.__saveBeforeClose();
-              return true;
-            }
-            return false;
-          })();
-        `).catch(err => {
-          console.error('[WindowManager] 保存失败:', err);
-        });
-
-        // 等待保存完成（给一些缓冲时间）
-        await new Promise(resolve => setTimeout(resolve, 300));
-
-        // 关闭窗口
-        window.close();
-        return true;
-      } catch (error) {
-        console.error('[WindowManager] 关闭窗口失败:', error);
-        // 即使保存失败也关闭窗口
-        window.close();
-        return true;
-      }
-    }
-    return false;
+    if (!window || window.isDestroyed()) return false;
+    await saveWindow(window);
+    window.close();
+    return true;
   }
 
   /**
@@ -1621,7 +1568,7 @@ class WindowManager extends EventEmitter {
     }
     // 等待所有窗口关闭完成
     await Promise.all(closePromises);
-    this.windows.clear();
+    // 已关闭窗口由 closed 事件移除；被阻止关闭的窗口继续保留。
   }
 
   /**

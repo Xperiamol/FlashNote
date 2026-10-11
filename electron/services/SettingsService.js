@@ -1,33 +1,8 @@
+const { getUserDataPath } = require('../utils/userDataPath');
 const SettingDAO = require('../dao/SettingDAO');
 const { EventEmitter } = require('events');
 const path = require('path');
 const fs = require('fs');
-
-// 尝试加载 Electron，如果失败则使用 null（独立运行模式）
-let app = null;
-try {
-  const electron = require('electron');
-  app = electron.app;
-} catch (e) {
-  // 独立运行模式（如 MCP Server），不依赖 Electron
-}
-
-// 获取用户数据目录
-const getUserDataPath = () => {
-  if (app) {
-    return app.getPath('userData');
-  }
-  // 独立运行模式：使用标准路径
-  const platform = process.platform;
-  const homeDir = process.env.HOME || process.env.USERPROFILE;
-  if (platform === 'win32') {
-    return path.join(process.env.APPDATA || homeDir, 'Flota');
-  } else if (platform === 'darwin') {
-    return path.join(homeDir, 'Library', 'Application Support', 'Flota');
-  } else {
-    return path.join(homeDir, '.config', 'Flota');
-  }
-};
 
 class SettingsService extends EventEmitter {
   constructor() {
@@ -526,7 +501,7 @@ class SettingsService extends EventEmitter {
    * 选择壁纸文件，复制到 userData/wallpaper/ 并返回 app:// URL
    */
   async selectWallpaper() {
-    const { dialog, app } = require('electron');
+    const { dialog } = require('electron');
     const path = require('path');
     const fs = require('fs');
     const { validateImagePath } = require('../utils/ipcValidator');
@@ -549,7 +524,7 @@ class SettingsService extends EventEmitter {
 
       const srcPath = validateImagePath(result.filePaths[0], { maxSizeBytes: 20 * 1024 * 1024 });
       const ext = path.extname(srcPath).toLowerCase();
-      const wallpaperDir = path.join(app.getPath('userData'), 'wallpaper');
+      const wallpaperDir = path.join(getUserDataPath(), 'wallpaper');
       
       // 确保目录存在
       if (!fs.existsSync(wallpaperDir)) {

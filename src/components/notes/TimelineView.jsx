@@ -1,3 +1,4 @@
+import { imageUploadName } from '../../utils/editorImageSource'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
   Box,
@@ -975,7 +976,7 @@ const TimelineView = ({ onTodoUpdated }) => {
           try {
             const fileName = file.name && file.name !== 'image.png'
               ? file.name
-              : `clipboard_${Date.now()}_${index + 1}.png`
+              : imageUploadName(file, 'clipboard')
             const imagePath = filePath
               ? await imageAPI.saveFromPath(filePath, fileName)
               : await imageAPI.saveFromBuffer(new Uint8Array(await file.arrayBuffer()), fileName)

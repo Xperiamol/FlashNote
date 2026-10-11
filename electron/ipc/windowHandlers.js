@@ -1,3 +1,4 @@
+const { saveWindow } = require('../utils/saveWindows')
 const { ipcMain, BrowserWindow } = require('electron')
 
 const getEventWindow = (event) => BrowserWindow.fromWebContents(event.sender)
@@ -30,7 +31,7 @@ const registerWindowHandlers = (windowManager) => {
       if (w) (w.isMaximized() ? w.unmaximize() : w.maximize())
       return true
     },
-    'window:close': async (event) => { const w = getEventWindow(event); if (w) w.close(); return true },
+    'window:close': async (event) => { const w = getEventWindow(event); if (w) { await saveWindow(w); w.close() } return true },
     'window:hide': async (event) => { const w = getEventWindow(event); if (w) w.hide(); return true },
     'window:show': async (event) => { const w = getEventWindow(event); if (w) w.show(); return true },
     'window:focus': async (event) => { const w = getEventWindow(event); if (w) w.focus(); return true },

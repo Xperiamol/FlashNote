@@ -7,7 +7,7 @@ import {
 	InputAdornment,
 	IconButton,
 	Tooltip,
-	Chip,
+
 	Snackbar,
 	Alert,
 	LinearProgress,

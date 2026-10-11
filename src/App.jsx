@@ -23,6 +23,7 @@ import {
   Close as CloseIcon
 } from './components/common/AppIcons'
 import { useStore } from './store/useStore'
+import { getVisibleNoteId } from './utils/aiCore/uiLocation'
 import { useShallow } from 'zustand/react/shallow'
 import { usePluginViewByNavId } from './store/usePluginViews'
 import { createAppTheme } from './styles/theme'
@@ -168,8 +169,9 @@ function App() {
   // 日历视图相关状态
   const [calendarCurrentDate, setCalendarCurrentDate] = useState(new Date())
 
-  // 暴露当前选中笔记ID给主进程（AI助手用）
-  useEffect(() => { window.__currentSelectedNoteId = selectedNoteId }, [selectedNoteId])
+  // 暴露正在显示的笔记给主进程（AI 工具兜底用）；不在笔记页时为 null
+  const visibleNoteId = useStore(getVisibleNoteId)
+  useEffect(() => { window.__flotaVisibleNoteId = visibleNoteId }, [visibleNoteId])
   const [selectedDate, setSelectedDate] = useState(null)
   const [calendarShowCompleted, setCalendarShowCompleted] = useState(false)
   const [calendarViewMode, setCalendarViewMode] = useState('todos') // 'todos', 'notes', 'focus'

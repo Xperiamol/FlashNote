@@ -1,8 +1,6 @@
-import React, { useEffect, useRef } from 'react'
+import React, { useEffect, useRef, useId } from 'react'
 import { Box } from '@mui/material'
 import { alpha, useTheme } from '@mui/material/styles'
-
-let orbSeq = 0
 
 /**
  * 空状态英雄区的「流体生命」主视觉：gooey 粘性滤镜 + 形变呼吸 + 弹簧鼠标跟随 + 点击融合水滴。
@@ -16,7 +14,7 @@ const FlotaAIOrb = ({ sx }) => {
   const theme = useTheme()
   const isDark = theme.palette.mode === 'dark'
   const primary = theme.palette.primary.main
-  const filterId = useRef(`flota-orb-goo-${(orbSeq += 1)}`).current
+  const filterId = `flota-orb-goo-${useId().replace(/:/g, '')}`
 
   const interactiveRef = useRef(null)
   const gooeyRef = useRef(null)

@@ -12,7 +12,7 @@ import {
     Divider,
     List,
     ListItem,
-    ListItemText,
+
     Dialog,
     DialogTitle,
     DialogContent,
@@ -20,7 +20,7 @@ import {
     LinearProgress,
     Chip,
     Tooltip,
-    IconButton,
+
     Portal,
     Slider,
     useTheme
@@ -60,6 +60,7 @@ import { SettingRow, SettingGroupLabel } from './SettingRow';
 import AppUpdateCard from './AppUpdateCard';
 import { usePrefsStore } from '../../store/usePrefsStore';
 import FileTypesSetting from './FileTypesSetting';
+import OpenSourceLicenses from './OpenSourceLicenses';
 import ClipperSettings from './ClipperSettings';
 import UsageWaveCard from '../common/UsageWaveCard';
 import ObsidianImportExport from '../ObsidianImportExport/ObsidianImportExport';
@@ -2120,46 +2121,7 @@ const Settings = () => {
                             {t('about.openSourceDesc')}
                         </Typography>
 
-                        <Box sx={{ textAlign: 'left', maxWidth: 540, mx: 'auto' }}>
-                            {[
-                                { title: 'MIT License', libs: [
-                                    ['Electron', 'Copyright (c) 2013–2024 GitHub Inc.'],
-                                    ['React', 'Copyright (c) Meta Platforms, Inc. and affiliates'],
-                                    ['MUI (Material UI)', 'Copyright (c) 2014 Call-Em-All'],
-                                    ['TipTap', 'Copyright (c) 2021 Übermind GmbH'],
-                                    ['Excalidraw', 'Copyright (c) 2020 Excalidraw team'],
-                                    ['Vite', 'Copyright (c) 2019–present Evan You'],
-                                    ['better-sqlite3', 'Copyright (c) 2017–2024 Joshua Wise'],
-                                    ['axios', 'Copyright (c) 2014–present Matt Zabriskie & Collaborators'],
-                                    ['zustand', 'Copyright (c) 2019 Paul Henschel'],
-                                    ['i18next', 'Copyright (c) 2012–present i18next'],
-                                    ['markdown-it', 'Copyright (c) 2014 Vitaly Puzrin and Alex Kocharin'],
-                                    ['date-fns', 'Copyright (c) 2021 The date-fns contributors'],
-                                    ['ws', 'Copyright (c) 2011 Einar Otto Stangvik'],
-                                    ['tsdav', 'Copyright (c) 2021 Nate Wang'],
-                                    ['MCP SDK', 'Copyright (c) 2024 Anthropic, PBC'],
-                                ]},
-                                { title: 'Apache License 2.0', libs: [
-                                    ['Transformers.js', 'Copyright (c) 2022 The HuggingFace Inc. team'],
-                                    ['@googleapis/calendar', 'Copyright (c) 2012 Google LLC'],
-                                ]},
-                                { title: 'ISC License', libs: [
-                                    ['lucide-react', 'Copyright (c) 2022 Lucide Contributors'],
-                                ]},
-                            ].map(group => (
-                                <Box key={group.title} sx={{ mb: 2.5 }}>
-                                    <Chip label={group.title} size="small" color="primary" variant="outlined" sx={{ mb: 1 }} />
-                                    {group.libs.map(([name, copyright]) => (
-                                        <Box key={name} sx={{ pl: 1, py: 0.5, display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', borderBottom: '1px solid', borderColor: 'divider' }}>
-                                            <Box>
-                                                <Typography variant="body2" sx={{ fontWeight: 500, color: 'text.primary', lineHeight: 1.4 }}>{name}</Typography>
-                                                <Typography variant="caption" color="text.secondary">{copyright}</Typography>
-                                            </Box>
-                                        </Box>
-                                    ))}
-                                </Box>
-                            ))}
-                        </Box>
+                        <OpenSourceLicenses />
                     </Paper>
                 </TabPanel>
             </Box>

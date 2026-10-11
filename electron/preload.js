@@ -75,6 +75,8 @@ contextBridge.exposeInMainWorld('electronAPI', {
   // 应用信息
   // 笔记相关API
   notes: {
+    stageDraft: inv('note:stage-draft'),
+    clearDraft: inv('note:clear-draft'),
     create: inv('note:create'),
     getById: inv('note:get-by-id'),
     getAll: inv('note:get-all'),
@@ -371,6 +373,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
     testWebSearch: inv('ai:test-web-search'),
     getProviders: inv('ai:get-providers'),
     chat: inv('ai:chat'),
+    cancelChat: inv('ai:cancel-chat'),
     autoAnnotate: inv('ai:auto-annotate'),
     chatStream: (messages, options) => ipcRenderer.invoke('ai:chat-stream', { messages, options }),
     cancelStream: (requestId) => ipcRenderer.invoke('ai:cancel-stream', requestId),
@@ -398,7 +401,10 @@ contextBridge.exposeInMainWorld('electronAPI', {
   // 通用附件 API（按 SHA-1 内容去重存到 attachments/）
   // 外部文件（系统双击 / 打开方式 / 打开文件…）：每个文件一个独立窗口，可预览、编辑写回、导入为笔记
   externalFiles: {
+    stageDraft: inv('external-file:stage-draft'),
+    clearDraft: inv('external-file:clear-draft'),
     read: inv('external-file:read'),
+    convert: inv('external-file:convert'),
     render: inv('external-file:render'),
     write: inv('external-file:write'),
     writeWhiteboard: inv('external-file:write-whiteboard'),

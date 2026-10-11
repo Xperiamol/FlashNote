@@ -2,24 +2,9 @@
  * 集中式日志服务 - 支持文件输出、日志分级和自动轮转
  */
 
+const { getUserDataPath } = require('../utils/userDataPath');
 const fs = require('fs');
 const path = require('path');
-
-let app = null;
-try {
-  const electron = require('electron');
-  app = electron.app;
-} catch (e) {
-  // 独立运行模式
-}
-
-const getUserDataPath = () => {
-  if (app) return app.getPath('userData');
-  const homeDir = process.env.HOME || process.env.USERPROFILE;
-  if (process.platform === 'win32') return path.join(process.env.APPDATA || homeDir, 'Flota');
-  if (process.platform === 'darwin') return path.join(homeDir, 'Library', 'Application Support', 'Flota');
-  return path.join(homeDir, '.config', 'Flota');
-};
 
 const LEVELS = { debug: 0, info: 1, warn: 2, error: 3 };
 const MAX_FILE_SIZE = 5 * 1024 * 1024; // 5MB

@@ -58,6 +58,8 @@ const FloatingGlassSurface = forwardRef(function FloatingGlassSurface({
   onClickAway,
   clickAwayDisabled = false,
   ariaLabel,
+  onDrop,
+  onDragOver,
   portalContainer,
   sx
 }, ref) {
@@ -65,6 +67,8 @@ const FloatingGlassSurface = forwardRef(function FloatingGlassSurface({
     <Fade in={open} timeout={{ enter: 160, exit: 120 }} mountOnEnter unmountOnExit>
       <Paper
         ref={ref}
+        onDrop={onDrop}
+        onDragOver={onDragOver}
         role={ariaLabel ? 'dialog' : undefined}
         aria-label={ariaLabel}
         elevation={0}

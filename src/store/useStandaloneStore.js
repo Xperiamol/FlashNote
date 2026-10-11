@@ -82,13 +82,7 @@ export const useStandaloneStore = create((set, get) => ({
         return { success: true, data: updatedNote }
       }
       
-      // 无返回数据时，兜底本地合并
-      set(state => ({
-        notes: state.notes.map(note => 
-          note.id === noteId ? { ...note, ...updates } : note
-        )
-      }))
-      return { success: !!result?.success, data: get().notes.find(n => n.id === noteId), error: result?.error }
+      return { success: false, error: result?.error || '保存未返回已持久化的笔记，请重试' }
     } catch (error) {
       console.error('更新笔记失败:', error)
       return { success: false, error: error.message }

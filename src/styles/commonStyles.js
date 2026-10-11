@@ -9,30 +9,33 @@ export const rowActionRevealSx = {
     isolation: 'isolate',
     color: 'text.primary',
     pointerEvents: 'none',
-    backgroundColor: 'transparent',
+    background: 'transparent',
     transition: 'color 150ms ease',
     '& > svg, & > .MuiCircularProgress-root': {
       opacity: 0,
       zIndex: 1,
-      transition: 'opacity 150ms ease',
+      transition: 'opacity 150ms ease, transform 150ms ease',
     },
-    // 底衬跟随主题：浅色模式微白、深色模式微黑，只是给纯高斯模糊加一点点色，
-    // 不做成实心圆底——底下的内容仍应透出来，只是被模糊 + 轻微调色
-    '&::before': (theme) => ({
+    // 只模糊按钮后方的内容，不叠加白／黑底色，保留壁纸原本的颜色。
+    '&::before': {
       content: '""',
       position: 'absolute',
-      inset: -12,
+      inset: -8,
       zIndex: 0,
       opacity: 0,
       borderRadius: '50%',
-      backgroundColor: theme.palette.mode === 'dark' ? 'rgba(0, 0, 0, 0.28)' : 'rgba(255, 255, 255, 0.5)',
+      background: 'transparent',
       backdropFilter: 'blur(9px)',
       WebkitBackdropFilter: 'blur(9px)',
-      maskImage: 'radial-gradient(circle, #000 34%, transparent 90%)',
+      maskImage: 'radial-gradient(ellipse closest-side, #000 35%, rgba(0,0,0,0.65) 60%, transparent 100%)',
+      transition: 'opacity 150ms ease',
       pointerEvents: 'none',
-    }),
+    },
     '& > svg': { position: 'relative' },
-    '&:hover': { color: 'primary.main', backgroundColor: 'transparent' },
+    // 用图标反馈交互，避免 MUI 点击涟漪又画出一块有颜色的按钮底。
+    '& > .MuiTouchRipple-root': { display: 'none' },
+    '&:hover, &.Mui-focusVisible': { color: 'primary.main', background: 'transparent' },
+    '&:active': { background: 'transparent', '& > svg': { transform: 'scale(0.92)' } },
   },
   // 只在鼠标悬停 / 键盘聚焦时显示；鼠标点击留下的焦点不应让按钮一直挂着
   '&:hover .row-inline-action, &:has(.row-inline-action:focus-visible) .row-inline-action, &[data-menu-open="true"] .row-inline-action': {
@@ -46,7 +49,7 @@ export const rowActionRevealSx = {
     },
   },
   '@media (prefers-reduced-motion: reduce)': {
-    '& .row-inline-action, & .row-inline-action > svg, & .row-inline-action > .MuiCircularProgress-root': { transition: 'none' },
+    '& .row-inline-action, & .row-inline-action::before, & .row-inline-action > svg, & .row-inline-action > .MuiCircularProgress-root': { transition: 'none' },
   },
 };
 

@@ -69,7 +69,6 @@ export default function AppUpdateCard({ version, info, autoCheck, onAutoCheckCha
         <Box sx={{ display: 'flex', alignItems: 'center', gap: 2, px: 2, py: 1.25, borderTop: 1, borderColor: 'divider' }}>
           <Box sx={{ flex: 1, minWidth: 0 }}>
             <Typography sx={{ fontSize: 13.5, fontWeight: 500 }}>启动时自动检查更新</Typography>
-            <Typography sx={{ fontSize: 12, color: 'text.secondary', mt: 0.125 }}>有新版本时提醒你，不会自动下载</Typography>
           </Box>
           <Switch checked={autoCheck} onChange={(event) => onAutoCheckChange(event.target.checked)}
             inputProps={{ 'aria-label': '启动时自动检查更新' }} />

@@ -28,16 +28,23 @@ export const createAppTheme = (mode = 'light', primaryColor = '#1976d2', { onWal
     const backgroundDefault = isDark ? '#161618' : '#f4f4f2';
     const backgroundPaper = isDark ? '#1f1f22' : '#ffffff';
 
-    // 浮层（菜单 / 弹窗 / 对话框）：实心底色 + 细边框 + 柔和投影，不用毛玻璃和渐变
-    const glassBackground = isDark ? '#242427' : '#ffffff';
+    // 全局浮层材质（菜单 / 弹窗 / 对话框）统一使用液态玻璃：
+    // 半透明底让壁纸和内容透出，背景模糊负责可读性，顶部高光负责材质边界。
+    // 所有 MUI 浮层和 AppContextMenu 都从 custom.glass 读取这一组 token。
+    const glassBackground = isDark ? 'rgba(31,31,35,0.72)' : 'rgba(255,255,255,0.72)';
     const glassBorder = isDark
-        ? '1px solid rgba(255, 255, 255, 0.09)'
-        : '1px solid rgba(0, 0, 0, 0.08)';
-    const glassBlur = 'none';
-    const glassBackgroundImage = 'none';
+        ? '1px solid rgba(255, 255, 255, 0.14)'
+        : '1px solid rgba(255, 255, 255, 0.72)';
+    const glassBlur = 'blur(24px) saturate(165%)';
+    const glassBackgroundImage = isDark
+        ? 'linear-gradient(135deg, rgba(255,255,255,0.075), rgba(255,255,255,0) 48%, rgba(120,150,255,0.035))'
+        : 'linear-gradient(135deg, rgba(255,255,255,0.52), rgba(255,255,255,0.06) 48%, rgba(120,150,255,0.025))';
     const glassShadow = isDark
         ? '0 12px 32px rgba(0, 0, 0, 0.45)'
         : '0 12px 32px rgba(0, 0, 0, 0.10), 0 2px 6px rgba(0, 0, 0, 0.04)';
+    const glassMenuShadow = isDark
+        ? '0 18px 56px rgba(0, 0, 0, 0.48), 0 4px 16px rgba(0, 0, 0, 0.18)'
+        : '0 18px 56px rgba(22,22,24, 0.18), 0 4px 16px rgba(22,22,24, 0.08)';
 
     // Surface tokens — 用于替换全应用的 rgba(255,255,255,0.x) / rgba(0,0,0,0.x) 硬编码
     const surface = {
@@ -478,7 +485,7 @@ export const createAppTheme = (mode = 'light', primaryColor = '#1976d2', { onWal
                         backgroundColor: glassBackground,
                         backgroundImage: glassBackgroundImage,
                         border: glassBorder,
-                        borderRadius: 12,
+                        borderRadius: 14,
                         boxShadow: glassShadow,
                     }
                 }
@@ -521,7 +528,7 @@ export const createAppTheme = (mode = 'light', primaryColor = '#1976d2', { onWal
                         backgroundColor: glassBackground,
                         backgroundImage: glassBackgroundImage,
                         border: glassBorder,
-                        borderRadius: 12,
+                        borderRadius: 14,
                         boxShadow: glassShadow,
                     }
                 }
@@ -534,7 +541,7 @@ export const createAppTheme = (mode = 'light', primaryColor = '#1976d2', { onWal
                         backgroundColor: glassBackground,
                         backgroundImage: glassBackgroundImage,
                         border: glassBorder,
-                        borderRadius: 12,
+                        borderRadius: 14,
                         boxShadow: glassShadow,
                     }
                 }
@@ -547,7 +554,7 @@ export const createAppTheme = (mode = 'light', primaryColor = '#1976d2', { onWal
                         backgroundColor: glassBackground,
                         backgroundImage: glassBackgroundImage,
                         border: glassBorder,
-                        borderRadius: 12,
+                        borderRadius: 14,
                         boxShadow: glassShadow,
                     }
                 }
@@ -713,6 +720,7 @@ export const createAppTheme = (mode = 'light', primaryColor = '#1976d2', { onWal
                 backdropFilter: glassBlur,
                 border: glassBorder,
                 boxShadow: glassShadow,
+                menuShadow: glassMenuShadow,
             },
             surface,
             onWallpaper,

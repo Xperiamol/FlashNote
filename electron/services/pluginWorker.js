@@ -9,7 +9,6 @@ const {
   pluginPath,
   manifest,
   permissions,
-  storagePath,
   timeout: rpcTimeout = 15000
 } = workerData
 

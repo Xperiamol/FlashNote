@@ -125,7 +125,6 @@ const enUS = {
     saveTooltip: 'Save (Ctrl+S)',
     saveWhiteboardTooltip: 'Save Whiteboard (Ctrl+S)',
     exportPngTooltip: 'Export PNG (high quality)',
-    dragImageHere: 'Drag image here'
   },
   settings: {
     general: 'General',
@@ -168,7 +167,6 @@ const enUS = {
     change: 'Change',
     select: 'Select',
     delete: 'Delete',
-    shortcuts: 'Shortcuts',
     resetAll: 'Reset All',
     shortcutConflict: 'Shortcut conflict: conflicts with "{name}"',
     shortcutDisabled: 'Shortcut settings are temporarily unavailable',

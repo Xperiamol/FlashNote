@@ -14,8 +14,6 @@ const isDebug = () => {
   }
 };
 
-const noop = () => {};
-
 const logger = {
   /** 调试信息，生产默认静默 */
   debug: (...args) => { if (isDebug()) console.log('[DEBUG]', ...args); },
