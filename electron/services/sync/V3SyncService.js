@@ -4,9 +4,11 @@
  * 集成到现有 CloudSyncManager 系统中
  */
 
+const { getUserDataPath } = require('../../utils/userDataPath');
 const { EventEmitter } = require('events');
 const path = require('path');
 const fs = require('fs');
+const { writeFileAtomicSync } = require('../../utils/atomicFile');
 
 let safeStorage = null;
 try {
@@ -14,29 +16,6 @@ try {
 } catch (e) {
   safeStorage = null;
 }
-
-// 获取用户数据路径（兼容 standalone 模式）
-const getUserDataPath = () => {
-  let app = null;
-  try {
-    app = require('electron').app;
-  } catch (e) {
-    // Standalone mode
-  }
-  
-  if (app) return app.getPath('userData');
-  
-  const platform = process.platform;
-  const homeDir = process.env.HOME || process.env.USERPROFILE;
-  
-  if (platform === 'win32') {
-    return path.join(process.env.APPDATA || homeDir, 'Flota');
-  } else if (platform === 'darwin') {
-    return path.join(homeDir, 'Library', 'Application Support', 'Flota');
-  } else {
-    return path.join(homeDir, '.config', 'Flota');
-  }
-};
 
 const SyncEngine = require('./SyncEngine');
 
@@ -244,12 +223,12 @@ class V3SyncService extends EventEmitter {
 
     engine.on('syncComplete', (result) => {
       this.isSyncing = false;
-      this.lastSyncTime = Date.now();
       this.lastSyncDuration = this.lastSyncStartedAt
-        ? this.lastSyncTime - this.lastSyncStartedAt
+        ? Date.now() - this.lastSyncStartedAt
         : 0;
 
       if (result.success) {
+        this.lastSyncTime = Date.now();
         this.status = 'success';
         this.lastError = null;
         this.lastErrorCategory = null;
@@ -301,6 +280,7 @@ class V3SyncService extends EventEmitter {
    *  - 不写盘（saveConfig 仅在验证通过后调用），避免把错误账户残留到下次启动
    */
   async enable() {
+    if (this.isSyncing || this._preparingSync) throw new Error('请等待当前同步完成');
     const nextConfig = this.buildConfigCandidate();
     this.validateConnectionConfig(nextConfig);
 
@@ -363,6 +343,7 @@ class V3SyncService extends EventEmitter {
    * 禁用同步服务
    */
   async disable() {
+    if (this.isSyncing || this._preparingSync) throw new Error('请等待当前同步完成后再关闭同步');
     console.log('[V3SyncService] 禁用同步服务...');
 
     this.isEnabled = false;
@@ -444,6 +425,7 @@ class V3SyncService extends EventEmitter {
    * `options` 参数已废弃，仅为向后兼容保留签名。
    */
   async saveConnectionConfig(configInput = {}, _options = undefined) {
+    if (this.isSyncing || this._preparingSync) throw new Error('请等待当前同步完成后再修改连接');
     const nextConfig = this.buildConfigCandidate(configInput);
     this.validateConnectionConfig(nextConfig);
 
@@ -488,12 +470,21 @@ class V3SyncService extends EventEmitter {
       throw new Error('同步服务未启用');
     }
 
-    if (this.isSyncing) {
+    if (this.isSyncing || this._preparingSync) {
       throw new Error('同步已在进行中');
     }
 
-    console.log('[V3SyncService] 开始手动同步...');
-    return await this.engine.performSync();
+    this._preparingSync = true;
+    try {
+      const { BrowserWindow } = require('electron');
+      await require('../../utils/saveWindows').saveAllWindows(BrowserWindow.getAllWindows(), { reason: 'sync' });
+      return await this.engine.performSync();
+    } catch (error) {
+      this.lastError = error.message;
+      this.status = 'error';
+      this.emit('syncError', error);
+      throw error;
+    } finally { this._preparingSync = false; }
   }
 
   /**
@@ -504,8 +495,13 @@ class V3SyncService extends EventEmitter {
       throw new Error('同步服务未启用');
     }
 
-    console.log('[V3SyncService] 开始强制全量同步...');
-    return await this.engine.forceFullSync();
+    if (this.isSyncing || this._preparingSync) throw new Error('同步已在进行中');
+    this._preparingSync = true;
+    try {
+      const { BrowserWindow } = require('electron');
+      await require('../../utils/saveWindows').saveAllWindows(BrowserWindow.getAllWindows(), { reason: 'sync' });
+      return await this.engine.forceFullSync();
+    } finally { this._preparingSync = false; }
   }
 
   /**
@@ -575,6 +571,7 @@ class V3SyncService extends EventEmitter {
    * @param {string} category - 类别名称：'notes', 'images', 'settings', 'todos'
    */
   enableCategory(category) {
+    if (this.isSyncing || this._preparingSync) throw new Error('请等待当前同步完成后再修改同步类别');
     if (!this.config.syncCategories) {
       this.config.syncCategories = [];
     }
@@ -595,6 +592,7 @@ class V3SyncService extends EventEmitter {
    * @param {string} category - 类别名称：'notes', 'images', 'settings', 'todos'
    */
   disableCategory(category) {
+    if (this.isSyncing || this._preparingSync) throw new Error('请等待当前同步完成后再修改同步类别');
     if (!this.config.syncCategories) {
       this.config.syncCategories = [];
     }
@@ -712,10 +710,11 @@ class V3SyncService extends EventEmitter {
         delete configToSave.credentials.password;
       }
 
-      fs.writeFileSync(this.configPath, JSON.stringify(configToSave, null, 2), 'utf8');
+      writeFileAtomicSync(this.configPath, JSON.stringify(configToSave, null, 2));
       console.log('[V3SyncService] 配置已保存');
     } catch (error) {
       console.error('[V3SyncService] 保存配置失败:', error);
+      throw error;
     }
   }
 
@@ -923,6 +922,7 @@ class V3SyncService extends EventEmitter {
    * 清除所有配置和缓存
    */
   clearAll() {
+    if (this.isSyncing || this._preparingSync) throw new Error('请等待当前同步完成后再清除配置');
     this.stopAutoSync();
     this.isEnabled = false;
     this.engine = null;

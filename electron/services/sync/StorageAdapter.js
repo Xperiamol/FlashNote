@@ -4,6 +4,7 @@
  * 提供统一的本地数据访问接口，支持原子化读写
  */
 
+const { isDeepStrictEqual } = require('util');
 const NoteDAO = require('../../dao/NoteDAO');
 const TodoDAO = require('../../dao/TodoDAO');
 const DatabaseManager = require('../../dao/DatabaseManager');
@@ -73,10 +74,36 @@ class StorageAdapter {
     this.db = this.dbManager.getDatabase();
     this.noteDAO = new NoteDAO(this.dbManager);
     this.todoDAO = new TodoDAO(this.dbManager);
+    // 修订号由 SQLite 触发器维护，涵盖 DAO、导入、同步以及直接 SQL 写入。
+    // 不能以 updated_at 作为缓存键：跨端会保留时间戳，同一秒内也可能多次编辑。
+    this.db.exec(`
+      CREATE TABLE IF NOT EXISTS sync_note_revisions (note_id INTEGER PRIMARY KEY, revision INTEGER NOT NULL);
+      CREATE TRIGGER IF NOT EXISTS sync_note_revision_insert AFTER INSERT ON notes BEGIN
+        INSERT INTO sync_note_revisions VALUES (NEW.id, 1) ON CONFLICT(note_id) DO UPDATE SET revision = revision + 1;
+      END;
+      CREATE TRIGGER IF NOT EXISTS sync_note_revision_update AFTER UPDATE ON notes BEGIN
+        INSERT INTO sync_note_revisions VALUES (NEW.id, 1) ON CONFLICT(note_id) DO UPDATE SET revision = revision + 1;
+      END;
+      CREATE TRIGGER IF NOT EXISTS sync_note_revision_delete AFTER DELETE ON notes BEGIN
+        INSERT INTO sync_note_revisions VALUES (OLD.id, 1) ON CONFLICT(note_id) DO UPDATE SET revision = revision + 1;
+      END;
+    `);
+    this._notesCache = new Map();
+    this._hashCache = new Map();
+  }
+
+  // 只锁住同步锁文件的短暂变更，网络请求不在 SQLite 事务内。
+  withSyncLockTransaction(callback) {
+    return this.db.transaction(callback).immediate();
   }
 
   isSyncableSetting(key, value = '') {
     return isSyncableSetting(key, value);
+  }
+
+  invalidateNoteCache() {
+    this._notesCache.clear();
+    this._hashCache.clear();
   }
 
   /**
@@ -86,22 +113,30 @@ class StorageAdapter {
    * @returns {Promise<Record<string, import('./types').NoteItem>>} sync_id -> NoteItem 映射
    */
   async getAllNotes(includeDeleted = true) {
-    const query = includeDeleted
-      ? `SELECT * FROM notes ORDER BY updated_at DESC`
-      : `SELECT * FROM notes WHERE is_deleted = 0 ORDER BY updated_at DESC`;
-
-    const rows = this.db.prepare(query).all();
-
-    console.log(`[StorageAdapter] getAllNotes(${includeDeleted}): 查询到 ${rows.length} 条记录`);
-
-    const notesMap = {};
-    for (const row of rows) {
-      const syncId = row.sync_id || row.id.toString();
-      console.log(`[StorageAdapter] 笔记 id=${row.id}, sync_id=${row.sync_id}, is_deleted=${row.is_deleted} -> key=${syncId}`);
-      notesMap[syncId] = this.normalizeNote(row);
-    }
-
-    return notesMap;
+    // 元数据与变化正文必须来自同一事务快照。
+    return this.db.transaction(() => {
+      const rows = this.db.prepare(`SELECT n.id, n.is_deleted, COALESCE(r.revision, 0) AS revision
+        FROM notes n LEFT JOIN sync_note_revisions r ON n.id = r.note_id`).all();
+      const getNote = this.db.prepare('SELECT * FROM notes WHERE id = ?');
+      const liveIds = new Set();
+      const notesMap = {};
+      for (const row of rows) {
+        liveIds.add(row.id);
+        let cached = this._notesCache.get(row.id);
+        if (!cached || cached.revision !== row.revision) {
+          cached = { revision: row.revision, note: this.normalizeNote(getNote.get(row.id)) };
+          this._notesCache.set(row.id, cached);
+        }
+        if (includeDeleted || !row.is_deleted) notesMap[cached.note.id] = { ...cached.note };
+      }
+      for (const id of this._notesCache.keys()) {
+        if (!liveIds.has(id)) {
+          this._hashCache.delete(this._notesCache.get(id).note.id);
+          this._notesCache.delete(id);
+        }
+      }
+      return notesMap;
+    })();
   }
 
   /**
@@ -111,7 +146,7 @@ class StorageAdapter {
    * @param {boolean} [includeDeleted=true] - 是否包含已删除的项
    * @returns {Promise<import('./types').NoteItem|null>} 笔记数据
    */
-  async getNoteById(syncId, includeDeleted = true) {
+  getNoteById(syncId, includeDeleted = true) {
     // 先尝试通过 sync_id 查找
     let query = includeDeleted
       ? `SELECT * FROM notes WHERE sync_id = ?`
@@ -159,7 +194,7 @@ class StorageAdapter {
    * @param {boolean} [includeDeleted=true] - 是否包含已删除的项
    * @returns {Promise<import('./types').TodoItem|null>} 待办数据
    */
-  async getTodoById(syncId, includeDeleted = true) {
+  getTodoById(syncId, includeDeleted = true) {
     const query = includeDeleted
       ? `SELECT * FROM todos WHERE sync_id = ?`
       : `SELECT * FROM todos WHERE sync_id = ? AND is_deleted = 0`;
@@ -193,8 +228,12 @@ class StorageAdapter {
    * @param {boolean} [skipChangeLog=true] - 是否跳过变更日志（同步时必须跳过）
    * @returns {Promise<void>}
    */
-  async upsertNote(noteData, skipChangeLog = true) {
-    const existing = await this.getNoteById(noteData.id, true);
+  async upsertNote(noteData, skipChangeLog = true, expectedLocal = undefined) {
+    // 同步读取、比较、写入之间不让出事件循环，防止下载期间的新编辑被覆盖。
+    const existing = this.getNoteById(noteData.id, true);
+    if (expectedLocal !== undefined && !isDeepStrictEqual(existing, expectedLocal)) {
+      throw new Error('下载期间本地笔记已修改，保留本地内容并在下次同步重新合并');
+    }
 
     if (existing) {
       // 更新
@@ -226,6 +265,7 @@ class StorageAdapter {
           tags: noteData.tags,
           category: noteData.category,
           is_pinned: noteData.is_pinned,
+          is_favorite: noteData.is_favorite || 0,
           created_at: this.toSQLiteDateTime(noteData.created_at),
           updated_at: this.toSQLiteDateTime(noteData.updated_at),
           ...(noteData.meta ? { meta: noteData.meta } : {}),
@@ -264,8 +304,14 @@ class StorageAdapter {
    * @param {boolean} [skipChangeLog=true] - 是否跳过变更日志
    * @returns {Promise<void>}
    */
-  async upsertTodo(todoData, skipChangeLog = true) {
-    const existing = await this.getTodoById(todoData.id, true);
+  applyTodos(todos) {
+    this.db.transaction(() => {
+      for (const todo of todos) this.upsertTodo(todo, true);
+    })();
+  }
+
+  upsertTodo(todoData, skipChangeLog = true) {
+    const existing = this.getTodoById(todoData.id, true);
 
     // ── 逐条时间戳冲突解决 ──
     // global_todos 以整组时间戳决定 download/upload，多设备场景下
@@ -282,7 +328,7 @@ class StorageAdapter {
         }
         // 远端删除 vs 本地存活 → 仅当远端更新时执行删除
         if (cloudTime >= existing.updated_at) {
-          await this.softDeleteTodo(todoData.id, skipChangeLog);
+          this.softDeleteTodo(todoData.id, skipChangeLog);
         }
         // 否则本地数据更新，保留本地存活版本
       }
@@ -344,14 +390,14 @@ class StorageAdapter {
       }
 
       // 更新
-      await this.todoDAO.update(
+      this.todoDAO.update(
         existing.db_id || existing.id,
         normalizedData,
         { skipChangeLog }
       );
     } else {
       // 创建
-      await this.todoDAO.create(
+      this.todoDAO.create(
         {
           sync_id: todoData.id,
           ...normalizedData,
@@ -384,10 +430,10 @@ class StorageAdapter {
    * @param {boolean} [skipChangeLog=true] - 是否跳过变更日志
    * @returns {Promise<void>}
    */
-  async softDeleteTodo(syncId, skipChangeLog = true) {
-    const existing = await this.getTodoById(syncId, true);
+  softDeleteTodo(syncId, skipChangeLog = true) {
+    const existing = this.getTodoById(syncId, true);
     if (existing) {
-      await this.todoDAO.softDelete(existing.db_id || existing.id, { skipChangeLog });
+      this.todoDAO.softDelete(existing.db_id || existing.id, { skipChangeLog });
     }
   }
 
@@ -495,6 +541,15 @@ class StorageAdapter {
    * @returns {string} MD5 hash
    */
   calculateNoteHash(note) {
+    this._hashCache ||= new Map();
+    const cached = this._hashCache.get(note.id);
+    if (cached && cached.content === note.content && cached.title === note.title && cached.type === note.note_type) return cached.hash;
+    const hash = this.calculateUncachedNoteHash(note);
+    if (note.id != null) this._hashCache.set(note.id, { content: note.content, title: note.title, type: note.note_type, hash });
+    return hash;
+  }
+
+  calculateUncachedNoteHash(note) {
     if (note.note_type === 'whiteboard') {
       // 画布使用 JSON hash
       return hashUtils.calculateJsonHash(

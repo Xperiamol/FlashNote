@@ -280,7 +280,12 @@ class WebDAVClient {
       }
       const detailSuffix = serverDetail ? `（${serverDetail}）` : '';
 
-      if (status === 401) {
+      if (status === 412) {
+        const conflict = new Error('其他设备已更新云端，当前提交已停止；本地修改会保留并在下次同步重新合并');
+        conflict.code = 'SYNC_CONCURRENT_WRITE';
+        conflict.status = 412;
+        return conflict;
+      } else if (status === 401) {
         return new Error(`WebDAV 认证失败：用户名或密码错误${where}${detailSuffix}`);
       } else if (status === 403) {
         return new Error(
@@ -409,11 +414,10 @@ class WebDAVClient {
       });
     } catch (error) {
       // 405 表示目录已存在，409 可能表示父目录不存在或冲突
-      // 部分 WebDAV 服务（含坚果云）对已存在目录会直接返 403，这里也吞掉避免误报
+      // 403 必须传播；不能把没有写权限当成目录已成功创建。
       if (
         error.message.includes('不支持该操作') ||
-        error.message.includes('冲突') ||
-        error.message.includes('权限不足')
+        error.message.includes('冲突')
       ) {
         return;
       }
@@ -429,14 +433,51 @@ class WebDAVClient {
    * @returns {Promise<void>}
    */
   async uploadText(remotePath, content, contentType = 'text/plain; charset=utf-8') {
-    await this.request({
-      method: 'PUT',
-      url: this.getFullPath(remotePath),
-      headers: {
-        'Content-Type': contentType,
-      },
-      data: content,
-    });
+    // 未读过的路径只允许创建；初始化时 HEAD 与 PUT 之间也可能有另一设备写入。
+    if (this._writeVersions?.get(remotePath) === '' && this._writtenBodies?.has(remotePath)) {
+      const ownBody = this._writtenBodies.get(remotePath);
+      await this.prepareWrite(remotePath, value => value === ownBody);
+    }
+    const expected = this._writeVersions ? (this._writeVersions.get(remotePath) ?? null) : undefined;
+    if (expected === '') throw new Error('服务器未提供强 ETag，无法安全提交并发同步；已保留本地数据');
+    let response;
+    try {
+      response = await this.request({
+        method: 'PUT',
+        url: this.getFullPath(remotePath),
+        headers: {
+          'Content-Type': contentType,
+          ...(expected === null ? { 'If-None-Match': '*' } : expected ? { 'If-Match': expected } : {}),
+        },
+        data: content,
+      });
+    } catch (error) {
+      // PUT 可能已完成但响应丢失；重试收到 412 时，只确认完全相同的正文。
+      if (error.code !== 'SYNC_CONCURRENT_WRITE' || await this.downloadText(remotePath) !== content) throw error;
+      this._writtenBodies?.set(remotePath, content);
+      return;
+    }
+    if (this._writeVersions) {
+      const etag = response.headers?.etag;
+      this._writeVersions.set(remotePath, etag && !etag.startsWith('W/') ? etag : '');
+      this._writtenBodies.set(remotePath, content);
+    }
+  }
+
+  beginSync() { this._writeVersions = new Map(); this._readBodies = new Map(); this._writtenBodies = new Map(); }
+
+  async prepareWrite(remotePath, validate) {
+    const previous = this._readBodies?.get(remotePath);
+    try {
+      const content = await this.downloadText(remotePath);
+      if (previous !== undefined && content !== previous && content !== this._writtenBodies?.get(remotePath)) {
+        throw new Error('读取后云端内容发生变化，已停止覆盖，请重新同步');
+      }
+      if (validate && !validate(content)) throw new Error('云端正文已被其他设备修改，已停止覆盖并等待重新合并');
+    } catch (error) {
+      if (!/^WebDAV 资源不存在/.test(error.message || '')) throw error;
+      this._writeVersions.set(remotePath, null);
+    }
   }
 
   /**
@@ -474,11 +515,20 @@ class WebDAVClient {
    * @returns {Promise<string>} 文件内容
    */
   async downloadText(remotePath) {
-    const response = await this.request({
+    let response;
+    try { response = await this.request({
       method: 'GET',
       url: this.getFullPath(remotePath),
       responseType: 'text',
-    });
+    }); } catch (error) {
+      if (this._writeVersions && /^WebDAV 资源不存在/.test(error.message || '')) this._writeVersions.set(remotePath, null);
+      throw error;
+    }
+    if (this._writeVersions) {
+      const etag = response.headers?.etag;
+      this._writeVersions.set(remotePath, etag && !etag.startsWith('W/') ? etag : '');
+      this._readBodies.set(remotePath, response.data);
+    }
     return response.data;
   }
 
@@ -516,11 +566,15 @@ class WebDAVClient {
    * @returns {Promise<void>}
    */
   async delete(remotePath) {
+    const expected = this._writeVersions?.get(remotePath);
+    if (expected === '') throw new Error('服务器未提供强 ETag，无法安全删除并发资源；已保留云端文件');
     try {
       await this.request({
         method: 'DELETE',
         url: this.getFullPath(remotePath),
+        headers: expected === null || expected === undefined ? {} : { 'If-Match': expected },
       });
+      if (this._writeVersions) this._writeVersions.delete(remotePath);
     } catch (error) {
       // 404 表示文件不存在，忽略
       if (!error.message.includes('不存在')) {

@@ -41,6 +41,25 @@ const createCloud = () => {
 // 笔记的 updated_at 精确到秒；需要"之后"发生的操作要隔开一秒以上
 const laterSecond = { op: 'sleep', ms: 1100 }
 
+test('草稿崩溃恢复保留副本，新草稿不被旧保存清除，重复启动不重复恢复', () => {
+  const cloud = createCloud()
+  try {
+    const [result] = cloud.run('A', [{ op: 'create', title: '恢复测试', content: '正式版' }, { op: 'draftChecks', title: '恢复测试' }])
+    assert.deepEqual(result, { before: 1, recovered: 1, second: 0, original: '正式版', restored: '更新的未保存输入' })
+  } finally { cloud.cleanup() }
+})
+
+test('增量扫描缓存不漏同时间戳的直接 SQL 修改及删除，旧快照保持不变', () => {
+  const cloud = createCloud()
+  try {
+    const [result] = cloud.run('A', [{ op: 'create', title: '修订', content: '旧正文' }, { op: 'revisionChecks', title: '修订' }])
+    assert.notEqual(result.oldHash, result.newHash)
+    assert.equal(result.content, 'same timestamp changed body')
+    assert.equal(result.oldContent, '旧正文')
+    assert.equal(result.deleted, true)
+  } finally { cloud.cleanup() }
+})
+
 // 两台设备都同步到同一篇笔记的起点
 const startWithSharedNote = (cloud, title, content) => {
   cloud.run('A', [{ op: 'create', title, content }, { op: 'sync' }])
@@ -241,5 +260,197 @@ test('画布笔记和改标题同步过去', () => {
     cloud.sync('B')
     assert.equal(cloud.note('B', '新标题')?.content, '正文')
     assert.equal(cloud.note('B', '旧标题'), undefined)
+  } finally { cloud.cleanup() }
+})
+
+
+test('提交中断后另一台设备新增笔记，恢复不能抹掉新索引', () => {
+  const cloud = createCloud()
+  try {
+    startWithSharedNote(cloud, '基线', 'v1')
+    const [failure] = cloud.run('A', [
+      { op: 'edit', title: '基线', content: 'v2' },
+      { op: 'failUpload', path: 'manifest.json' }, { op: 'trySync' },
+    ])
+    assert.match(failure.error, /模拟上传中断/)
+    cloud.run('B', [{ op: 'create', title: '中断期间新增', content: '不能丢' }, { op: 'sync' }])
+    cloud.sync('A')
+    cloud.sync('C')
+    assert.equal(cloud.note('C', '中断期间新增')?.content, '不能丢')
+    assert.equal(cloud.note('C', '基线')?.content, 'v2')
+  } finally { cloud.cleanup() }
+})
+
+test('提交中断且云端未变：重启后恢复并收敛', () => {
+  const cloud = createCloud()
+  try {
+    startWithSharedNote(cloud, '恢复', '旧内容')
+    cloud.run('A', [{ op: 'edit', title: '恢复', content: '新内容' },
+      { op: 'failUpload', path: 'manifest.json' }, { op: 'trySync' }])
+    cloud.sync('A')
+    cloud.sync('B')
+    assert.equal(cloud.note('B', '恢复')?.content, '新内容')
+    assert.equal(cloud.sync('A').uploaded, 0)
+  } finally { cloud.cleanup() }
+})
+
+test('损坏的画布 JSON 不覆盖本地，修复云端文件后可以重试', () => {
+  const cloud = createCloud()
+  const initial = JSON.stringify({ elements: [], fileMap: {} })
+  const updated = JSON.stringify({ elements: [{ id: 'a', type: 'rectangle' }], fileMap: {} })
+  try {
+    cloud.run('A', [{ op: 'create', title: '画布', content: initial, noteType: 'whiteboard' }, { op: 'sync' }])
+    cloud.sync('B')
+    cloud.run('A', [{ op: 'edit', title: '画布', content: updated }, { op: 'sync' },
+      { op: 'corruptRemote', title: '画布', content: '{broken' }])
+    const [failed] = cloud.run('B', [{ op: 'sync' }])
+    assert.equal(failed.errors, 1)
+    assert.equal(cloud.note('B', '画布')?.content, initial)
+    cloud.run('A', [{ op: 'corruptRemote', title: '画布', content: updated }])
+    cloud.sync('B')
+    assert.equal(cloud.note('B', '画布')?.content, updated)
+  } finally { cloud.cleanup() }
+})
+
+
+test('网络下载期间保存了新内容，同步不能覆盖这次编辑', () => {
+  const cloud = createCloud()
+  try {
+    startWithSharedNote(cloud, '并发编辑', '原文')
+    cloud.run('B', [{ op: 'edit', title: '并发编辑', content: '远端更新' }, { op: 'sync' }])
+    const [result] = cloud.run('A', [
+      { op: 'editDuringDownload', title: '并发编辑', content: '下载期间的新编辑' }, { op: 'sync' },
+    ])
+    assert.equal(result.errors, 1)
+    assert.equal(result.success, false)
+    assert.equal(cloud.note('A', '并发编辑')?.content, '下载期间的新编辑')
+  } finally { cloud.cleanup() }
+})
+
+
+test('Markdown 正文被截断但索引未变时不能覆盖本地', () => {
+  const cloud = createCloud()
+  try {
+    startWithSharedNote(cloud, '完整性', '本地已保存')
+    cloud.run('B', [{ op: 'edit', title: '完整性', content: '远端完整内容' }, { op: 'sync' },
+      { op: 'corruptRemote', title: '完整性', content: '远端完整' }])
+    const [result] = cloud.run('A', [{ op: 'sync' }])
+    assert.equal(result.errors, 1)
+    assert.equal(cloud.note('A', '完整性')?.content, '本地已保存')
+    cloud.run('B', [{ op: 'corruptRemote', title: '完整性', content: '远端完整内容' }])
+    cloud.sync('A')
+    assert.equal(cloud.note('A', '完整性')?.content, '远端完整内容')
+  } finally { cloud.cleanup() }
+})
+
+test('连续无变更同步只读检查，不创建目录或重写索引', () => {
+  const cloud = createCloud()
+  try {
+    const results = cloud.run('A', [
+      { op: 'categories', value: ['notes', 'todos', 'settings', 'widgets'] },
+      { op: 'create', title: '性能', content: 'unchanged' }, { op: 'widget' },
+      { op: 'sync' }, { op: 'sync' }, { op: 'sync' },
+    ])
+    const last = results.at(-1)
+    console.log('NO_CHANGE_CALLS', JSON.stringify(last.calls))
+    assert.equal(last.errors, 0)
+    assert.deepEqual(last.calls.filter(c => ['uploadText', 'uploadBinary', 'createDirectory', 'delete'].includes(c.method)), [])
+    assert.ok(last.calls.length <= 3, JSON.stringify(last.calls))
+    // 重启设备后也只读；新设备仍能下载组件及实例数据。
+    const [restarted] = cloud.run('A', [
+      { op: 'categories', value: ['notes', 'todos', 'settings', 'widgets'] }, { op: 'sync' },
+    ])
+    assert.ok(restarted.calls.length <= 3)
+    const [download, widgets] = cloud.run('B', [
+      { op: 'categories', value: ['notes', 'todos', 'settings', 'widgets'] },
+      { op: 'sync' }, { op: 'dumpWidgets' },
+    ])
+    assert.equal(download.errors, 0)
+    assert.equal(widgets.widgets[0].code, '<p>hello</p>')
+    assert.equal(widgets.records.length, 1)
+
+  } finally { cloud.cleanup() }
+})
+
+
+test('组件下载失败后的重试不能把旧代码上传覆盖远端', () => {
+  const cloud = createCloud()
+  const category = { op: 'categories', value: ['notes', 'widgets'] }
+  try {
+    cloud.run('A', [category, { op: 'widget' }, { op: 'sync' }, { op: 'sync' }])
+    cloud.run('B', [category, { op: 'sync' }])
+    cloud.run('A', [category, { op: 'editWidget', code: '<p>new version</p>' }, { op: 'sync' }])
+    const [failed] = cloud.run('B', [category, { op: 'failPath', path: '/code/' }, { op: 'sync' }])
+    assert.equal(failed.errors, 1)
+    const [retried, dump] = cloud.run('B', [category, { op: 'sync' }, { op: 'dumpWidgets' }])
+    assert.equal(retried.errors, 0)
+    assert.equal(dump.widgets[0].code, '<p>new version</p>')
+  } finally { cloud.cleanup() }
+})
+
+test('新设备首次下载笔记保留置顶元数据', () => {
+  const cloud = createCloud()
+  try {
+    cloud.run('A', [{ op: 'create', title: '置顶新机', content: 'body' }, { op: 'pin', title: '置顶新机' }, { op: 'sync' }])
+    cloud.sync('B')
+    assert.equal(cloud.note('B', '置顶新机').is_pinned, 1)
+  } finally { cloud.cleanup() }
+})
+
+
+test('标签更新失败和待办批量写到一半失败时整批回滚', () => {
+  const cloud = createCloud()
+  try {
+    const [result] = cloud.run('A', [{ op: 'create', title: '事务', content: 'original' }, { op: 'transactionChecks', title: '事务' }])
+    assert.equal(result.errors, 3)
+    assert.equal(result.created, 0)
+    assert.equal(result.content, 'original')
+    assert.equal(result.todosCreated, 0)
+  } finally { cloud.cleanup() }
+})
+
+test('云端索引丢失时不把本地旧正文登记成云端新正文的版本', () => {
+  const cloud = createCloud()
+  try {
+    startWithSharedNote(cloud, '缺失索引', 'old')
+    cloud.run('A', [{ op: 'edit', title: '缺失索引', content: 'new' }, { op: 'sync' }, { op: 'dropManifest' }])
+    const [result, remote] = cloud.run('B', [{ op: 'trySync' }, { op: 'readRemoteNote', title: '缺失索引' }])
+    assert.ok(result.error, JSON.stringify(result))
+    assert.equal(remote.content, 'new')
+    assert.equal(cloud.note('B', '缺失索引').content, 'old')
+  } finally { cloud.cleanup() }
+})
+
+
+test('两端新增待办合并后均保留，删除依赖墓碑传播', () => {
+  const cloud = createCloud()
+  try {
+    cloud.run('A', [{ op: 'createTodo', content: 'shared' }, { op: 'sync' }])
+    cloud.sync('B')
+    cloud.run('A', [{ op: 'createTodo', content: 'local-A' }])
+    cloud.run('B', [{ op: 'createTodo', content: 'local-B' }, { op: 'sync' }])
+    cloud.sync('A')
+    cloud.sync('B')
+    const [dump] = cloud.run('A', [{ op: 'dumpTodos' }])
+    assert.deepEqual(dump.todos.map(t => t.content), ['local-A', 'local-B', 'shared'])
+    cloud.run('B', [laterSecond, { op: 'deleteTodo', content: 'shared' }, { op: 'sync' }])
+    cloud.sync('A')
+    const [deleted] = cloud.run('A', [{ op: 'dumpTodos' }])
+    assert.equal(deleted.todos.find(t => t.content === 'shared').is_deleted, 1)
+  } finally { cloud.cleanup() }
+})
+
+test('空闲与只下载的同步不写云端，新设备首次同步不重写待办', () => {
+  const cloud = createCloud()
+  const writes = result => result.calls.filter(call => /^upload|^delete/.test(call.method)).map(call => call.path)
+  try {
+    cloud.run('A', [{ op: 'createTodo', content: 'shared' }, { op: 'create', title: '共享', content: 'v1' }, { op: 'sync' }])
+    assert.deepEqual(writes(cloud.sync('B')), ['/Flota/manifest.json'])
+    cloud.run('A', [{ op: 'edit', title: '共享', content: 'v2' }, { op: 'sync' }])
+    const download = cloud.sync('B')
+    assert.equal(download.downloaded, 1)
+    assert.deepEqual(writes(download), [])
+    assert.deepEqual(writes(cloud.sync('A')), [])
+    assert.deepEqual(writes(cloud.sync('B')), [])
   } finally { cloud.cleanup() }
 })

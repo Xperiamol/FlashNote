@@ -1,3 +1,5 @@
+import { requireSyncSuccess } from '../../utils/syncResult'
+import { notifyError } from '../../utils/notify'
 import { useState, useEffect } from 'react';
 import {
   Box,
@@ -258,7 +260,7 @@ const SyncStatusIndicator = () => {
       // 触发坚果云同步
       const hasNutcloudModule = modules.notes.enabled || modules.images.enabled || modules.settings.enabled || (modules.todos.enabled && modules.todos.provider === 'nutcloud');
       if (hasNutcloudModule) {
-        await window.electronAPI?.sync?.manualSync?.();
+        requireSyncSuccess(await window.electronAPI?.sync?.manualSync?.());
       }
       
       // 触发日历同步
@@ -274,6 +276,7 @@ const SyncStatusIndicator = () => {
       setTimeout(() => loadSyncStatus(), 500);
     } catch (error) {
       console.error('手动同步失败:', error);
+      notifyError(error.message || '同步未完成，请重试');
       // 出错时也刷新状态，清除转圈
       loadSyncStatus();
     }

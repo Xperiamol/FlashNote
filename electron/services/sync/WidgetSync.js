@@ -1,3 +1,4 @@
+const { validateWidgetManifest, validateWidgetData } = require('./payloadValidation');
 /**
  * 组件同步（独立于主 manifest）
  *
@@ -14,7 +15,8 @@
  */
 
 const fs = require('fs');
-const path = require('path');
+const { isDeepStrictEqual } = require('util');
+const { writeFileAtomicSync } = require('../../utils/atomicFile');
 const hashUtils = require('./utils/hash');
 const WidgetDAO = require('../../dao/WidgetDAO');
 
@@ -103,19 +105,15 @@ class WidgetSync {
   }
 
   saveCache(manifest) {
-    const tmp = `${this.cachePath}.tmp`;
-    fs.mkdirSync(path.dirname(this.cachePath), { recursive: true });
-    fs.writeFileSync(tmp, JSON.stringify(manifest, null, 2));
-    fs.renameSync(tmp, this.cachePath);
+    writeFileAtomicSync(this.cachePath, JSON.stringify(manifest, null, 2));
   }
 
   async loadRemoteManifest() {
     try {
-      if (!(await this.client.exists(`${this.dir}manifest.json`))) return { widgets: {}, instances: {} };
-      const remote = await this.client.downloadJson(`${this.dir}manifest.json`);
+      const remote = validateWidgetManifest(await this.client.downloadJson(`${this.dir}manifest.json`));
       return { widgets: remote?.widgets || {}, instances: remote?.instances || {} };
     } catch (error) {
-      if (/404/.test(error.message)) return { widgets: {}, instances: {} };
+      if (error.response?.status === 404 || /^(?:WebDAV 资源不存在|文件不存在:)/.test(error.message)) return { widgets: {}, instances: {} };
       throw error;
     }
   }
@@ -130,11 +128,23 @@ class WidgetSync {
     }
   }
 
+  async prepareUpload() {
+    if (!this._directoriesReady) this._directoriesReady = this.ensureDirectories();
+    await this._directoriesReady;
+  }
+
   async syncWidget(id, remote, local, cached, stats) {
     const action = decide(remote, local, cached);
-    if (action === 'none') return local || remote;
+    if (action === 'none') return remote || local;
     if (action === 'download') {
       const code = remote.d ? (this.dao.getWidget(id, { includeDeleted: true })?.code || '') : await this.client.downloadText(`${this.dir}code/${id}.html`);
+      if (!remote.d && this.hash([remote.name, code, remote.pinned, false, remote.source, remote.storeId]) !== remote.h) {
+        throw new Error(`云端组件代码与索引不一致：${id}`);
+      }
+      const current = this.dao.getWidget(id, { includeDeleted: true });
+      if (!isDeepStrictEqual(current ? this.widgetEntry(current) : undefined, local)) {
+        throw new Error(`下载期间组件已在本地修改：${id}`);
+      }
       this.dao.upsertWidgetFromSync({
         id, name: remote.name, code, source: remote.source, storeId: remote.storeId, pinned: remote.pinned,
         createdAt: remote.c, updatedAt: remote.t, isDeleted: Boolean(remote.d), deletedAt: remote.deletedAt,
@@ -145,9 +155,15 @@ class WidgetSync {
       return remote;
     }
     const widget = this.dao.getWidget(id, { includeDeleted: true });
-    if (!widget.isDeleted) await this.client.uploadText(`${this.dir}code/${id}.html`, widget.code || '', 'text/html; charset=utf-8');
+    await this.prepareUpload();
+    if (!widget.isDeleted) {
+      const codePath = `${this.dir}code/${id}.html`;
+      await this.client.prepareWrite?.(codePath, code => !remote || remote.d ||
+        this.hash([remote.name, code, remote.pinned, false, remote.source, remote.storeId]) === remote.h);
+      await this.client.uploadText(codePath, widget.code || '', 'text/html; charset=utf-8');
+    }
     stats.uploaded++;
-    return local;
+    return this.widgetEntry(widget);
   }
 
   syncInstanceMeta(id, remote, local, cached, stats) {
@@ -162,7 +178,7 @@ class WidgetSync {
       return remote;
     }
     if (action === 'upload') stats.uploaded++;
-    return action === 'upload' ? local : (local || remote);
+    return action === 'upload' ? local : (remote || local);
   }
 
   async syncData(id, remoteEntry, stats) {
@@ -172,7 +188,9 @@ class WidgetSync {
     if (remoteHash === localHash) return localHash;
     if (remoteHash) {
       const remote = await this.client.downloadJson(`${this.dir}data/${id}.json`);
-      const applied = this.dao.mergeFromSync(id, Array.isArray(remote?.records) ? remote.records : []);
+      const records = validateWidgetData(remote);
+      if (this.hash(records) !== remoteHash) throw new Error(`云端组件数据与索引不一致：${id}`);
+      const applied = this.dao.mergeFromSync(id, records);
       if (applied > 0) {
         notifyRenderer('widget:data-changed', { instanceId: id, collection: '*', at: Date.now() });
         local = this.dao.exportForSync(id);
@@ -180,6 +198,7 @@ class WidgetSync {
       }
     }
     if (localHash !== remoteHash && local.length > 0) {
+      await this.prepareUpload();
       await this.client.uploadJson(`${this.dir}data/${id}.json`, { version: MANIFEST_VERSION, records: local });
       stats.uploaded++;
       return localHash;
@@ -192,13 +211,25 @@ class WidgetSync {
    */
   async run() {
     const stats = { uploaded: 0, downloaded: 0, errors: 0, errorDetails: [], changed: false };
-    await this.ensureDirectories();
+    this._directoriesReady = null;
 
     const remote = await this.loadRemoteManifest();
     const cache = this.loadCache();
     const localWidgets = Object.fromEntries(this.dao.listWidgets({ includeDeleted: true }).map((w) => [w.id, this.widgetEntry(w)]));
     const localInstances = Object.fromEntries(this.dao.listAllInstances({ includeDeleted: true }).map((i) => [i.id, this.instanceEntry(i)]));
     const result = { widgets: {}, instances: {} };
+    const failed = { widgets: new Set(), instances: new Set() };
+    // 云端索引描述服务器状态；本地缓存只能描述实际成功获取的状态。
+    const saveObservedCache = () => {
+      const observed = { widgets: { ...result.widgets }, instances: { ...result.instances } };
+      for (const kind of ['widgets', 'instances']) {
+        for (const id of failed[kind]) {
+          if (cache[kind][id]) observed[kind][id] = cache[kind][id];
+          else delete observed[kind][id];
+        }
+      }
+      if (!isDeepStrictEqual(cache, observed)) this.saveCache(observed);
+    };
 
     for (const id of new Set([...Object.keys(remote.widgets), ...Object.keys(localWidgets)])) {
       try {
@@ -208,6 +239,7 @@ class WidgetSync {
       } catch (error) {
         stats.errors++;
         stats.errorDetails.push(`组件 ${id}: ${error.message}`);
+        failed.widgets.add(id);
         if (remote.widgets[id]) result.widgets[id] = remote.widgets[id];
       }
     }
@@ -222,20 +254,39 @@ class WidgetSync {
       } catch (error) {
         stats.errors++;
         stats.errorDetails.push(`实例 ${id}: ${error.message}`);
+        failed.instances.add(id);
         if (remote.instances[id]) result.instances[id] = remote.instances[id];
       }
     }
 
+    // 无变化时不重建目录、不二次下载、不刷新远端时间戳。
+    if (isDeepStrictEqual(result, remote)) {
+      saveObservedCache();
+      if (stats.changed) notifyRenderer('widget:list-changed', { at: Date.now(), reason: 'sync' });
+      return stats;
+    }
+
+    await this.prepareUpload();
     // 写回前重新拉取远端，保留这段时间内其他设备新增的条目
     const latest = await this.loadRemoteManifest();
     const merged = {
       version: MANIFEST_VERSION,
       updated_at: Date.now(),
-      widgets: { ...latest.widgets, ...result.widgets },
-      instances: { ...latest.instances, ...result.instances },
+      widgets: { ...latest.widgets },
+      instances: { ...latest.instances },
     };
+    for (const kind of ['widgets', 'instances']) {
+      for (const [id, entry] of Object.entries(result[kind])) {
+        if (!failed[kind].has(id) && !isDeepStrictEqual(entry, remote[kind][id])) {
+          if (!isDeepStrictEqual(latest[kind][id], remote[kind][id]) && !isDeepStrictEqual(latest[kind][id], entry)) {
+            throw new Error(`组件索引在同步期间变化：${id}，等待重新合并`);
+          }
+          merged[kind][id] = entry;
+        }
+      }
+    }
     await this.client.uploadJson(`${this.dir}manifest.json`, merged);
-    this.saveCache(merged);
+    saveObservedCache();
 
     if (stats.changed) notifyRenderer('widget:list-changed', { at: Date.now(), reason: 'sync' });
     this.log(`[WidgetSync] 完成：上传 ${stats.uploaded}，下载 ${stats.downloaded}，错误 ${stats.errors}`);

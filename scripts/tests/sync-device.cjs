@@ -17,12 +17,23 @@ if (!process.env.SYNC_TEST_VERBOSE) {
 }
 
 class FolderDav {
-  constructor(root) { this.root = root }
+  constructor(root) {
+    this.root = root
+    this.calls = []
+    for (const name of ['exists', 'createDirectory', 'uploadText', 'uploadBinary', 'downloadText', 'downloadBinary', 'delete', 'list']) {
+      const method = this[name].bind(this)
+      this[name] = async (...args) => {
+        this.calls.push({ method: name, path: args[0] })
+        return method(...args)
+      }
+    }
+  }
   file(remotePath) { return path.join(this.root, remotePath) }
   async testConnection() { return true }
   async exists(remotePath) { return fs.existsSync(this.file(remotePath)) }
   async createDirectory(remotePath) { fs.mkdirSync(this.file(remotePath), { recursive: true }) }
   async uploadText(remotePath, content) {
+    if (this.failUpload && remotePath.includes(this.failUpload)) throw new Error('模拟上传中断');
     fs.mkdirSync(path.dirname(this.file(remotePath)), { recursive: true })
     fs.writeFileSync(this.file(remotePath), content, 'utf8')
   }
@@ -74,6 +85,32 @@ class FolderDav {
   const outputs = []
   for (const op of ops) {
     switch (op.op) {
+      case 'draftChecks': {
+        const Drafts = require('../../electron/services/EditorDraftService')
+        const drafts = new Drafts(DatabaseManager.getInstance())
+        const note = byTitle(op.title)
+        drafts.stage({ key: 'crash', noteId: note.id, revision: 1, updates: { content: '未保存输入', note_type: 'markdown' } })
+        drafts.stage({ key: 'crash', noteId: note.id, revision: 2, updates: { content: '更新的未保存输入', note_type: 'markdown' } })
+        drafts.clear({ key: 'crash', revision: 1 })
+        const before = db.prepare('SELECT count(*) AS n FROM editor_drafts').get().n
+        const recovered = drafts.recover()
+        outputs.push({ before, recovered, second: drafts.recover(), original: byTitle(op.title).content,
+          restored: byTitle(op.title + '（恢复草稿）').content })
+        break
+      }
+      case 'revisionChecks': {
+        const row = byTitle(op.title)
+        const key = row.sync_id || String(row.id)
+        const first = await engine.storage.getAllNotes()
+        const oldHash = engine.storage.calculateNoteHash(first[key])
+        db.prepare('UPDATE notes SET content = ? WHERE id = ?').run('same timestamp changed body', row.id)
+        const second = await engine.storage.getAllNotes()
+        const newHash = engine.storage.calculateNoteHash(second[key])
+        db.prepare('DELETE FROM notes WHERE id = ?').run(row.id)
+        const third = await engine.storage.getAllNotes()
+        outputs.push({ oldHash, newHash, content: second[key].content, oldContent: first[key].content, deleted: !third[key] })
+        break
+      }
       case 'create':
         expectOk(await notes.createNote({ title: op.title, content: op.content, note_type: op.noteType }), 'create')
         break
@@ -110,12 +147,159 @@ class FolderDav {
         engine.client.failPattern = id
         break
       }
+      case 'editDuringDownload': {
+        const original = engine.client.downloadText.bind(engine.client)
+        let edited = false
+        engine.client.downloadText = async (remotePath) => {
+          const content = await original(remotePath)
+          if (!edited && remotePath.includes('/notes/')) {
+            edited = true
+            expectOk(await notes.updateNote(byTitle(op.title).id, { content: op.content }), 'concurrent edit')
+          }
+          return content
+        }
+        break
+      }
+      case 'widget': {
+        const WidgetDAO = require('../../electron/dao/WidgetDAO')
+        const dao = new WidgetDAO()
+        dao.insertWidget({ id: 'perf-widget', name: '同步测试', code: '<p>hello</p>' })
+        dao.insertInstance({ id: 'perf-instance', widgetId: 'perf-widget', name: '默认' })
+        dao.insertRecords('perf-instance', 'items', [{ id: 'item-1', title: '保留数据' }])
+        break
+      }
+      case 'seedNotes': {
+        const padding = 'x'.repeat(op.bodyBytes)
+        db.transaction(() => {
+          for (let i = 0; i < op.count; i++) notes.noteDAO.create({ title: `bench-${i}`, content: `${i}\n${padding}` }, { skipChangeLog: true })
+        })()
+        break
+      }
+      case 'measureSync': {
+        const { performance } = require('node:perf_hooks')
+        const phases = {}
+        const originals = {}
+        for (const name of ['bootstrap', 'scanAndDiff', 'executeTasks', 'commit']) {
+          originals[name] = engine[name]
+          engine[name] = async function (...args) {
+            const start = performance.now()
+            try { return await originals[name].apply(this, args) }
+            finally { phases[name] = performance.now() - start }
+          }
+        }
+        let heartbeat = performance.now(), maxGap = 0
+        const timer = setInterval(() => {
+          const now = performance.now()
+          maxGap = Math.max(maxGap, now - heartbeat)
+          heartbeat = now
+        }, 5)
+        engine.client.calls = []
+        const start = performance.now()
+        try {
+          const result = await engine.performSync()
+          const duration = performance.now() - start
+          await new Promise(resolve => setTimeout(resolve, 10))
+          outputs.push({ op: 'measureSync', durationMs: duration, maxTimerGapMs: maxGap, phases,
+            requests: engine.client.calls.length, writes: engine.client.calls.filter(call => call.method.startsWith('upload')).length,
+            uploaded: result.uploaded, downloaded: result.downloaded, errors: result.errors })
+        } finally {
+          clearInterval(timer)
+          for (const [name, original] of Object.entries(originals)) engine[name] = original
+        }
+        break
+      }
+      case 'measureSave': {
+        const { performance } = require('node:perf_hooks')
+        const samples = []
+        const note = byTitle('bench-0')
+        for (let i = 0; i < 20; i++) {
+          const start = performance.now()
+          expectOk(await notes.updateNote(note.id, { content: `${note.content}\nedit-${i}` }), 'save')
+          samples.push(performance.now() - start)
+        }
+        samples.sort((a, b) => a - b)
+        outputs.push({ op: 'measureSave', medianMs: samples[10], p95Ms: samples[18], maxMs: samples[19] })
+        break
+      }
+      case 'createTodo':
+        engine.storage.todoDAO.create({ content: op.content })
+        break
+      case 'deleteTodo': {
+        const row = db.prepare('SELECT id FROM todos WHERE content = ?').get(op.content)
+        engine.storage.todoDAO.softDelete(row.id)
+        break
+      }
+      case 'dumpTodos':
+        outputs.push({ todos: db.prepare('SELECT content, is_deleted FROM todos ORDER BY content').all() })
+        break
+      case 'transactionChecks': {
+        const dao = notes.noteDAO
+        const beforeCount = db.prepare('SELECT count(*) AS n FROM notes').get().n
+        const original = dao.syncTagUsage
+        const errors = []
+        dao.syncTagUsage = () => { throw new Error('模拟标签更新失败') }
+        try {
+          try { dao.create({ title: 'partial', content: 'partial', tags: 'new-tag' }) } catch (e) { errors.push(e.message) }
+          try { dao.update(byTitle(op.title).id, { content: 'partial', tags: 'new-tag' }) } catch (e) { errors.push(e.message) }
+        } finally { dao.syncTagUsage = original }
+        const todoCount = db.prepare('SELECT count(*) AS n FROM todos').get().n
+        try {
+          engine.storage.applyTodos([
+            { id: 'transaction-good', content: 'good', updated_at: Date.now() },
+            { id: 'transaction-bad', content: 'bad', description: {}, updated_at: Date.now() },
+          ])
+        } catch (e) { errors.push(e.message) }
+        outputs.push({ op: 'transactionChecks', errors: errors.length,
+          created: db.prepare('SELECT count(*) AS n FROM notes').get().n - beforeCount,
+          content: byTitle(op.title).content,
+          todosCreated: db.prepare('SELECT count(*) AS n FROM todos').get().n - todoCount })
+        break
+      }
+      case 'dropManifest':
+        fs.unlinkSync(path.join(remoteDir, 'Flota', 'manifest.json'))
+        break
+      case 'readRemoteNote': {
+        const note = byTitle(op.title)
+        outputs.push({ content: fs.readFileSync(path.join(remoteDir, 'Flota', 'notes', note.sync_id + (note.note_type === 'whiteboard' ? '.wb' : '.md')), 'utf8') })
+        break
+      }
+      case 'editWidget': {
+        const WidgetDAO = require('../../electron/dao/WidgetDAO')
+        new WidgetDAO().updateWidget('perf-widget', { code: op.code })
+        break
+      }
+      case 'failPath':
+        engine.client.failPattern = op.path
+        break
+      case 'dumpWidgets': {
+        const WidgetDAO = require('../../electron/dao/WidgetDAO')
+        const dao = new WidgetDAO()
+        outputs.push({ op: 'dumpWidgets', widgets: dao.listWidgets(), records: dao.exportForSync('perf-instance') })
+        break
+      }
+      case 'categories':
+        engine.config.syncCategories = op.value
+        break
+      case 'failUpload':
+        engine.client.failUpload = op.path
+        break
+      case 'trySync':
+        try { outputs.push({ op: 'trySync', result: await engine.performSync() }) }
+        catch (error) { outputs.push({ op: 'trySync', error: error.message }) }
+        break
+      case 'corruptRemote': {
+        const manifest = JSON.parse(fs.readFileSync(path.join(remoteDir, 'Flota', 'manifest.json'), 'utf8'))
+        const [id, entry] = Object.entries(manifest.files).find(([, entry]) => entry.meta?.title === op.title)
+        fs.writeFileSync(path.join(remoteDir, 'Flota', 'notes', id + entry.ext), op.content)
+        break
+      }
       case 'sleep':
         await new Promise(resolve => setTimeout(resolve, op.ms))
         break
       case 'sync': {
+        engine.client.calls = []
         const result = await engine.performSync()
-        outputs.push({ op: 'sync', uploaded: result.uploaded, downloaded: result.downloaded, deleted: result.deleted, errors: result.errors, errorDetails: result.errorDetails })
+        outputs.push({ op: 'sync', success: result.success, calls: engine.client.calls, uploaded: result.uploaded, downloaded: result.downloaded, deleted: result.deleted, errors: result.errors, errorDetails: result.errorDetails })
         break
       }
       case 'dump':

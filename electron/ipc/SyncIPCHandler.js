@@ -4,32 +4,10 @@
  * 处理所有云同步相关的 IPC 通信
  */
 
+const { getUserDataPath } = require('../utils/userDataPath');
 const { ipcMain, BrowserWindow } = require('electron');
 const { getInstance: getV3SyncService } = require('../services/sync/V3SyncService');
 const path = require('path');
-
-// 获取用户数据路径
-const getUserDataPath = () => {
-  let app = null;
-  try {
-    app = require('electron').app;
-  } catch (e) {
-    // Standalone mode
-  }
-  
-  if (app) return app.getPath('userData');
-  
-  const platform = process.platform;
-  const homeDir = process.env.HOME || process.env.USERPROFILE;
-  
-  if (platform === 'win32') {
-    return path.join(process.env.APPDATA || homeDir, 'Flota');
-  } else if (platform === 'darwin') {
-    return path.join(homeDir, 'Library', 'Application Support', 'Flota');
-  } else {
-    return path.join(homeDir, '.config', 'Flota');
-  }
-}
 
 class SyncIPCHandler {
   constructor() {
@@ -167,6 +145,7 @@ class SyncIPCHandler {
       const { getInstance: getNetworkService } = require('../services/NetworkService')
       const network = getNetworkService()
       if (!network.isOnline) {
+        await require('../utils/saveWindows').saveAllWindows(BrowserWindow.getAllWindows(), { reason: 'sync' })
         const { getInstance: getOfflineSyncQueue } = require('../services/OfflineSyncQueue')
         getOfflineSyncQueue().enqueue({ type: 'manual-sync' })
         return { success: false, offline: true, error: '当前离线，已加入同步队列' }

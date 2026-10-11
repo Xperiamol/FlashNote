@@ -1,3 +1,4 @@
+import { requireSyncSuccess } from '../../utils/syncResult'
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   Box,
@@ -196,7 +197,7 @@ const StatusHero = ({ syncStatus, syncing, onSyncNow }) => {
   } else if (isEnabled) {
     palette = 'success';
     Icon = CloudDoneIcon;
-    title = '云端已是最新';
+    title = '同步已启用';
     subtitle = `上次同步：${formatRelativeTime(lastSyncTime)}`;
   } else if (syncStatus?.accountConfigured) {
     palette = 'warning';
@@ -846,7 +847,7 @@ const ManageView = ({
               {isEnabled && (
                 <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 2 }}>
                   <Box>
-                    <Typography variant="body2">重建同步索引</Typography>
+                    <Typography variant="body2">全量检查同步</Typography>
                     <Typography variant="caption" color="text.secondary">
                       仅用于修复 manifest 异常，不代表“本机覆盖云端”或“云端覆盖本机”
                     </Typography>
@@ -858,7 +859,7 @@ const ManageView = ({
                     onClick={handlers.onForceFull}
                     disabled={syncing}
                   >
-                    重建
+                    检查
                   </Button>
                 </Box>
               )}
@@ -1110,6 +1111,11 @@ const NutcloudSyncSettings = () => {
     setMessage(null);
     try {
       const result = await window.electronAPI.sync.manualSync();
+      if (result?.offline) {
+        setMessage({ type: 'info', text: '内容已保存在本机，联网后会自动重试同步' });
+        return;
+      }
+      requireSyncSuccess(result);
       setMessage({
         type: 'success',
         text: `同步完成：上传 ${result.uploaded || 0}，下载 ${result.downloaded || 0}，跳过 ${result.skipped || 0}`,
@@ -1127,14 +1133,14 @@ const NutcloudSyncSettings = () => {
     setSyncing(true);
     setMessage(null);
     try {
-      const result = await window.electronAPI.sync.forceFullSync();
+      const result = requireSyncSuccess(await window.electronAPI.sync.forceFullSync());
       setMessage({
         type: 'success',
-        text: `同步索引已重建：上传 ${result.uploaded || 0}`,
+        text: `全量检查已完成：上传 ${result.uploaded || 0}`,
       });
       await loadStatus({ keepPassword: true });
     } catch (error) {
-      setMessage({ type: 'error', text: `重建同步索引失败：${error.message}` });
+      setMessage({ type: 'error', text: `全量检查同步失败：${error.message}` });
     } finally {
       setSyncing(false);
     }
@@ -1371,16 +1377,16 @@ const NutcloudSyncSettings = () => {
       </Dialog>
 
       <Dialog open={forceFullSyncDialog} onClose={() => setForceFullSyncDialog(false)} maxWidth="xs" fullWidth>
-        <DialogTitle>确认重建同步索引</DialogTitle>
+        <DialogTitle>确认全量检查同步</DialogTitle>
         <DialogContent>
           <DialogContentText>
-            将备份并重建云端 manifest，用于修复同步索引损坏。它不会表达“本机覆盖云端”或“云端覆盖本机”，建议仅在同步索引明显异常时使用。
+            将重新读取本地全部正文，并与云端进行比较和同步。保留现有同步基线和云端索引；检查期间的并发修改仍受保护。
           </DialogContentText>
         </DialogContent>
         <DialogActions>
           <Button onClick={() => setForceFullSyncDialog(false)}>取消</Button>
           <Button onClick={confirmForceFullSync} variant="contained" color="warning">
-            确认重建
+            确认检查
           </Button>
         </DialogActions>
       </Dialog>

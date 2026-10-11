@@ -1,31 +1,17 @@
+const { validateTodos, validateSettings } = require('./payloadValidation');
+const { writeFileAtomic, writeFileAtomicSync } = require('../../utils/atomicFile');
 /**
  * Flota v3.0 原子化同步系统 - 同步引擎
  *
  * 核心同步逻辑，实现 manifest-driven 的原子化增量同步
  */
 
+const { getUserDataPath } = require('../../utils/userDataPath');
 const { EventEmitter } = require('events');
 const path = require('path');
 const fs = require('fs');
 const crypto = require('crypto');
-
-// 尝试加载 Electron，如果失败则使用 null（独立运行模式）
-let app = null;
-try {
-  const electron = require('electron');
-  app = electron.app;
-} catch (e) {
-  // 独立运行模式
-}
-
-const getUserDataPath = () => {
-  if (app) return app.getPath('userData');
-  const platform = process.platform;
-  const homeDir = process.env.HOME || process.env.USERPROFILE;
-  if (platform === 'win32') return path.join(process.env.APPDATA || homeDir, 'Flota');
-  if (platform === 'darwin') return path.join(homeDir, 'Library', 'Application Support', 'Flota');
-  return path.join(homeDir, '.config', 'Flota');
-};
+const { isDeepStrictEqual } = require('util');
 
 const WebDAVClient = require('./webdavClient');
 const StorageAdapter = require('./StorageAdapter');
@@ -112,50 +98,52 @@ class SyncEngine extends EventEmitter {
    * @private
    */
   acquireSyncLock() {
-    const LOCK_TIMEOUT_MS = 10 * 60 * 1000;
+    // 上次释放若遇到临时 I/O/数据库占用，保留凭据并在重试时释放自己的锁。
+    if (this._syncLockToken && !this.isSyncing) this.releaseSyncLock();
+    if (this._syncLockToken) throw new Error('同步锁尚未释放，请稍后重试');
+    // 限流等待和大文件同步可以超过十分钟。只按进程存活判断，不按耗时抢锁。
+    // 同步创建临时文件再 hard-link：其他进程绝不会读到半个 JSON。
+    const token = crypto.randomUUID();
+    const temporary = this.lockFilePath + '.' + token;
+    const alive = pid => {
+      if (!Number.isInteger(pid) || pid <= 0) return true;
+      try { process.kill(pid, 0); return true; }
+      catch (error) { return error.code !== 'ESRCH'; }
+    };
     try {
-      // 检查现存锁是否已过期
-      if (fs.existsSync(this.lockFilePath)) {
-        try {
-          const lockContent = JSON.parse(fs.readFileSync(this.lockFilePath, 'utf8'));
-          const age = Date.now() - (lockContent.startedAt || 0);
-          if (age > LOCK_TIMEOUT_MS) {
-            this.log(`[Sync] 检测到过期锁文件（${Math.floor(age / 1000)}s 前的 PID ${lockContent.pid}），强制清理`);
-            fs.unlinkSync(this.lockFilePath);
-          } else {
-            throw new Error(`[Sync] 同步锁被另一进程持有（PID ${lockContent.pid}, ${Math.floor(age / 1000)}s 前），跳过本次`);
-          }
-        } catch (parseErr) {
-          if (parseErr.message?.startsWith('[Sync]')) throw parseErr;
-          // 锁文件损坏，强制清理
-          this.log('[Sync] 锁文件损坏，强制清理');
-          try { fs.unlinkSync(this.lockFilePath); } catch (_) {}
+      this.storage.withSyncLockTransaction(() => {
+        if (fs.existsSync(this.lockFilePath)) {
+          let owner;
+          try { owner = JSON.parse(fs.readFileSync(this.lockFilePath, 'utf8')); }
+          catch { throw new Error('同步锁已损坏，无法安全判断持有者；请关闭其他实例后检查同步锁文件'); }
+          if (alive(owner?.pid)) throw new Error('同步已在进行中，请等待当前任务完成');
+          fs.unlinkSync(this.lockFilePath);
         }
-      }
-      // 原子创建锁文件
-      const fd = fs.openSync(this.lockFilePath, 'wx');
-      try {
-        fs.writeSync(fd, JSON.stringify({ pid: process.pid, startedAt: Date.now() }), 0, 'utf8');
-      } finally {
-        fs.closeSync(fd);
-      }
-    } catch (e) {
-      if (e.code === 'EEXIST') {
-        throw new Error('[Sync] 同步锁竞争失败，另一进程刚刚创建了锁，跳过本次');
-      }
-      throw e;
+        // SQLite 在进程退出后自动释放互斥；旧版遗留的 .recover 不再阻止恢复。
+        fs.writeFileSync(temporary, JSON.stringify({ pid: process.pid, token, startedAt: Date.now() }), { flag: 'wx' });
+        fs.linkSync(temporary, this.lockFilePath);
+        this._syncLockToken = token;
+      });
+    } catch (error) {
+      if (error.code === 'EEXIST' || error.code === 'ENOENT') throw new Error('另一同步任务正在获取锁，请稍后重试');
+      throw error;
+    } finally {
+      try { fs.unlinkSync(temporary); } catch (_) {}
     }
   }
 
-  /**
-   * 释放跨进程同步锁
-   * @private
-   */
   releaseSyncLock() {
+    const token = this._syncLockToken;
+    if (!token) return;
     try {
-      if (fs.existsSync(this.lockFilePath)) fs.unlinkSync(this.lockFilePath);
-    } catch (e) {
-      this.logError('[Sync] 释放锁文件失败（不影响下次同步，10 分钟后会自动清理）', e);
+      this.storage.withSyncLockTransaction(() => {
+        const owner = JSON.parse(fs.readFileSync(this.lockFilePath, 'utf8'));
+        if (owner.token === token && owner.pid === process.pid) fs.unlinkSync(this.lockFilePath);
+      });
+      this._syncLockToken = null;
+    } catch (error) {
+      if (error.code === 'ENOENT') this._syncLockToken = null;
+      else this.logError('释放同步锁失败', error);
     }
   }
 
@@ -166,17 +154,7 @@ class SyncEngine extends EventEmitter {
    * @returns {Promise<import('./types').SyncResult>} 同步结果
    */
   async performSync(_forceFullSync = false, options = {}) {
-    if (this.isSyncing) {
-      // 超时保护：若 isSyncing 持续超过 10 分钟仍未释放，视为遗留状态，强制重置
-      // 防止上一次同步因进程异常中断（如崩溃、强制关机）导致 isSyncing 永久卡死
-      const SYNC_TIMEOUT_MS = 10 * 60 * 1000;
-      if (this._syncStartedAt && Date.now() - this._syncStartedAt > SYNC_TIMEOUT_MS) {
-        this.log(`[Sync] 检测到上次同步超时未释放（${Math.floor((Date.now() - this._syncStartedAt) / 1000)}s），强制重置`);
-        this.isSyncing = false;
-      } else {
-        throw new Error('同步已在进行中');
-      }
-    }
+    if (this.isSyncing) throw new Error('同步已在进行中');
 
     let lockAcquired = false;
     if (!options.lockAlreadyAcquired) {
@@ -189,6 +167,7 @@ class SyncEngine extends EventEmitter {
     const startTime = Date.now();
 
     try {
+      this.client.beginSync?.();
       this.emit('syncStart');
       this.log('========== 开始同步 ==========');
 
@@ -205,12 +184,16 @@ class SyncEngine extends EventEmitter {
           skipped: 0,
           errors: 0,
           errorDetails: [],
-          duration: Date.now() - startTime,
         };
+        await this.syncWidgets(result);
+        result.success = result.errors === 0;
+        result.duration = Date.now() - startTime;
         this.emit('syncComplete', result);
         this.log(`========== 初始化完成 (上传 ${result.uploaded} 个文件) ==========`);
         return result;
       }
+
+      const assetRetryErrors = await this.retryPendingAssets();
 
       // 阶段 2: 扫描与计算
       this.emit('syncProgress', { stage: 'scan', progress: 0.2 });
@@ -221,39 +204,28 @@ class SyncEngine extends EventEmitter {
       // 阶段 3: 执行
       this.emit('syncProgress', { stage: 'execute', progress: 0.4 });
       const result = await this.executeTasks(tasks);
+      result.errors += assetRetryErrors.length;
+      result.errorDetails.push(...assetRetryErrors);
 
       // 阶段 4: 提交 — 即使有非致命错误（如图片上传失败）也提交已成功部分
       this.emit('syncProgress', { stage: 'commit', progress: 0.9 });
-      await this.commit(localManifest, remoteManifest, tasks, result);
-      this.log('同步提交成功');
-
-      // 组件单独同步（独立 manifest，旧版本与 Android 端不受影响）；失败不影响主同步结果
-      if ((this.config.syncCategories || []).includes('widgets')) {
-        try {
-          const widgetResult = await new WidgetSync({
-            client: this.client,
-            rootPath: this.config.rootPath,
-            cachePath: path.join(getUserDataPath(), 'sync-widgets-v2-manifest.json'),
-            log: (...args) => this.log(...args),
-          }).run();
-          result.uploaded = (result.uploaded || 0) + widgetResult.uploaded;
-          result.downloaded = (result.downloaded || 0) + widgetResult.downloaded;
-          result.errors = (result.errors || 0) + widgetResult.errors;
-          if (widgetResult.errorDetails.length) {
-            result.errorDetails = [...(result.errorDetails || []), ...widgetResult.errorDetails];
-          }
-        } catch (error) {
-          this.logError('[WidgetSync] 组件同步失败', error);
-          result.errors = (result.errors || 0) + 1;
-          result.errorDetails = [...(result.errorDetails || []), `组件同步失败：${error.message}`];
-        }
+      const hasChanges = tasks.some(task => task.operation !== 'skip') || this._purgedNoteIds?.size > 0;
+      if (hasChanges) {
+        await this.commit(localManifest, remoteManifest, tasks, result);
+      } else {
+        const cache = this.loadLocalManifest();
+        if (!isDeepStrictEqual(cache, remoteManifest)) this.saveLocalManifest(remoteManifest);
+        this.log('本地与云端一致，跳过远端提交');
       }
+
+      await this.syncWidgets(result);
       if (result.errors > 0) {
         this.logError(`同步完成但有 ${result.errors} 个非致命错误`);
       }
 
+      result.success = result.errors === 0;
       result.duration = Date.now() - startTime;
-      this.lastSyncTime = Date.now();
+      if (result.success) this.lastSyncTime = Date.now();
 
       // Periodic GC: purge soft-deleted todos older than 30 days
       try {
@@ -282,127 +254,34 @@ class SyncEngine extends EventEmitter {
     }
   }
 
-  /**
-   * 强制全量同步 - 清空云端并重新上传
-   * @returns {Promise<import('./types').SyncResult>} 同步结果
-   */
-  /**
-   * 强制全量同步 - 重建 manifest 索引
-   *
-   * 安全语义：仅清空 manifest 索引，**不删除任何云端文件**。
-   * 重新初始化后，bootstrap → initializeCleanSlate 会保护性跳过已存在的 todos.json/settings.json，
-   * 笔记 .md/.wb 也不会被覆盖；新生成的 manifest.json 会重新索引本端的所有 active 笔记，
-   * 远端原有但本端没有的笔记会在下次扫描时被识别为 "仅远端存在 → 下载"。
-   *
-   * 使用场景：用户怀疑 manifest 错乱、缓存损坏、需要重新建立索引时使用。
-   * @returns {Promise<import('./types').SyncResult>} 同步结果
-   */
-  async forceFullSync() {
-    this.log('========== 强制全量同步：重建 manifest（不删除云端文件） ==========');
-
-    const remoteManifestPath = this.config.rootPath + 'manifest.json';
-    const remoteBackupPath = this.config.rootPath + 'manifest.json.backup';
-    const localBackupPath = this.localManifestPath + '.backup';
-    let remoteBackedUp = false;
-    let localBackedUp = false;
-    let lockAcquired = false;
-
+  // 组件单独同步（独立 manifest，旧版本与 Android 端不受影响）；失败不影响主同步结果
+  async syncWidgets(result) {
+    if (!(this.config.syncCategories || []).includes('widgets')) return;
     try {
-      // forceFullSync 的备份/删除 manifest 阶段也必须持有同步锁，
-      // 否则普通同步可能在 manifest 被删除但尚未重建时并发运行。
-      this.acquireSyncLock();
-      lockAcquired = true;
-
-      // #N10：先备份云端 manifest
-      // 自查修正：只有当云端 manifest 不存在 或 备份成功时，才允许继续删除原 manifest
-      // 否则备份失败 + 删除原 manifest = 数据无法恢复
-      let oldRemote = null;
-      try {
-        oldRemote = await this.client.downloadJson(remoteManifestPath);
-      } catch (e) {
-        if (e.response?.status === 404 || /不存在|404|not found/i.test(e.message || '')) {
-          // 云端确实没有 manifest，无需备份
-          this.log('云端 manifest 不存在 (404)，无需备份');
-        } else {
-          // 其他错误（网络/权限/超时）→ 不能贸然继续，否则可能在云端 manifest 实际存在的情况下删除它
-          throw new Error(
-            `下载云端 manifest 失败，无法判断是否需要备份，已中止：${e.message}`
-          );
-        }
+      const widgetResult = await new WidgetSync({
+        client: this.client,
+        rootPath: this.config.rootPath,
+        cachePath: path.join(getUserDataPath(), 'sync-widgets-v2-manifest.json'),
+        log: (...args) => this.log(...args),
+      }).run();
+      result.uploaded = (result.uploaded || 0) + widgetResult.uploaded;
+      result.downloaded = (result.downloaded || 0) + widgetResult.downloaded;
+      result.errors = (result.errors || 0) + widgetResult.errors;
+      if (widgetResult.errorDetails.length) {
+        result.errorDetails = [...(result.errorDetails || []), ...widgetResult.errorDetails];
       }
-
-      if (oldRemote) {
-        try {
-          await this.client.uploadJson(remoteBackupPath, oldRemote);
-          remoteBackedUp = true;
-          this.log('已备份云端 manifest → manifest.json.backup');
-        } catch (e) {
-          // 备份失败 → 拒绝继续，保护数据
-          throw new Error(
-            `备份云端 manifest 失败，已中止强制全量同步以避免数据丢失：${e.message}`
-          );
-        }
-      }
-
-      // #N10：先备份本地 manifest
-      if (fs.existsSync(this.localManifestPath)) {
-        try {
-          fs.copyFileSync(this.localManifestPath, localBackupPath);
-          localBackedUp = true;
-          this.log('已备份本地 manifest → ' + localBackupPath);
-        } catch (e) {
-          throw new Error(`备份本地 manifest 失败，已中止：${e.message}`);
-        }
-      }
-
-      // 删除云端 manifest（仅删除索引，不删数据文件）
-      try {
-        await this.client.delete(remoteManifestPath);
-        this.log('已删除云端 manifest（数据文件未触动）');
-      } catch (e) {
-        if (e.response?.status !== 404) throw e;
-        this.log('云端 manifest 不存在，跳过删除');
-      }
-
-      // 删除本地缓存 manifest
-      if (fs.existsSync(this.localManifestPath)) {
-        fs.unlinkSync(this.localManifestPath);
-        this.log('已删除本地缓存 manifest');
-      }
-
-      // 执行同步（将触发初始化，但 todos.json/settings.json 等已有文件会被保护性跳过）
-      const result = await this.performSync(true, { lockAlreadyAcquired: true });
-      // #N10：成功后清理备份
-      try {
-        if (remoteBackedUp) await this.client.delete(remoteBackupPath).catch(() => {});
-        if (localBackedUp && fs.existsSync(localBackupPath)) fs.unlinkSync(localBackupPath);
-      } catch (_) {}
-      return result;
     } catch (error) {
-      this.logError('强制全量同步失败，尝试恢复备份', error);
-      // #N10：失败时恢复备份
-      try {
-        if (remoteBackedUp) {
-          const backup = await this.client.downloadJson(remoteBackupPath);
-          if (backup) {
-            await this.client.uploadJson(remoteManifestPath, backup);
-            this.log('已从备份恢复云端 manifest');
-          }
-        }
-        if (localBackedUp && fs.existsSync(localBackupPath)) {
-          fs.copyFileSync(localBackupPath, this.localManifestPath);
-          fs.unlinkSync(localBackupPath);
-          this.log('已从备份恢复本地 manifest');
-        }
-      } catch (recoverErr) {
-        this.logError('恢复备份失败，备份保留在 manifest.json.backup', recoverErr);
-      }
-      throw error;
-    } finally {
-      if (lockAcquired) {
-        this.releaseSyncLock();
-      }
+      this.logError('[WidgetSync] 组件同步失败', error);
+      result.errors = (result.errors || 0) + 1;
+      result.errorDetails = [...(result.errorDetails || []), `组件同步失败：${error.message}`];
     }
+  }
+
+  /** 全量复查本地正文与云端索引；保留三向基线和云端索引，避免重建期间并发丢失。 */
+  async forceFullSync() {
+    if (this.isSyncing) throw new Error('同步已在进行中');
+    this.storage.invalidateNoteCache?.();
+    return this.performSync(true);
   }
 
   // ==================== 阶段 1: 初始化 (Bootstrap) ====================
@@ -417,31 +296,18 @@ class SyncEngine extends EventEmitter {
    * @returns {Promise<boolean|{uploaded: number}>} true=已初始化，{uploaded}=刚完成初始化
    */
   async bootstrap() {
-    this.log('[Bootstrap] 检查云端 manifest...');
-
-    // 先确保根目录存在，避免 409 错误
+    // 直接读取索引：避免先检查根目录、再检查文件、最后再下载的三次往返。
+    this._bootstrapManifest = undefined;
     try {
-      const rootExists = await this.client.exists(this.config.rootPath);
-      if (!rootExists) {
-        this.log('[Bootstrap] 根目录不存在，云端未初始化');
-        return await this.initializeCleanSlate();
-      }
+      this._bootstrapManifest = await this.client.downloadJson(this.config.rootPath + 'manifest.json');
+      return true;
     } catch (error) {
-      this.log('[Bootstrap] 检查根目录失败，假设云端未初始化:', error.message);
-      return await this.initializeCleanSlate();
+      if (error.response?.status === 404 || /^(?:WebDAV 资源不存在|文件不存在:)/.test(error.message || '')) {
+        return this.initializeCleanSlate();
+      }
+      // 网络、权限、损坏 JSON 不能被误当成空云端，避免触发初始化写入。
+      throw error;
     }
-
-    // 检查 manifest 是否存在
-    const manifestPath = this.config.rootPath + 'manifest.json';
-    const manifestExists = await this.client.exists(manifestPath);
-
-    if (!manifestExists) {
-      this.log('[Bootstrap] 云端未初始化，开始初始化程序...');
-      return await this.initializeCleanSlate();
-    }
-
-    this.log('[Bootstrap] 云端已初始化');
-    return true;
   }
 
   /**
@@ -465,7 +331,7 @@ class SyncEngine extends EventEmitter {
       await this.client.createDirectory(this.config.rootPath);
       this.log('[Init] 根目录创建完成');
     } catch (error) {
-      this.log('[Init] 根目录创建失败（可能已存在）:', error.message);
+      throw new Error(`初始化目录失败：${error.message}`);
     }
 
     try {
@@ -488,8 +354,8 @@ class SyncEngine extends EventEmitter {
     // 这是 "本地待办丢失" 类问题的关键防线 —— 任何"清空覆盖"必须显式且可控。
     const todosRemotePath = this.config.rootPath + 'todos.json';
     const settingsRemotePath = this.config.rootPath + 'settings.json';
-    const todosExisted = await this.client.exists(todosRemotePath).catch(() => false);
-    const settingsExisted = await this.client.exists(settingsRemotePath).catch(() => false);
+    const todosExisted = await this.client.exists(todosRemotePath);
+    const settingsExisted = await this.client.exists(settingsRemotePath);
     if (!todosExisted) {
       await this.client.uploadJson(todosRemotePath, []);
       uploadCount += 1;
@@ -510,6 +376,21 @@ class SyncEngine extends EventEmitter {
     const localTodos = enabledCategories.includes('todos') ? await this.storage.getAllTodos(false) : {};
     const localSettings = enabledCategories.includes('settings') ? await this.storage.getAllSettings() : {};
 
+    // 缺失索引不代表旧数据可以覆盖。无法证明一致时停止初始化，保留双方快照。
+    if (todosExisted) {
+      const remoteTodos = validateTodos(await this.client.downloadJson(todosRemotePath));
+      if (remoteTodos.length && !isDeepStrictEqual(remoteTodos, Object.values(localTodos))) {
+        throw new Error('云端索引缺失且已有待办与本地不同，已保留数据，请恢复云端索引');
+      }
+    }
+    if (settingsExisted) {
+      const payload = validateSettings(await this.client.downloadJson(settingsRemotePath));
+      const values = payload.__schema === 'kv-ts' ? payload.values : payload;
+      if (Object.keys(values).length && !isDeepStrictEqual(values, localSettings)) {
+        throw new Error('云端索引缺失且已有设置与本地不同，已保留数据，请恢复云端索引');
+      }
+    }
+
     this.log(`[Init] 本地数据 (已启用类别: ${enabledCategories.join(', ')}): ${Object.keys(localNotes).length} 笔记, ${Object.keys(localTodos).length} 待办`);
 
     // 4. 上传本地笔记和画布（如果启用）
@@ -518,15 +399,19 @@ class SyncEngine extends EventEmitter {
       ? Object.values(localNotes).map(async (note) => {
           const ext = note.note_type === 'whiteboard' ? '.wb' : '.md';
           const remotePath = this.config.rootPath + 'notes/' + note.id + ext;
-          const exists = await this.client.exists(remotePath).catch(() => false);
+          const exists = await this.client.exists(remotePath);
           if (exists) {
-            this.log(`[Init] 云端笔记已存在，跳过覆盖: ${note.id}${ext}`);
+            const content = await this.client.downloadText(remotePath);
+            if (content !== note.content) throw new Error(`云端索引缺失且笔记内容不同：${note.id}，已保留双方内容`);
+            this.log(`[Init] 云端笔记与本地一致: ${note.id}${ext}`);
             return;
           }
           await this.uploadNote(note);
         })
       : [];
-    await Promise.all(noteUploads);
+    const uploadResults = await Promise.allSettled(noteUploads);
+    const failedUpload = uploadResults.find(result => result.status === 'rejected');
+    if (failedUpload) throw failedUpload.reason;
     uploadCount += noteUploads.length;
     if (noteUploads.length > 0) {
       this.log(`[Init] ${noteUploads.length} 个笔记/画布已检查/上传`);
@@ -581,7 +466,7 @@ class SyncEngine extends EventEmitter {
     // 必须把它们登记到 manifest，下次 scanAndDiff 才会识别为 "仅远端存在 → 下载"。
     if (enabledCategories.includes('notes')) {
       try {
-        const remoteFiles = await this.client.list(this.config.rootPath + 'notes/', 1).catch(() => []);
+        const remoteFiles = await this.client.list(this.config.rootPath + 'notes/', 1);
         for (const f of remoteFiles) {
           if (f.isDirectory) continue;
           const baseName = decodeURIComponent(f.href.split('/').pop() || '');
@@ -603,7 +488,8 @@ class SyncEngine extends EventEmitter {
           this.log(`[Init] 发现云端独有笔记，已登记到 manifest: ${fileId}${ext}`);
         }
       } catch (e) {
-        this.logError('[Init] 扫描云端 notes/ 目录失败（不阻断）', e);
+        this.logError('[Init] 扫描云端 notes/ 目录失败，停止发布不完整索引', e);
+        throw e;
       }
     }
 
@@ -643,8 +529,8 @@ class SyncEngine extends EventEmitter {
       try {
         const localPath = path.join(getUserDataPath(), relativePath);
         if (!fs.existsSync(localPath)) {
-          this.log(`[Init Images] 本地图片不存在，跳过: ${relativePath}`);
-          continue;
+          if (await this.client.exists(this.config.rootPath + relativePath)) continue;
+          throw new Error(`图片在本地和云端均不存在：${relativePath}`);
         }
 
         const remotePath = this.config.rootPath + relativePath;
@@ -654,6 +540,7 @@ class SyncEngine extends EventEmitter {
         this.log(`[Init Images] 上传成功: ${relativePath}`);
       } catch (error) {
         this.log(`[Init Images] 上传失败: ${relativePath}, ${error.message}`);
+        throw error;
       }
     }
 
@@ -672,11 +559,15 @@ class SyncEngine extends EventEmitter {
     for (const relativePath of allRefs) {
       try {
         const localPath = path.join(getUserDataPath(), relativePath);
-        if (!fs.existsSync(localPath)) continue;
+        if (!fs.existsSync(localPath)) {
+          if (await this.client.exists(this.config.rootPath + relativePath)) continue;
+          throw new Error(`附件在本地和云端均不存在：${relativePath}`);
+        }
         await this.client.uploadBinary(this.config.rootPath + relativePath, fs.readFileSync(localPath));
         uploadedCount++;
       } catch (error) {
         this.log(`[Init Attachments] 上传失败: ${relativePath}, ${error.message}`);
+        throw error;
       }
     }
     return uploadedCount;
@@ -824,7 +715,8 @@ class SyncEngine extends EventEmitter {
     this._remoteSettingsContainsDeviceLocal = false;
 
     // 1. 下载远程 manifest
-    const remoteManifest = await this.client.downloadJson(this.config.rootPath + 'manifest.json');
+    let remoteManifest = this._bootstrapManifest ?? await this.client.downloadJson(this.config.rootPath + 'manifest.json');
+    this._bootstrapManifest = undefined;
 
     // #N9：远端 manifest schema 校验，损坏则直接抛错阻断同步
     if (!this.isValidManifest(remoteManifest)) {
@@ -835,31 +727,29 @@ class SyncEngine extends EventEmitter {
     // 暂存最近一次远端 manifest，供 generateManifest 在 cache 缺失时回退使用
     this._lastRemoteManifest = remoteManifest;
 
-    // #N1：检测上一轮 commit 是否中断
-    // 若有 pending：cached 中存的就是"我们期望的、已成功执行但 manifest 上传失败"的状态
-    // → 直接尝试用本地 cached 重新上传 manifest，不走 diff 流程
-    if (this.hasPendingCommit()) {
-      this.log('[Scan] ⚠️ 检测到上一轮 commit 未完成，尝试恢复...');
-      try {
-        const cached = this.loadLocalManifest();
-        const recovery = { ...cached };
-        delete recovery._pendingCommit;
-        // 仅当远端 manifest 与上次执行前快照一致时才直接覆盖（说明确实是 commit 阶段中断）
-        // 否则走正常 diff 流程，让 LWW + dev 仲裁处理
-        await this.client.uploadJson(this.config.rootPath + 'manifest.json', recovery);
-        this.saveLocalManifest(recovery);
-        this.log('[Scan] commit 恢复成功，远端 manifest 已对齐');
-        // 恢复成功后继续走正常 scan，可能已无差异
-      } catch (e) {
-        this.logError('[Scan] commit 恢复失败，回退到正常 diff 流程', e);
-        // 不阻断，继续走正常 diff（cached 仍有 _pendingCommit 标记，下次再尝试）
+    // 只重放基于同一远端快照的提交，不能覆盖中断期间其他设备的新索引。
+    const pending = this.loadLocalManifest();
+    if (pending?._pendingCommit) {
+      if (!pending._pendingBase || !pending._pendingLocalCache) {
+        throw new Error('旧版未完成同步缺少恢复快照，已停止自动覆盖云端索引；请先备份并检查同步状态');
       }
+      const { _pendingCommit, _pendingBase, _pendingLocalCache, _pendingPreviousCache, ...recovery } = pending;
+      if (isDeepStrictEqual(remoteManifest.files, _pendingBase.files) ||
+          isDeepStrictEqual(remoteManifest.files, recovery.files)) {
+        await this.client.uploadJson(this.config.rootPath + 'manifest.json', recovery);
+        this.saveLocalManifest(_pendingLocalCache);
+        remoteManifest = recovery;
+      } else {
+        // 远端已推进：回到中断前的三向合并基线，保留冲突处理机会。
+        this.saveLocalManifest(_pendingPreviousCache || { version: 3, files: {} });
+      }
+      this._lastRemoteManifest = remoteManifest;
     }
 
     // 协议握手探测：嗅探一次远端 settings.json 是否已是 kv-ts 格式（仅头部判断，不下载完整时多余开销）
     // 决定本端 settings 上传时使用新格式还是旧格式，避免单端升级污染未升级的旧客户端
     this._lastRemoteSettingsIsKvTs = false;
-    if (remoteManifest.files?.['global_settings']) {
+    if ((this.config.syncCategories || []).includes('settings') && remoteManifest.files?.['global_settings']) {
       try {
         const remoteSettings = await this.client.downloadJson(this.config.rootPath + 'settings.json').catch(() => null);
         this._lastRemoteSettingsIsKvTs = !!(remoteSettings && remoteSettings.__schema === 'kv-ts');
@@ -961,6 +851,9 @@ class SyncEngine extends EventEmitter {
 
       const task = await this.decideOperation(fileId, remoteEntry, localEntry, cachedEntry, localData);
       if (task) {
+        if (isNotesCategory && task.operation === 'download') {
+          task.expectedLocal = localData.localNotes[fileId] || null;
+        }
         tasks.push(task);
       }
     }
@@ -1463,6 +1356,10 @@ class SyncEngine extends EventEmitter {
         const delta = await handler(task);
         addCounters(delta);
         markTaskSuccess(task);
+        if (task.assetError) {
+          result.errors++;
+          result.errorDetails.push({ fileId: task.fileId, error: task.assetError });
+        }
       } catch (error) {
         if (error?.code === 'MANIFEST_DANGLING_ENTRY' && task.fileId) {
           // 这是预期的自愈路径：记录待清理条目，不按失败计数。
@@ -1481,7 +1378,7 @@ class SyncEngine extends EventEmitter {
 
     // 阶段级（scan/commit）异常会抛出并触发 syncError；
     // 到达这里说明本次同步可提交，任务失败仅作为告警。
-    result.success = true;
+    result.success = result.errors === 0;
     return result;
   }
 
@@ -1491,6 +1388,27 @@ class SyncEngine extends EventEmitter {
    */
   async executeUpload(task) {
     this.log(`[Upload] ${task.fileId}`);
+
+    // 正文和 manifest 使用读取时的 ETag 做条件提交。先检查正文与扫描快照
+    // 是否一致，避免另一设备先写正文、尚未更新索引时被覆盖。
+    const remote = this._lastRemoteManifest?.files?.[task.fileId];
+    await this.client.prepareWrite?.(task.remotePath, content => {
+      // 上次可能已写完正文、却在提交 manifest 前退出；同一正文可安全幂等重试。
+      // prepareWrite 仍会绑定当前 ETag，检查之后的新写入不会被覆盖。
+      if (typeof task.data?.content === 'string' && content === task.data.content) return true;
+      if (!remote) return false;
+      if (!/^[a-f0-9]{32}$/i.test(remote.h || '')) return true;
+      if (task.fileId === 'global_todos' || task.fileId === 'global_settings') return true;
+      if (remote.ext === '.wb') {
+        const title = remote.meta?.title || '';
+        if (this.storage.calculateNoteHash({ content, title, note_type: 'whiteboard' }) === remote.h) return true;
+        // 旧 Android 使用 Gson 的 HTML 安全转义；只接受可验证的旧编码，不跳过完整性检查。
+        const legacy = JSON.stringify({ content, title }).replace(/[<>&='\u2028\u2029]/g,
+          char => '\\u' + char.charCodeAt(0).toString(16).padStart(4, '0'));
+        return crypto.createHash('md5').update(legacy, 'utf8').digest('hex') === remote.h;
+      }
+      return this.storage.calculateNoteHash({ content, note_type: 'markdown' }) === remote.h;
+    });
 
     if (task.fileId === 'global_todos' || task.fileId === 'global_settings') {
       // 上传 JSON
@@ -1502,17 +1420,13 @@ class SyncEngine extends EventEmitter {
       // 上传笔记/画布
       const note = task.data;
       if (note) {
-        // 如果有旧文件路径（类型转换），先删除旧文件
-        if (task.oldRemotePath && task.oldRemotePath !== task.remotePath) {
-          try {
-            this.log(`[Upload] 删除旧文件: ${task.oldRemotePath}`);
-            await this.client.delete(task.oldRemotePath);
-          } catch (error) {
-            // 如果旧文件不存在，忽略错误
-            if (error.response?.status !== 404) {
-              this.log(`[Upload] 删除旧文件失败: ${error.message}`);
-            }
-          }
+        // 类型转换保留旧文件；新正文与索引提交成功前，旧索引仍可能引用它。
+        const enabledCategories = this.config.syncCategories || [];
+        if (enabledCategories.includes('images')) {
+          await this.uploadNoteImages(note.content, note.note_type || 'markdown');
+        }
+        if (enabledCategories.includes('attachments')) {
+          await this.uploadNoteAttachments(note.content, note.note_type || 'markdown');
         }
 
         await this.client.uploadText(task.remotePath, note.content);
@@ -1528,14 +1442,6 @@ class SyncEngine extends EventEmitter {
             is_favorite: remoteMeta.is_favorite || 0,
           });
           task.localEntry.meta = { ...task.localEntry.meta, ...remoteMeta };
-        }
-
-        const enabledCategories = this.config.syncCategories || [];
-        if (enabledCategories.includes('images')) {
-          await this.uploadNoteImages(note.content, note.note_type || 'markdown');
-        }
-        if (enabledCategories.includes('attachments')) {
-          await this.uploadNoteAttachments(note.content, note.note_type || 'markdown');
         }
 
         // 画布笔记：同步上传预览图
@@ -1588,7 +1494,7 @@ class SyncEngine extends EventEmitter {
       if (!imageData) return;
       const dir = path.dirname(localPath);
       if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
-      fs.writeFileSync(localPath, imageData);
+      await writeFileAtomic(localPath, imageData);
       this.log(`[Wallpaper] 壁纸下载成功: ${relativePath}`);
     } catch (error) {
       this.log(`[Wallpaper] 壁纸${upload ? '上传' : '下载'}失败: ${relativePath}, ${error.message}`);
@@ -1611,8 +1517,8 @@ class SyncEngine extends EventEmitter {
     for (const relativePath of imageRefs) {
       const localPath = path.join(getUserDataPath(), relativePath);
       if (!fs.existsSync(localPath)) {
-        this.log(`[Upload Images] 本地图片不存在，跳过: ${relativePath}`);
-        continue;
+        if (await this.client.exists(this.config.rootPath + relativePath)) continue;
+        throw new Error(`图片在本地和云端均不存在：${relativePath}`);
       }
 
       const remotePath = this.config.rootPath + relativePath;
@@ -1655,6 +1561,7 @@ class SyncEngine extends EventEmitter {
     if (failedImages.length > 0) {
       this.emit('imageUploadFailed', { failed: failedImages, total: imageRefs.length });
       this.log(`[Upload Images] ${failedImages.length} 个图片上传失败`);
+      throw new Error(`图片上传不完整：${failedImages.join(", ")}`);
     }
   }
 
@@ -1667,8 +1574,8 @@ class SyncEngine extends EventEmitter {
       try {
         const localPath = path.join(getUserDataPath(), relativePath);
         if (!fs.existsSync(localPath)) {
-          this.log(`[Upload Attachments] 本地附件不存在，跳过: ${relativePath}`);
-          continue;
+          if (await this.client.exists(this.config.rootPath + relativePath)) continue;
+          throw new Error(`附件在本地和云端均不存在：${relativePath}`);
         }
         const remotePath = this.config.rootPath + relativePath;
         await this.ensureRemoteDirectory(remotePath);
@@ -1676,6 +1583,7 @@ class SyncEngine extends EventEmitter {
         this.log(`[Upload Attachments] 附件上传成功: ${relativePath}`);
       } catch (error) {
         this.log(`[Upload Attachments] 附件上传失败: ${relativePath}, ${error.message}`);
+        throw error;
       }
     }
   }
@@ -1696,10 +1604,9 @@ class SyncEngine extends EventEmitter {
 
     if (task.fileId === 'global_todos') {
       // 下载 todos
-      const remoteTodos = await this.client.downloadJson(task.remotePath);
+      const remoteTodos = validateTodos(await this.client.downloadJson(task.remotePath));
       this.log(`[Download] 下载了 ${remoteTodos.length} 个 todos`);
 
-      const cloudIds = new Set();
       for (const todo of remoteTodos) {
         // 确保每个 todo 都有有效的时间戳
         if (!todo.created_at) {
@@ -1708,32 +1615,16 @@ class SyncEngine extends EventEmitter {
         if (!todo.updated_at) {
           todo.updated_at = Date.now();
         }
-        if (todo.id) cloudIds.add(todo.id);
-        await this.storage.upsertTodo(todo, true);
       }
 
-      // Safety net: soft-delete local active todos not present in cloud
-      // (handles the case where another device deleted a todo)
-      //
-      // 重要保护：仅当云端确实有 todos 时才执行 safety net 软删除。
-      // 当 remoteTodos 为空数组（首次同步、云端被错误清空、initializeCleanSlate
-      // 上传了空文件等场景）时，一律不删除本地任何 todo，避免本地待办被批量丢失。
-      if (remoteTodos.length > 0) {
-        const localTodos = await this.storage.getAllTodos(false); // active only
-        for (const syncId of Object.keys(localTodos)) {
-          if (!cloudIds.has(syncId)) {
-            this.log(`[Download] 云端不存在，软删除本地 todo: ${syncId}`);
-            await this.storage.softDeleteTodo(syncId, true);
-          }
-        }
-      } else {
-        this.log('[Download] 云端 todos 为空，跳过 safety net 软删除（保护本地待办不被清空）');
-      }
+      this.storage.applyTodos(remoteTodos);
+
+      // 删除只能依赖显式墓碑；集合缺项也可能是另一端未同步完或本地刚新建。
     } else if (task.fileId === 'global_settings') {
       // 下载 settings —— 兼容两种云端格式：
       //   新格式: { __schema: 'kv-ts', values: {...}, timestamps: {...} } —— 逐 key LWW
       //   旧格式: { key: value, ... } —— 整体覆盖（迁移期兼容，会 INSERT OR UPDATE 但不会删除本地多出的 key）
-      const remotePayload = await this.client.downloadJson(task.remotePath);
+      const remotePayload = validateSettings(await this.client.downloadJson(task.remotePath));
       if (remotePayload && remotePayload.__schema === 'kv-ts') {
         const stat = await this.storage.mergeSettingsByKey(
           remotePayload.values || {},
@@ -1808,6 +1699,13 @@ class SyncEngine extends EventEmitter {
         updated_at: task.remoteEntry.t || task.remoteEntry.c || null,
       };
 
+      // Markdown 的跨端 hash 协议一致，拒绝截断正文或正文/索引不同步的快照。
+      // 白板的历史 Android Gson 转义尚未与桌面 JSON.stringify 完全一致，不能在此强制同一 hash。
+      if (noteType !== 'whiteboard' && /^[a-f0-9]{32}$/i.test(task.remoteEntry.h || '') &&
+          this.storage.calculateNoteHash(noteData) !== task.remoteEntry.h) {
+        throw new Error('云端正文与同步索引不一致，保留本地内容并等待重试');
+      }
+
       if (task.keepLocalMeta) {
         const localNote = await this.storage.getNoteById(task.fileId, true);
         if (localNote) {
@@ -1822,21 +1720,75 @@ class SyncEngine extends EventEmitter {
       }
 
       this.log(`[Download] 笔记元数据: created_at=${noteData.created_at}, title=${noteData.title}`);
-      await this.storage.upsertNote(noteData, true);
 
-      const enabledCategories = this.config.syncCategories || [];
-      if (enabledCategories.includes('images')) {
-        await this.downloadNoteImages(content, noteType);
+      if (noteType === 'whiteboard') {
+        let scene;
+        try { scene = JSON.parse(content); } catch { throw new Error('云端画布 JSON 损坏，保留本地内容'); }
+        if (!scene || !Array.isArray(scene.elements)) throw new Error('云端画布缺少 elements，保留本地内容');
       }
-      if (enabledCategories.includes('attachments')) {
-        await this.downloadNoteAttachments(content, noteType);
+      try {
+        await this.downloadNoteAssets(noteData);
+      } catch (error) {
+        // 先持久化补传义务，再应用完整正文。正文 checkpoint 可推进，资源仍会重试。
+        const pending = this.loadPendingAssets();
+        pending[task.fileId] = ['images', 'attachments'].filter(category => this.config.syncCategories.includes(category));
+        this.savePendingAssets(pending);
+        task.assetError = `正文已下载，图片或附件待补全：${error.message}`;
       }
+      await this.storage.upsertNote(noteData, true, task.expectedLocal);
 
       // 画布笔记：同步下载预览图
       if (noteType === 'whiteboard') {
         await this.syncWhiteboardPreview(task.fileId, false);
       }
     }
+  }
+
+  getPendingAssetsPath() {
+    const account = [this.config.baseUrl, this.config.username, this.config.rootPath].join('|');
+    const key = crypto.createHash('sha256').update(account).digest('hex').slice(0, 20);
+    return path.join(getUserDataPath(), `sync-assets-${key}.json`);
+  }
+
+  loadPendingAssets() {
+    try {
+      const pending = JSON.parse(fs.readFileSync(this.getPendingAssetsPath(), 'utf8'));
+      if (!pending || typeof pending !== 'object' || Array.isArray(pending)) throw new Error('资源重试记录损坏');
+      return pending;
+    } catch (error) { if (error.code === 'ENOENT') return {}; throw error; }
+  }
+
+  savePendingAssets(pending) {
+    writeFileAtomicSync(this.getPendingAssetsPath(), JSON.stringify(pending));
+  }
+
+  async downloadNoteAssets(note) {
+    const categories = this.config.syncCategories || [];
+    if (categories.includes('images')) await this.downloadNoteImages(note.content, note.note_type);
+    if (categories.includes('attachments')) await this.downloadNoteAttachments(note.content, note.note_type);
+  }
+
+  async retryPendingAssets() {
+    if (!(this.config.syncCategories || []).includes('notes')) return [];
+    const pending = this.loadPendingAssets();
+    const errors = [];
+    for (const id of Object.keys(pending)) {
+      const note = await this.storage.getNoteById(id, false);
+      if (!note || note.is_deleted) { delete pending[id]; continue; }
+      const remaining = new Set(Array.isArray(pending[id]) ? pending[id] : ['images', 'attachments']);
+      for (const category of remaining) {
+        if (!this.config.syncCategories.includes(category)) continue;
+        try {
+          if (category === 'images') await this.downloadNoteImages(note.content, note.note_type);
+          else await this.downloadNoteAttachments(note.content, note.note_type);
+          remaining.delete(category);
+        } catch (error) { errors.push({ fileId: id, error: `图片或附件仍待补全：${error.message}` }); }
+      }
+      if (remaining.size) pending[id] = [...remaining];
+      else delete pending[id];
+    }
+    if (Object.keys(pending).length || fs.existsSync(this.getPendingAssetsPath())) this.savePendingAssets(pending);
+    return errors;
   }
 
   /**
@@ -1887,10 +1839,10 @@ class SyncEngine extends EventEmitter {
       } else {
         // 下载预览图 — 始终覆盖本地（确保获取最新版本）
         const imageData = await this.client.downloadBinary(remotePath);
-        if (imageData) {
+        if (imageData?.length) {
           const dir = path.dirname(localPath);
           if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
-          fs.writeFileSync(localPath, Buffer.from(imageData));
+          await writeFileAtomic(localPath, Buffer.from(imageData));
           this.log(`[WhiteboardPreview] 下载成功: ${syncId}`);
         }
       }
@@ -1945,7 +1897,7 @@ class SyncEngine extends EventEmitter {
     const downloadOne = async (relativePath) => {
       // 检查本地是否已存在
       const localPath = path.join(getUserDataPath(), relativePath);
-      if (fs.existsSync(localPath)) {
+      if (fs.existsSync(localPath) && fs.statSync(localPath).size > 0) {
         this.log(`[Download Images] 图片已存在，跳过: ${relativePath}`);
         return;
       }
@@ -1958,12 +1910,12 @@ class SyncEngine extends EventEmitter {
           this.log(`[Download Images] 下载图片 (尝试 ${attempt}/3): ${relativePath}`);
 
           const imageData = await this.client.downloadBinary(remotePath);
-          if (imageData) {
+          if (imageData?.length) {
             const localDir = path.dirname(localPath);
             if (!fs.existsSync(localDir)) {
               fs.mkdirSync(localDir, { recursive: true });
             }
-            fs.writeFileSync(localPath, imageData);
+            await writeFileAtomic(localPath, imageData);
             this.log(`[Download Images] 图片下载成功: ${relativePath}`);
             success = true;
           }
@@ -1990,6 +1942,7 @@ class SyncEngine extends EventEmitter {
     if (failedImages.length > 0) {
       this.emit('imageDownloadFailed', { failed: failedImages, total: imageRefs.length });
       this.log(`[Download Images] ${failedImages.length} 个图片下载失败`);
+      throw new Error(`图片下载不完整：${failedImages.join(", ")}`);
     }
   }
 
@@ -2001,15 +1954,16 @@ class SyncEngine extends EventEmitter {
     for (const relativePath of refs) {
       try {
         const localPath = path.join(getUserDataPath(), relativePath);
-        if (fs.existsSync(localPath)) continue;
+        if (fs.existsSync(localPath) && fs.statSync(localPath).size > 0) continue;
         const data = await this.client.downloadBinary(this.config.rootPath + relativePath);
-        if (!data) continue;
+        if (!data?.length) throw new Error(`附件下载为空：${relativePath}`);
         const localDir = path.dirname(localPath);
         if (!fs.existsSync(localDir)) fs.mkdirSync(localDir, { recursive: true });
-        fs.writeFileSync(localPath, data);
+        await writeFileAtomic(localPath, data);
         this.log(`[Download Attachments] 附件下载成功: ${relativePath}`);
       } catch (error) {
         this.log(`[Download Attachments] 附件下载失败: ${relativePath}, ${error.message}`);
+        throw error;
       }
     }
   }
@@ -2149,21 +2103,9 @@ class SyncEngine extends EventEmitter {
       return;
     }
 
-    // 删除云端文件（尝试删除 .md 和 .wb 两种扩展名，与 Android 保持一致）
-    const extensions = ['.md', '.wb'];
-    for (const ext of extensions) {
-      const delPath = this.getRemotePath(task.fileId, ext);
-      try {
-        await this.client.delete(delPath);
-        this.log(`[Upload Delete] 已删除云端文件: ${delPath}`);
-      } catch (error) {
-        if (error.response?.status === 404) {
-          this.log(`[Upload Delete] 云端文件已不存在: ${delPath}`);
-        } else {
-          throw error;
-        }
-      }
-    }
+    // 删除通过条件提交的 manifest 墓碑传播。正文保留，避免提交失败后
+    // 旧索引指向已被删掉的文件，也给其他设备的并发编辑留下恢复来源。
+
   }
 
   /**
@@ -2185,7 +2127,7 @@ class SyncEngine extends EventEmitter {
     // 任何阶段失败：本地 DB 仍是合并前状态，下次同步重新触发 merge-todos
 
     // Step 1: 下载远端 todos 到内存（不立刻 upsert 到本地）
-    const remoteTodos = await this.client.downloadJson(task.remotePath).catch(() => []);
+    const remoteTodos = validateTodos(await this.client.downloadJson(task.remotePath));
     if (!Array.isArray(remoteTodos)) {
       throw new Error('[MergeTodos] 远端 todos.json 格式异常，本次合并已取消');
     }
@@ -2215,22 +2157,18 @@ class SyncEngine extends EventEmitter {
     const mergedArray = Array.from(mergedMap.values());
 
     // Step 3: 上传合并结果到远端（先于本地写入，确保失败时本地仍是旧状态）
-    await this.client.uploadJson(task.remotePath, mergedArray);
-    this.log(`[MergeTodos] 上传成功 ${mergedArray.length} 条 todos`);
+    // 合并结果与云端内容相同（如新设备首次同步）时不重写，云端已是该快照。
+    if (this.storage.calculateTodosHash(mergedArray) !== this.storage.calculateTodosHash(remoteTodos)) {
+      await this.client.uploadJson(task.remotePath, mergedArray);
+      this.log(`[MergeTodos] 上传成功 ${mergedArray.length} 条 todos`);
+    }
+    task.uploadedTodos = mergedArray;
 
     // Step 4: 上传成功后才把"远端独有"的部分 upsert 到本地 DB
     // 注意：这里只 upsert 那些在本次合并中"被远端版本胜出"的条目，避免无谓写入
-    let upsertCount = 0;
-    for (const remoteTodo of remoteTodos) {
-      const sid = remoteTodo.id || remoteTodo.sync_id;
-      if (!sid) continue;
-      const winner = mergedMap.get(sid);
-      if (winner === remoteTodo) {
-        await this.storage.upsertTodo(remoteTodo, true);
-        upsertCount++;
-      }
-    }
-    this.log(`[MergeTodos] 已 upsert ${upsertCount} 条远端胜出的 todos 到本地`);
+    const remoteWinners = remoteTodos.filter(todo => mergedMap.get(todo.id) === todo);
+    this.storage.applyTodos(remoteWinners);
+    this.log(`[MergeTodos] 已写入 ${remoteWinners.length} 条远端胜出的 todos 到本地`);
   }
 
   // ==================== 阶段 4: 提交 (Commit) ====================
@@ -2257,8 +2195,9 @@ class SyncEngine extends EventEmitter {
 
     const setMergedTodosEntry = async (task) => {
       try {
-        const allTodos = await this.storage.getAllTodos(true);
-        const todosArray = Object.values(allTodos);
+        // 索引必须对应实际上传的快照，不能混入上传后用户刚编辑的待办。
+        const todosArray = task.uploadedTodos;
+        if (!Array.isArray(todosArray)) throw new Error('缺少已上传待办快照');
         let t = 0;
         for (const todo of todosArray) {
           const ts = this.storage.parseTimestamp(todo.updated_at);
@@ -2294,8 +2233,8 @@ class SyncEngine extends EventEmitter {
           dev: this.deviceId, // 合并是由本机执行的，dev 标记为本机用于 LWW tiebreaker
         };
       } catch (e) {
-        this.logError('[Commit] 重新计算 global_todos hash 失败', e);
-        // 回退：保持 remoteManifest 中的条目
+        this.logError('[Commit] 计算已上传待办 hash 失败', e);
+        throw e;
       }
     };
 
@@ -2396,7 +2335,28 @@ class SyncEngine extends EventEmitter {
     // 3) 上传成功后写入正式 cached（去掉标记）
     // 任何一步失败：下次同步通过 hasPendingCommit() 检测，走"恢复路径"——
     //   把 cached 当作"事实上已成功的状态"做 diff，避免被误判为双端冲突。
-    const pendingMarker = { ...newManifest, _pendingCommit: true };
+    // 本机缓存要反映"本机实际同步到的版本"：没下载成功的条目保留上一次的缓存，
+    // 否则下次会把本机旧内容误判为本地修改，推上去盖掉另一台设备的新版本
+    const localCache = { ...newManifest, files: { ...newManifest.files } };
+    for (const task of tasks || []) {
+      if ((task.operation === 'download' || task.operation === 'merge-todos') && !isSuccessfulTask(task)) {
+        if (previousCache?.files?.[task.fileId]) localCache.files[task.fileId] = previousCache.files[task.fileId];
+        else delete localCache.files[task.fileId];
+      }
+    }
+    // 只下载的轮次索引内容不变：不写云端，避免制造新版本让其他设备白跑一轮。
+    if (isDeepStrictEqual(newManifest.files, remoteManifest.files)
+      && isDeepStrictEqual(newManifest.previewHashes || {}, remoteManifestPreviewHashes)) {
+      this.saveLocalManifest(localCache);
+      this.log('[Commit] 云端索引无变化，跳过上传');
+      return;
+    }
+    const pendingMarker = {
+      ...newManifest, _pendingCommit: true,
+      _pendingBase: remoteManifest,
+      _pendingLocalCache: localCache,
+      _pendingPreviousCache: previousCache,
+    };
     this.saveLocalManifest(pendingMarker);
 
     try {
@@ -2409,15 +2369,6 @@ class SyncEngine extends EventEmitter {
 
     // 上传成功，写入正式 cached（去掉 _pendingCommit）
     delete newManifest._pendingCommit;
-    // 本机缓存要反映"本机实际同步到的版本"：没下载成功的条目保留上一次的缓存，
-    // 否则下次会把本机旧内容误判为本地修改，推上去盖掉另一台设备的新版本
-    const localCache = { ...newManifest, files: { ...newManifest.files } };
-    for (const task of tasks || []) {
-      if ((task.operation === 'download' || task.operation === 'merge-todos') && !isSuccessfulTask(task)) {
-        if (previousCache?.files?.[task.fileId]) localCache.files[task.fileId] = previousCache.files[task.fileId];
-        else delete localCache.files[task.fileId];
-      }
-    }
     this.saveLocalManifest(localCache);
 
     // 永久删除记录：删除已推到云端（或云端已经没有/已是删除状态）的不再需要
@@ -2445,28 +2396,21 @@ class SyncEngine extends EventEmitter {
    */
   async gcOrphanImages(manifest) {
     try {
-      // 仅当启用 images 类别时才清理云端
+      // 本地资源回收；不依据本地引用删除云端资源。
       const enabledCategories = this.config.syncCategories || [];
-            const allNotesIncludingDeleted = await this.storage.getAllNotes(true);
+      const allNotesIncludingDeleted = await this.storage.getAllNotes(true);
 
-      // 安全防御 #J：如果本地笔记数量异常少（疑似数据被意外清空），跳过 GC，
-      // 防止"本地清空 → 云端图片全删"的灾难性副作用。
-      // 阈值：当本地 active 笔记 < 1，且 manifest 中的笔记条目却 >= 5 时拒绝清理云端。
-      const manifestNotesCount = Object.values(manifest.files || {})
-        .filter(e => e && e.d === 0 && e.ext && (e.ext === '.md' || e.ext === '.wb')).length;
-      const localTotal = Object.keys(allNotesIncludingDeleted || {}).length;
-      const skipCloudGc = (localTotal < 1 && manifestNotesCount >= 5) || (localTotal < manifestNotesCount * 0.2 && manifestNotesCount >= 10);
-      if (skipCloudGc) {
-        this.log(`[GC Images] 本地笔记异常少 (local=${localTotal}, manifest=${manifestNotesCount})，跳过云端 GC 防止误删`);
+      // 本地引用只能证明本地孤儿，不能证明其他设备没有正在上传或引用。
+      // 云端图片不在此自动删除；本地清理也要求所有远端笔记已完整落地。
+      if (!enabledCategories.includes('notes')) return;
+      for (const [id, entry] of Object.entries(manifest.files || {})) {
+        if (id === 'global_todos' || id === 'global_settings') continue;
+        const note = allNotesIncludingDeleted[id];
+        if (!note || this.storage.calculateNoteHash(note) !== entry.h) return;
       }
-
-      // 收集被引用的图片：回收站里的笔记也算（恢复后还要用），按文件名在正文里查找，
-      // 不靠图片语法正则——`![](<images/x.png>)`、带标题、%20 编码等写法以前认不出，正在用的图片被当孤儿删掉
       const referenced = collectReferencedImageNames(
         Object.values(allNotesIncludingDeleted || {}).map((note) => note.content)
       );
-      // 只开了图片同步、没开笔记同步时，本机看不到其他设备的笔记，不能替它们判断云端图片没人用
-      const canDeleteCloud = !skipCloudGc && enabledCategories.includes('images') && enabledCategories.includes('notes');
 
       // 本地 images 目录
       const localImagesDir = path.join(getUserDataPath(), 'images');
@@ -2492,10 +2436,6 @@ class SyncEngine extends EventEmitter {
               if (now - stat.mtimeMs < ORPHAN_TTL_MS) continue;
               fs.unlinkSync(full);
               this.log(`[GC Images] 删除本地孤儿图片: ${normalized}`);
-              // 同步删除云端（除非触发安全防御）
-              if (canDeleteCloud) {
-                this.client.delete(this.config.rootPath + normalized).catch(() => {});
-              }
             } catch (_) { /* 忽略单个失败 */ }
           }
         }
@@ -2548,22 +2488,11 @@ class SyncEngine extends EventEmitter {
    * @private
    */
   saveLocalManifest(manifest) {
-    const tmpPath = `${this.localManifestPath}.tmp`;
     try {
-      const json = JSON.stringify(manifest, null, 2);
-      // 写临时文件 → fsync → rename，保证崩溃/断电时不会出现半截 JSON
-      const fd = fs.openSync(tmpPath, 'w');
-      try {
-        fs.writeSync(fd, json, 0, 'utf8');
-        try { fs.fsyncSync(fd); } catch (_) { /* 部分文件系统不支持 fsync，忽略 */ }
-      } finally {
-        fs.closeSync(fd);
-      }
-      fs.renameSync(tmpPath, this.localManifestPath);
+      writeFileAtomicSync(this.localManifestPath, JSON.stringify(manifest, null, 2));
     } catch (error) {
       this.logError('保存本地 manifest 失败', error);
-      // 清理临时文件
-      try { if (fs.existsSync(tmpPath)) fs.unlinkSync(tmpPath); } catch (_) {}
+      throw error;
     }
   }
 
@@ -2581,18 +2510,16 @@ class SyncEngine extends EventEmitter {
       const lo = 946684800000;  // 2000-01-01
       const hi = Date.now() + 10 * 365 * 24 * 3600 * 1000;
       // 允许 0（首次同步占位）或 [lo, hi] 范围内的合法时间戳
-      if (typeof m.last_synced_at !== 'number') return false;
+      if (!Number.isFinite(m.last_synced_at)) return false;
       if (m.last_synced_at !== 0 && (m.last_synced_at < lo || m.last_synced_at > hi)) {
         return false;
       }
     }
-    // 抽查 files 中的 entry 结构（最多看 10 个，避免大 manifest 校验开销）
-    let checked = 0;
+    // 每个条目都可能触发数据写入，必须全部校验。
     for (const [fileId, entry] of Object.entries(m.files)) {
-      if (checked++ >= 10) break;
       if (!entry || typeof entry !== 'object') return false;
       if (typeof entry.h !== 'string') return false;
-      if (typeof entry.t !== 'number') return false;
+      if (!Number.isFinite(entry.t)) return false;
       if (entry.d !== 0 && entry.d !== 1) return false;
       void fileId;
     }
