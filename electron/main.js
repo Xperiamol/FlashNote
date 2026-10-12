@@ -723,6 +723,14 @@ async function initializeServices() {
     const SettingDAO = require('./dao/SettingDAO')
     const settingDAO = new SettingDAO()
 
+    // macOS：设置里旧的钥匙串密文迁移到本机密钥（只在存在旧密文时访问一次钥匙串），要在各服务读取设置之前完成
+    try {
+      const { migrateLegacySettingSecrets } = require('./services/SecretMigration')
+      migrateLegacySettingSecrets(require('./dao/DatabaseManager').getInstance().getDatabase())
+    } catch (error) {
+      console.warn('[Main] 迁移本机机密失败:', error.message)
+    }
+
     // 回收站自动清理：启动时清一次，之后每 6 小时检查
     // 设置里启用的可打开文件类型
     try {

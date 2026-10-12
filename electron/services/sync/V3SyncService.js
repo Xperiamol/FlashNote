@@ -10,12 +10,7 @@ const path = require('path');
 const fs = require('fs');
 const { writeFileAtomicSync } = require('../../utils/atomicFile');
 
-let safeStorage = null;
-try {
-  safeStorage = require('electron').safeStorage;
-} catch (e) {
-  safeStorage = null;
-}
+const secureValue = require('../../utils/secureValue');
 
 const SyncEngine = require('./SyncEngine');
 
@@ -374,22 +369,25 @@ class V3SyncService extends EventEmitter {
   }
 
   canEncryptCredentials() {
-    return !!safeStorage?.isEncryptionAvailable?.();
+    return secureValue.canEncrypt();
   }
 
   encryptPassword(password) {
     if (!password || !this.canEncryptCredentials()) return null;
-    return safeStorage.encryptString(password).toString('base64');
+    return secureValue.encryptValue(password);
   }
 
+  // 新格式带 enc:vN: 前缀；更早的版本直接存系统安全存储的 base64，没有前缀
   decryptPassword(encryptedPassword) {
-    if (!encryptedPassword || !this.canEncryptCredentials()) return '';
-    try {
-      return safeStorage.decryptString(Buffer.from(encryptedPassword, 'base64'));
-    } catch (error) {
-      console.warn('[V3SyncService] 同步密码无法由本机钥匙串解密，已要求重新输入:', error.message);
-      return '';
-    }
+    if (!encryptedPassword) return '';
+    return secureValue.isEncryptedValue(encryptedPassword)
+      ? secureValue.decryptValue(encryptedPassword)
+      : secureValue.decryptLegacy(encryptedPassword);
+  }
+
+  /** 同步密码仍是旧的系统钥匙串格式（macOS 需要迁移到本机密钥） */
+  isLegacyPassword(encryptedPassword) {
+    return Boolean(encryptedPassword) && (!secureValue.isEncryptedValue(encryptedPassword) || secureValue.needsMigration(encryptedPassword));
   }
 
   /**
@@ -662,9 +660,16 @@ class V3SyncService extends EventEmitter {
         this.config = JSON.parse(content);
 
         if (this.config?.credentials?.passwordEncrypted) {
-          const decrypted = this.decryptPassword(this.config.credentials.passwordEncrypted);
+          const stored = this.config.credentials.passwordEncrypted;
+          const decrypted = this.decryptPassword(stored);
           if (decrypted) {
             this.config.credentials.password = decrypted;
+          }
+          // macOS 不再使用钥匙串：旧格式解密成功就改存本机密钥格式；解不开（拒绝了钥匙串）就丢弃，
+          // 避免每次启动都再请求钥匙串，用户重新输入一次密码即可
+          if (secureValue.usesLocalKey() && this.isLegacyPassword(stored)) {
+            if (!decrypted) delete this.config.credentials.passwordEncrypted;
+            this.shouldPersistMigratedConfig = true;
           }
         }
 

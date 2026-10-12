@@ -61,7 +61,8 @@ const isDeviceLocalSettingKey = (key) => {
 
 const isSyncableSetting = (key, rawValue = '') =>
   !isDeviceLocalSettingKey(key) &&
-  !(typeof rawValue === 'string' && rawValue.startsWith('enc:v1:'));
+  // 任何版本的本机密文（enc:v1 钥匙串、enc:v2 本机密钥）只在本机可解，绝不同步
+  !(typeof rawValue === 'string' && /^enc:v\d+:/.test(rawValue));
 
 /**
  * 存储适配器类
