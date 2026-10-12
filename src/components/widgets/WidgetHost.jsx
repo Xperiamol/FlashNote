@@ -52,7 +52,7 @@ export default function WidgetHost({
   const primaryColor = useStore((state) => state.primaryColor) || '#1976d2'
   const isDraft = String(instanceId).startsWith('__draft__')
   // 组件代码或授权变化时重新加载
-  const widgetsVersion = useWidgetStore((state) => state.widgets.map((w) => `${w.id}:${w.updatedAt}:${w.pendingApproval ? 1 : 0}`).join('|'))
+  const widgetsVersion = useWidgetStore((state) => state.widgets.map((w) => `${w.id}:${w.updatedAt}:${w.pendingApproval ? 1 : 0}:${(w.network?.pending || []).join(',')}:${w.network?.declined ? 1 : 0}`).join('|'))
   const iframeRef = useRef(null)
   const onEventRef = useRef(onEvent)
   onEventRef.current = onEvent
@@ -84,7 +84,8 @@ export default function WidgetHost({
 
   // 主题变化不重新加载 iframe（通过 env 事件推送），只有代码或尺寸变化才重新加载
   const initialThemeRef = useRef({ mode, primaryColor })
-  const widgetUpdatedAt = info?.widget?.updatedAt || ''
+  // 联网授权变化时重新加载，组件重新发起之前被拦下的请求
+  const widgetUpdatedAt = `${info?.widget?.updatedAt || ''}${info?.widget?.network?.pending?.length ? ':net-pending' : ''}`
   const src = useMemo(() => {
     const params = new URLSearchParams({
       instance: instanceId,
@@ -193,6 +194,14 @@ export default function WidgetHost({
     post({ type: 'event', event: 'env', payload: envRef.current })
   }, [mode, primaryColor, loading, post, info?.instance?.name])
 
+  // 主进程事件（定时提醒到点等）只推给这个实例
+  useEffect(() => {
+    const unsubscribe = window.electronAPI?.widgets?.onEvent?.((message) => {
+      if (message?.instanceId === instanceId && typeof message.event === 'string') post({ type: 'event', event: message.event, payload: message.payload })
+    })
+    return () => unsubscribe?.()
+  }, [instanceId, post])
+
   // 数据变化（其他放置位置、其他窗口、同步写入）推送给组件
   useEffect(() => {
     const unsubscribe = window.electronAPI?.widgets?.onDataChanged?.((payload) => {
@@ -220,11 +229,28 @@ export default function WidgetHost({
     )
   }
 
+  const network = info?.widget?.network
+  const readsPrivate = (info?.widget?.manifest?.permissions || []).some((permission) => permission === 'notes:read' || permission === 'todos:read')
+  const showNetworkPrompt = !isDraft && surface !== 'probe' && network?.pending?.length > 0 && !network.declined
+  const networkPrompt = showNetworkPrompt && (
+    <Alert severity="info" sx={{ mb: 0.75, borderRadius: 2, alignItems: 'center' }}
+      action={(
+        <Box sx={{ display: 'flex', gap: 0.5 }}>
+          <Button color="inherit" size="small" onClick={() => window.electronAPI.widgets.declineNetwork(info.widget.id)}>不允许</Button>
+          <Button color="inherit" size="small" variant="outlined" onClick={() => window.electronAPI.widgets.approveNetwork(info.widget.id)}>允许</Button>
+        </Box>
+      )}>
+      「{info.widget.name}」想访问网络：{network.pending.join('、')}
+      {readsPrivate && '。它也能读取你的笔记或待办，允许后可能把这些内容发送到上述网站'}
+    </Alert>
+  )
+
   const isFull = resolvedSize === 'full'
   const frameHeight = isFull ? '100%' : Math.min(Math.max(contentHeight || minHeight, minHeight), maxHeight)
 
   return (
     <Box sx={{ position: 'relative', width: '100%', height: isFull ? '100%' : 'auto', display: 'flex', flexDirection: 'column', ...sx }}>
+      {networkPrompt}
       <Box sx={{ position: 'relative', flex: isFull ? 1 : 'none', minHeight: isFull ? 0 : undefined }}>
         <iframe
           ref={iframeRef}

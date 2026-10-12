@@ -30,6 +30,8 @@ const registerWidgetHandlers = (getWidgetService, getWidgetGenerator, getPluginM
   handle('widget:versions', (service, id) => service.listVersions(id));
   handle('widget:rollback', (service, id, version) => service.rollback(id, version));
   handle('widget:approve', (service, id) => service.approve(id));
+  handle('widget:approve-network', (service, id) => service.approveNetwork(id));
+  handle('widget:decline-network', (service, id) => service.declineNetwork(id));
   handle('widget:ai-usage', (service, id) => service.getAiUsage(id));
 
   // ---- 实例 ----

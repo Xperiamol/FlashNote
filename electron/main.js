@@ -759,8 +759,22 @@ async function initializeServices() {
         BrowserWindow.getAllWindows().forEach((win) => {
           if (win && !win.isDestroyed()) win.webContents.send(channel, data)
         })
+      },
+      // 组件通知与定时提醒：点击后打开主窗口里的这个组件实例
+      showNotification: ({ title, body, widgetId, instanceId }) => {
+        if (!Notification.isSupported()) return
+        const notification = new Notification({ title, body, silent: false })
+        notification.on('click', () => {
+          if (!mainWindow || mainWindow.isDestroyed()) return
+          if (mainWindow.isMinimized()) mainWindow.restore()
+          if (!mainWindow.isVisible()) mainWindow.show()
+          mainWindow.focus()
+          mainWindow.webContents.send('widget:open-instance', { widgetId, instanceId })
+        })
+        notification.show()
       }
     })
+    services.widgetService.startScheduler()
     services.clipService = new ClipService({
       getDefaults: () => require('./ipc/clipperHandlers').readClipperSettings(settingDAO),
       noteService: services.noteService,

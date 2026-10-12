@@ -6,6 +6,8 @@
   'use strict';
 
   var params = new URLSearchParams(location.search);
+  // 需要等用户操作或较慢的调用单独放宽超时
+  var CALL_TIMEOUTS = { 'ai.complete': 180000, 'files.pick': 600000, 'files.save': 600000, 'ui.confirm': 600000 };
   var seq = 0;
   var pending = new Map();
   var listeners = new Map();
@@ -36,7 +38,7 @@
         if (!pending.has(id)) return;
         pending.delete(id);
         reject(new Error('Flota 调用超时：' + method));
-      }, method === 'ai.complete' ? 180000 : 30000);
+      }, CALL_TIMEOUTS[method] || 30000);
       pending.set(id, { resolve: resolve, reject: reject, timer: timer });
       post({ type: 'rpc', id: id, method: method, params: callParams || {} });
     });
@@ -178,6 +180,33 @@
     state: {
       get: function (key) { return call('state.get', { key: String(key) }); },
       set: function (key, value) { return call('state.set', { key: String(key), value: value }); }
+    },
+    // 联网：需声明 net:fetch，并在清单 network 中列出域名；首次使用由用户授权
+    net: {
+      fetch: function (url, options) {
+        var payload = { url: String(url) };
+        Object.keys(options || {}).forEach(function (k) { payload[k] = options[k]; });
+        return call('net.fetch', payload);
+      }
+    },
+    // 系统通知与定时提醒：需声明 notify
+    notify: function (title, body) { return call('notify', { title: String(title || ''), body: body == null ? '' : String(body) }); },
+    schedule: {
+      set: function (item) { return call('schedule.set', item || {}); },
+      remove: function (id) { return call('schedule.remove', { id: String(id) }); },
+      list: function () { return call('schedule.list'); }
+    },
+    // 文件对话框：需声明 files
+    files: {
+      pick: function (options) { return call('files.pick', options || {}); },
+      save: function (options) { return call('files.save', options || {}); }
+    },
+    clipboard: {
+      write: function (text) { return call('clipboard.write', { text: String(text == null ? '' : text) }); }
+    },
+    // 其他组件：在清单 imports 中声明 "组件id.集合名" 后可列出它的实例，再用 flota.data.from(实例id) 只读访问
+    widgets: {
+      instances: function (widgetId) { return call('widgets.instances', { widgetId: String(widgetId) }); }
     }
   };
 

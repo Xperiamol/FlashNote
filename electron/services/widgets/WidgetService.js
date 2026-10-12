@@ -4,6 +4,8 @@ const path = require('path');
 const { EventEmitter } = require('events');
 const WidgetDAO = require('../../dao/WidgetDAO');
 const { parseManifest } = require('./manifest');
+const { WidgetNet } = require('./WidgetNet');
+const { WidgetScheduler } = require('./WidgetScheduler');
 
 const COLLECTION_RE = /^[A-Za-z_][\w-]{0,63}$/;
 const DRAFT_PREFIX = '__draft__';
@@ -12,8 +14,22 @@ const RECENTLY_DELETED_MS = 30 * 24 * 60 * 60 * 1000;
 const AI_DAILY_LIMIT = 50;
 const MAX_CODE_SIZE = 2 * 1024 * 1024;
 const STORAGE_PREFIX = 'widget:';
-// 生成组件时作为参考范例的商店组件
-const FEW_SHOT_EXAMPLES = ['flashcards', 'kanban'];
+const NOTIFY_DAILY_LIMIT = 30;
+const MAX_FILE_BYTES = 10 * 1024 * 1024;
+const MAX_SAVE_BYTES = 20 * 1024 * 1024;
+const MAX_PICK_FILES = 20;
+const MAX_CLIPBOARD_CHARS = 1024 * 1024;
+const TEXT_EXTENSIONS = new Set(['txt', 'md', 'markdown', 'csv', 'tsv', 'json', 'xml', 'html', 'htm', 'yaml', 'yml', 'ics', 'log', 'srt', 'vtt', 'js', 'css', 'svg']);
+const MIME_BY_EXT = {
+  txt: 'text/plain', md: 'text/markdown', csv: 'text/csv', tsv: 'text/tab-separated-values', json: 'application/json',
+  xml: 'application/xml', html: 'text/html', svg: 'image/svg+xml', png: 'image/png', jpg: 'image/jpeg', jpeg: 'image/jpeg',
+  gif: 'image/gif', webp: 'image/webp', pdf: 'application/pdf', ics: 'text/calendar', mp3: 'audio/mpeg', wav: 'audio/wav',
+};
+// 预览（自动预跑）期间不会真正执行的调用：写入外部数据、联网、通知、文件对话框、剪贴板
+const PREVIEW_BLOCKED = new Set([
+  'notes.create', 'notes.update', 'todos.create', 'todos.update', 'ai.complete',
+  'net.fetch', 'notify', 'schedule.set', 'schedule.remove', 'files.pick', 'files.save', 'clipboard.write',
+]);
 
 class WidgetError extends Error {
   constructor(code, message) {
@@ -88,16 +104,51 @@ class WidgetService extends EventEmitter {
    * @param {(channel: string, payload: any) => void} [deps.broadcast]
    * @param {() => string} [deps.getStoreDir] 商店组件（plugins/widgets）所在目录
    */
-  constructor({ noteService, todoService, aiService, broadcast, getStoreDir }) {
+  /**
+   * @param {object} deps
+   * @param {(n: { title: string, body: string, widgetId: string, instanceId: string }) => void} [deps.showNotification] 系统通知（点击后打开组件）
+   * @param {{ showOpenDialog: Function, showSaveDialog: Function }} [deps.dialog] 文件对话框（默认 Electron dialog）
+   * @param {{ writeText: Function }} [deps.clipboard]
+   * @param {WidgetNet} [deps.net]
+   */
+  constructor({ noteService, todoService, aiService, broadcast, getStoreDir, showNotification, dialog, clipboard, net, dao }) {
     super();
     this.noteService = noteService;
-    this.noteDAO = noteService.noteDAO;
+    this.noteDAO = noteService?.noteDAO;
     this.todoService = todoService;
     this.aiService = aiService;
     this.broadcast = broadcast || (() => {});
     this.getStoreDir = getStoreDir || (() => path.join(__dirname, '..', '..', '..', 'plugins', 'widgets'));
-    this.dao = new WidgetDAO();
+    this.dao = dao || new WidgetDAO();
     this.drafts = new Map();
+    this.showNotification = showNotification || (() => {});
+    this.dialog = dialog || null;
+    this.clipboard = clipboard || null;
+    this.net = net || new WidgetNet();
+    this.scheduler = new WidgetScheduler({
+      store: {
+        load: () => this.getDB().prepare(`
+          SELECT plugin_id, key, value FROM plugin_storage WHERE plugin_id LIKE '${STORAGE_PREFIX}%' AND key LIKE 'schedules:%'
+        `).all().map((row) => {
+          let items = [];
+          try { items = JSON.parse(row.value) || []; } catch {}
+          return { widgetId: row.plugin_id.slice(STORAGE_PREFIX.length), instanceId: row.key.slice('schedules:'.length), items };
+        }),
+        read: (widgetId, instanceId) => this.getStorage(widgetId, `schedules:${instanceId}`, []) || [],
+        write: (widgetId, instanceId, items) => this.setStorage(widgetId, `schedules:${instanceId}`, items.length ? items : null),
+      },
+      onFire: ({ widgetId, instanceId, item }) => this.fireSchedule(widgetId, instanceId, item),
+    });
+  }
+
+  /** 由主进程在数据库就绪后调用 */
+  startScheduler() { this.scheduler.start(); }
+
+  stopScheduler() { this.scheduler.stop(); }
+
+  getElectron() {
+    // 测试里注入依赖；运行时按需加载 Electron，避免纯 Node 环境下崩溃
+    try { return require('electron'); } catch { return {}; }
   }
 
   getDB() {
@@ -119,8 +170,35 @@ class WidgetService extends EventEmitter {
       manifest,
       manifestError: error,
       pendingApproval: Boolean(this.getStorage(widget.id, 'pendingApproval', false)),
+      network: this.networkStatus(widget.id, manifest),
       ...(withCode ? { code } : {}),
     };
+  }
+
+  /** 联网授权：清单 network 中尚未经用户允许的域名 */
+  networkStatus(widgetId, manifest) {
+    if (!manifest.permissions.includes('net:fetch') || !manifest.network.length) return { hosts: [], pending: [], declined: false };
+    const approved = new Set(this.getStorage(widgetId, 'netApproved', []) || []);
+    const pending = manifest.network.filter((host) => !approved.has(host));
+    const declined = pending.length > 0 && this.getStorage(widgetId, 'netDeclined', null) === pending.join(',');
+    return { hosts: manifest.network, pending, declined };
+  }
+
+  approveNetwork(widgetId) {
+    const { manifest } = parseManifest(this.requireWidget(widgetId).code);
+    const approved = new Set(this.getStorage(widgetId, 'netApproved', []) || []);
+    manifest.network.forEach((host) => approved.add(host));
+    this.setStorage(widgetId, 'netApproved', [...approved].sort());
+    this.setStorage(widgetId, 'netDeclined', null);
+    this.emitChanged('widget-network-approved');
+    return true;
+  }
+
+  declineNetwork(widgetId) {
+    const { manifest } = parseManifest(this.requireWidget(widgetId).code);
+    this.setStorage(widgetId, 'netDeclined', this.networkStatus(widgetId, manifest).pending.join(',') || null);
+    this.emitChanged('widget-network-declined');
+    return true;
   }
 
   listWidgets() {
@@ -365,17 +443,6 @@ class WidgetService extends EventEmitter {
     return fs.readFileSync(path.join(this.getStoreDir(), file), 'utf-8');
   }
 
-  listExamples() {
-    return FEW_SHOT_EXAMPLES.map((name) => {
-      try {
-        const code = this.readStoreFile(`${name}.flota-widget.html`);
-        return { id: name, name: parseManifest(code).manifest.name, code };
-      } catch {
-        return null;
-      }
-    }).filter(Boolean);
-  }
-
   /**
    * @param {Array<object>} entries 注册表中 type 为 widget 的条目
    * @param {(entry: object) => string} resolvePath 条目 → 本地 HTML 文件路径
@@ -495,8 +562,8 @@ class WidgetService extends EventEmitter {
 
   async handleRpc(ref, method, params = {}, context = {}) {
     const ctx = this.resolveContext(ref);
-    if (ctx.draft && ['notes.create', 'notes.update', 'todos.create', 'todos.update', 'ai.complete'].includes(method)) {
-      throw new WidgetError('PREVIEW_ONLY', '预览期间不能修改真实笔记、待办或调用 AI；请将操作放到用户点击事件中');
+    if (ctx.draft && PREVIEW_BLOCKED.has(method)) {
+      throw new WidgetError('PREVIEW_ONLY', '预览期间不会真正执行这个操作（修改笔记待办、调用 AI、联网、通知、文件、剪贴板）；请放到用户点击事件中，并处理失败');
     }
     switch (method) {
       case 'data.query': {
@@ -624,6 +691,45 @@ class WidgetService extends EventEmitter {
       case 'ai.complete':
         return this.completeWithAI(ctx, params);
 
+      case 'net.fetch':
+        return this.fetchForWidget(ctx, params);
+
+      case 'notify':
+        return this.notifyFromWidget(ctx, params);
+      case 'schedule.set':
+        this.assertPermission(ctx, 'notify');
+        return this.scheduler.set(ctx.widgetId, ctx.scopeId, params);
+      case 'schedule.remove':
+        this.assertPermission(ctx, 'notify');
+        return this.scheduler.remove(ctx.widgetId, ctx.scopeId, params.id);
+      case 'schedule.list':
+        this.assertPermission(ctx, 'notify');
+        return ctx.draft ? [] : this.scheduler.list(ctx.widgetId, ctx.scopeId);
+
+      case 'files.pick':
+        return this.pickFiles(ctx, params);
+      case 'files.save':
+        return this.saveFile(ctx, params);
+
+      case 'clipboard.write': {
+        this.assertPermission(ctx, 'clipboard:write');
+        const text = String(params.text ?? '');
+        if (text.length > MAX_CLIPBOARD_CHARS) throw new WidgetError('TOO_LARGE', '复制的内容过长');
+        (this.clipboard || this.getElectron().clipboard).writeText(text);
+        return true;
+      }
+
+      // 被 imports 引用的组件有哪些实例（只读），配合 flota.data.from(instanceId) 读取其数据
+      case 'widgets.instances': {
+        const widgetId = String(params.widgetId || '');
+        if (!ctx.manifest.imports.some((item) => item.startsWith(`${widgetId}.`))) {
+          throw new WidgetError('PERMISSION_DENIED', `组件清单的 imports 中没有引用 ${widgetId}`);
+        }
+        const widget = this.dao.getWidget(widgetId);
+        if (!widget) return [];
+        return this.dao.listInstances(widgetId).map((instance) => ({ id: instance.id, name: instance.name, widgetName: widget.name }));
+      }
+
       // 界面状态：按实例 + 放置位置区分（同一实例在笔记里和首页可以停在不同的页签）
       case 'state.get':
         return this.getStorage(ctx.widgetId || ctx.scopeId, `state:${ctx.scopeId}:${context.placement || 'default'}:${params.key}`, null);
@@ -634,6 +740,78 @@ class WidgetService extends EventEmitter {
       default:
         throw new WidgetError('UNKNOWN_METHOD', `未知的组件调用：${method}`);
     }
+  }
+
+  async fetchForWidget(ctx, params) {
+    this.assertPermission(ctx, 'net:fetch');
+    const { pending } = this.networkStatus(ctx.widgetId, ctx.manifest);
+    if (pending.length) {
+      throw new WidgetError('NETWORK_APPROVAL_REQUIRED', `等待用户允许访问：${pending.join('、')}`);
+    }
+    try {
+      return await this.net.fetch(params, { owner: ctx.widgetId, hosts: ctx.manifest.network });
+    } catch (error) {
+      throw new WidgetError(error.code || 'NET_FAILED', error.message);
+    }
+  }
+
+  notifyFromWidget(ctx, params) {
+    this.assertPermission(ctx, 'notify');
+    const key = `notifyUsage:${today()}`;
+    const used = Number(this.getStorage(ctx.widgetId, key, 0)) || 0;
+    if (used >= NOTIFY_DAILY_LIMIT) throw new WidgetError('QUOTA_EXCEEDED', `这个组件今天的通知已达上限（${NOTIFY_DAILY_LIMIT} 条）`);
+    const title = String(params.title || '').trim().slice(0, 100);
+    if (!title) throw new WidgetError('INVALID_PARAMS', '通知需要 title');
+    this.setStorage(ctx.widgetId, key, used + 1);
+    this.showNotification({ title, body: String(params.body || '').trim().slice(0, 300), widgetId: ctx.widgetId, instanceId: ctx.scopeId });
+    return true;
+  }
+
+  /** 定时提醒到点：实例已删除就丢弃；发系统通知，并让正在显示的组件收到 schedule 事件 */
+  fireSchedule(widgetId, instanceId, item) {
+    const instance = this.dao.getInstance(instanceId);
+    if (!instance || instance.widgetId !== widgetId) return;
+    this.showNotification({ title: item.title, body: item.body, widgetId, instanceId });
+    this.broadcast('widget:event', { instanceId, event: 'schedule', payload: { id: item.id, title: item.title, body: item.body, data: item.data, at: Date.now() } });
+  }
+
+  async pickFiles(ctx, params) {
+    this.assertPermission(ctx, 'files');
+    const accept = (Array.isArray(params.accept) ? params.accept : [])
+      .map((ext) => String(ext).replace(/^\./, '').toLowerCase()).filter((ext) => /^[a-z0-9]{1,10}$/.test(ext));
+    const dialog = this.dialog || this.getElectron().dialog;
+    const result = await dialog.showOpenDialog({
+      title: '选择文件',
+      properties: ['openFile', ...(params.multiple ? ['multiSelections'] : [])],
+      filters: accept.length ? [{ name: '支持的文件', extensions: accept }] : undefined,
+    });
+    if (result.canceled || !result.filePaths?.length) return [];
+    return result.filePaths.slice(0, MAX_PICK_FILES).map((filePath) => {
+      const stat = fs.statSync(filePath);
+      if (stat.size > MAX_FILE_BYTES) throw new WidgetError('TOO_LARGE', `${path.basename(filePath)} 超过 10MB 上限`);
+      const ext = path.extname(filePath).slice(1).toLowerCase();
+      const buffer = fs.readFileSync(filePath);
+      const asText = params.as === 'text' || (params.as !== 'base64' && TEXT_EXTENSIONS.has(ext));
+      return {
+        name: path.basename(filePath),
+        size: stat.size,
+        type: MIME_BY_EXT[ext] || (asText ? 'text/plain' : 'application/octet-stream'),
+        lastModified: stat.mtimeMs,
+        ...(asText ? { text: buffer.toString('utf8').replace(/^\uFEFF/, '') } : { base64: buffer.toString('base64') }),
+      };
+    });
+  }
+
+  async saveFile(ctx, params) {
+    this.assertPermission(ctx, 'files');
+    const name = path.basename(String(params.name || '导出.txt')).replace(/[\\/:*?"<>|]/g, '_') || '导出.txt';
+    const buffer = params.encoding === 'base64' ? Buffer.from(String(params.content || ''), 'base64') : Buffer.from(String(params.content ?? ''), 'utf8');
+    if (buffer.length > MAX_SAVE_BYTES) throw new WidgetError('TOO_LARGE', '保存的内容超过 20MB 上限');
+    const dialog = this.dialog || this.getElectron().dialog;
+    const result = await dialog.showSaveDialog({ title: '保存文件', defaultPath: name });
+    if (result.canceled || !result.filePath) return { saved: false };
+    fs.writeFileSync(result.filePath, buffer);
+    return { saved: true, name: path.basename(result.filePath) };
   }
 
   toggleTodoTo(id, completed) {

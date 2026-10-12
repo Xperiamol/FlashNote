@@ -100,7 +100,7 @@ const CommandPalette = ({ open, onClose }) => {
     {
       id: 'new-widget',
       title: '新建组件',
-      description: '在 AI 小窗里描述需求，生成一个小应用（看板、闪卡、打卡…）',
+      description: '在 AI 小窗里描述需求，生成一个小应用（天气看板、记账导入、定时提醒、读书汇总…）',
       category: '组件',
       icon: <WidgetsRounded />,
       action: () => {

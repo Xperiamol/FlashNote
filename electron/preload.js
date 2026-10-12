@@ -329,6 +329,8 @@ contextBridge.exposeInMainWorld('electronAPI', {
     versions: inv('widget:versions'),
     rollback: inv('widget:rollback'),
     approve: inv('widget:approve'),
+    approveNetwork: inv('widget:approve-network'),
+    declineNetwork: inv('widget:decline-network'),
     aiUsage: inv('widget:ai-usage'),
     instances: inv('widget:instances'),
     allInstances: inv('widget:all-instances'),
@@ -349,6 +351,10 @@ contextBridge.exposeInMainWorld('electronAPI', {
     storeInstall: inv('widget:store-install'),
     storePreview: inv('widget:store-preview'),
     onDataChanged: listen('widget:data-changed'),
+    // 主进程推给组件的事件（定时提醒到点等）
+    onEvent: listen('widget:event'),
+    // 点击组件通知：打开对应实例
+    onOpenInstance: listen('widget:open-instance'),
     onListChanged: listen('widget:list-changed'),
     onGenerateProgress: listen('widget:generate-progress'),
   },

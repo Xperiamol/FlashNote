@@ -38,7 +38,7 @@ import { useAutoMemoryNotices } from './hooks/useAutoMemoryNotices'
 import { usePrefsStore, useApplyEditorPrefs } from './store/usePrefsStore'
 import WidgetHomeView from './components/widgets/WidgetHomeView'
 import WidgetProbeHost from './components/widgets/WidgetProbeHost'
-import { parseWidgetViewId } from './store/useWidgetStore'
+import { openWidgetHome, parseWidgetViewId } from './store/useWidgetStore'
 import { useHomeStore, isRestorableView } from './store/useHomeStore'
 import TitleBar from './components/layout/TitleBar'
 import Sidebar from './components/layout/Sidebar'
@@ -168,6 +168,11 @@ function App() {
 
   // 日历视图相关状态
   const [calendarCurrentDate, setCalendarCurrentDate] = useState(new Date())
+
+  // 点击组件的通知或定时提醒：打开对应实例
+  useEffect(() => window.electronAPI?.widgets?.onOpenInstance?.(({ widgetId, instanceId } = {}) => {
+    if (widgetId) openWidgetHome(widgetId, instanceId || null)
+  }), [])
 
   // 暴露正在显示的笔记给主进程（AI 工具兜底用）；不在笔记页时为 null
   const visibleNoteId = useStore(getVisibleNoteId)
