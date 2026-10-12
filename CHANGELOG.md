@@ -2,6 +2,12 @@
 
 本项目遵循 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/) 规范。
 
+## [4.3.2] - 2026-10-12
+
+### Changed / 更新内容
+- fix(mac): no more keychain password prompt after every install - secrets are encrypted with a key kept in the app's own data folder, and existing ones move over once
+
+
 ## [4.3.1] - 2026-10-12
 
 ### Changed / 更新内容
