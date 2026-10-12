@@ -2,6 +2,13 @@
 
 本项目遵循 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/) 规范。
 
+## [4.4.0] - 2026-10-12
+
+### Changed / 更新内容
+- feat(ai): AI changes only the parts of a note it needs to, shows a before/after preview, never overwrites what you typed meanwhile, and offers 2-3 design directions to pick from when making a widget
+- feat(widgets): widgets can fetch from the web after you allow it, send reminders and notifications even when closed, import and export files, and read other widgets' data; long widgets no longer fail on output length and edits keep the code they don't touch
+
+
 ## [4.3.2] - 2026-10-12
 
 ### Changed / 更新内容
