@@ -20,7 +20,8 @@ class PendingActionStore {
     }
   }
 
-  async create(name, args, context = null) {
+  /** @param {object} [extra] { preview }：确认卡上展示的修改前后对比 */
+  async create(name, args, context = null, extra = {}) {
     const now = Date.now();
     this._sweepExpired(now);
     const actionId = `${now.toString(36)}_${Math.random().toString(36).slice(2, 8)}`;
@@ -33,6 +34,7 @@ class PendingActionStore {
       // 创建时上下文快照（如当前笔记 id/标题），确认时据此定位目标，避免用户切换后改错对象。
       context: context && typeof context === 'object' ? context : null,
       memoryReview,
+      preview: extra?.preview || null,
       createdAt: now,
       expiresAt: now + PENDING_ACTION_TTL_MS
     };
@@ -45,9 +47,10 @@ class PendingActionStore {
       label: action.label,
       args,
       context: action.context,
-      summary: this._summarizeAction(name, args),
+      summary: this._summarizeAction(name, args, extra?.preview),
       confirmationHint: '确认卡已显示。请等待用户点击卡片或输入简短确认；不要再次调用同一写入工具创建重复计划。',
-      memoryReview
+      memoryReview,
+      ...(extra?.preview ? { preview: extra.preview } : {})
     };
   }
 
@@ -101,7 +104,7 @@ class PendingActionStore {
     }
   }
 
-  _summarizeAction(name, args = {}) {
+  _summarizeAction(name, args = {}, preview = null) {
     const repeatLabel = (todo = {}) => {
       if (!todo.repeat_type || todo.repeat_type === 'none') return '';
       const interval = Number(todo.repeat_interval) > 1 ? Number(todo.repeat_interval) : 1;
@@ -116,7 +119,12 @@ class PendingActionStore {
 
     switch (name) {
       case 'create_note': return `创建笔记「${args.title || '未命名'}」`;
-      case 'edit_note': return `编辑笔记 #${args.id}${args.title ? `，标题改为「${args.title}」` : ''}`;
+      case 'edit_note': {
+        const title = args.title ? `，标题改为「${args.title}」` : '';
+        if (preview?.mode === 'partial') return `修改笔记 #${args.id} 中的 ${preview.total} 处内容${title}`;
+        if (preview?.mode === 'rewrite') return `改写笔记 #${args.id}（变动约 ${preview.changedLines} 行）${title}`;
+        return `编辑笔记 #${args.id}${title}`;
+      }
       case 'edit_notes': {
         const list = Array.isArray(args.edits) ? args.edits : [];
         return `批量编辑 ${list.length} 条笔记`;

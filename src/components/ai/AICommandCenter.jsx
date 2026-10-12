@@ -661,7 +661,8 @@ const AICommandCenter = ({
               args: parsed.args || {},
               context: parsed.context || null,
               summary: parsed.summary,
-              label: parsed.label
+              label: parsed.label,
+              ...(parsed.preview ? { preview: parsed.preview } : {})
             })
           }
           if (['create_note', 'edit_note', 'edit_notes'].includes(chunk.name) && parsed?.success === true && !parsed?.requiresConfirmation) {

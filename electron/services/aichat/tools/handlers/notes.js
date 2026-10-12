@@ -8,6 +8,7 @@ const {
   getCurrentNoteLines,
   validateNoteContentUpdate
 } = require('../../noteSummary');
+const { applyNoteEdits, contentHash } = require('../../noteEdits');
 const path = require('path');
 const fs = require('fs');
 const { app } = require('electron');
@@ -134,11 +135,38 @@ const create_note = async (args, _runtime, { noteDAO }) => {
   return JSON.stringify({ success: true, id: note.id, title: note.title });
 };
 
+/**
+ * 计算 edit_note 要写入的正文：
+ * - edits / append：按 find/replace 只改指定片段，基于此刻的最新正文应用（确认前用户的其他编辑会保留）
+ * - content：整篇改写；若提出修改时记录了正文指纹，此刻正文已变化则拒绝，避免覆盖用户刚写的内容
+ * @returns {{ content?: string, error?: string, changes?: object[] }}
+ */
+const resolveNoteContentEdit = (existing, args = {}) => {
+  const hasPatch = (Array.isArray(args.edits) && args.edits.length > 0) || (typeof args.append === 'string' && args.append.trim());
+  if (hasPatch && args.content !== undefined) return { error: 'content（整篇改写）不能和 edits / append 同时使用' };
+  if (hasPatch) {
+    if ((existing.note_type || 'markdown') === 'whiteboard') return { error: '画布笔记不能按文字片段修改' };
+    try {
+      return applyNoteEdits(existing.content || '', { edits: args.edits || [], append: args.append });
+    } catch (error) {
+      return { error: error.message };
+    }
+  }
+  if (args.content !== undefined && args._base_hash && contentHash(existing.content || '') !== args._base_hash) {
+    return { error: '笔记在确认前已被修改，整篇改写会覆盖这些修改，已取消。请让 AI 基于最新内容重新修改' };
+  }
+  return { content: args.content };
+};
+
 const edit_note = async (args, _runtime, { noteDAO }) => {
   if (!args.id) return JSON.stringify({ error: '请提供笔记ID' });
   const existing = noteDAO.findById(args.id);
   if (!existing) return JSON.stringify({ error: `未找到ID为 ${args.id} 的笔记` });
-  const contentError = validateNoteContentUpdate(existing, args.content);
+  const resolved = resolveNoteContentEdit(existing, args);
+  if (resolved.error) {
+    return JSON.stringify({ success: false, error: resolved.error, note_type: existing.note_type || 'markdown' });
+  }
+  const contentError = validateNoteContentUpdate(existing, resolved.content);
   if (contentError) {
     return JSON.stringify({
       success: false,
@@ -148,7 +176,7 @@ const edit_note = async (args, _runtime, { noteDAO }) => {
   }
   const updateData = {};
   if (args.title !== undefined) updateData.title = args.title;
-  if (args.content !== undefined) updateData.content = args.content;
+  if (resolved.content !== undefined) updateData.content = resolved.content;
   if (args.tags !== undefined) updateData.tags = args.tags;
   if (args.category !== undefined) updateData.category = args.category;
   noteDAO.update(args.id, updateData);
@@ -212,5 +240,6 @@ module.exports = {
   summarize_current_note_section,
   create_note,
   edit_note,
-  edit_notes
+  edit_notes,
+  resolveNoteContentEdit
 };

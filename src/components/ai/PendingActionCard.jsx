@@ -190,6 +190,53 @@ const ActionButtons = ({ action, status, compact, confirmLabel = '确认', confi
   )
 }
 
+// ─── 笔记修改前后对比：局部修改逐处显示，整篇改写只显示中间真正变化的部分 ───
+const NoteEditPreview = ({ preview, compact }) => {
+  const theme = useTheme()
+  if (!preview?.changes?.length) return null
+  const dark = theme.palette.mode === 'dark'
+  const rowSx = (color) => ({
+    display: 'flex', gap: 0.75, px: 0.75, py: 0.25, borderRadius: '6px',
+    bgcolor: alpha(theme.palette[color].main, dark ? 0.18 : 0.09),
+  })
+  const textSx = { fontSize: compact ? 11.5 : 12.5, lineHeight: 1.6, whiteSpace: 'pre-wrap', wordBreak: 'break-word', minWidth: 0 }
+  const markSx = (color) => ({ ...textSx, color: `${color}.main`, fontWeight: 700, flexShrink: 0, width: 10 })
+  // 上下文只取紧挨着的一行，帮助定位改的是哪里
+  const contextLine = (text, end) => {
+    const lines = String(text || '').split('\n')
+    const line = (end ? lines[lines.length - 1] : lines[0]).trim()
+    return line ? <Typography sx={{ ...textSx, color: 'text.secondary', px: 0.75 }}>{end ? `…${line}` : `${line}…`}</Typography> : null
+  }
+  return (
+    <Box sx={{ mt: 0.75, display: 'flex', flexDirection: 'column', gap: 0.75, maxHeight: compact ? 240 : 340, overflowY: 'auto', pr: 0.5 }}>
+      {preview.mode === 'rewrite' && (
+        <Typography variant="caption" color="text.secondary">整篇改写，变动约 {preview.changedLines} 行，下面是变化的部分</Typography>
+      )}
+      {preview.changes.map((change, index) => (
+        <Box key={index} sx={{ display: 'flex', flexDirection: 'column', gap: 0.25, p: 0.5, borderRadius: '8px', border: '1px solid', borderColor: 'divider', bgcolor: alpha(theme.palette.background.paper, dark ? 0.35 : 0.6) }}>
+          {contextLine(change.contextBefore, true)}
+          {change.before && (
+            <Box sx={rowSx('error')}>
+              <Typography sx={markSx('error')}>−</Typography>
+              <Typography sx={textSx}>{change.before}</Typography>
+            </Box>
+          )}
+          {change.after && (
+            <Box sx={rowSx('success')}>
+              <Typography sx={markSx('success')}>+</Typography>
+              <Typography sx={textSx}>{change.after}</Typography>
+            </Box>
+          )}
+          {contextLine(change.contextAfter, false)}
+        </Box>
+      ))}
+      {preview.total > preview.changes.length && (
+        <Typography variant="caption" color="text.secondary">还有 {preview.total - preview.changes.length} 处修改</Typography>
+      )}
+    </Box>
+  )
+}
+
 // ─── 单个动作卡 ───
 // ─── 执行中：有步骤进度时显示真实进度，没有时轮换提示语（与 AI 页面的思考动画一致） ───
 
@@ -319,6 +366,7 @@ const SimpleActionCard = ({ action, executing, onExecute, onDismiss, compact }) 
           {action.error}
         </Typography>
       )}
+      {!isFinished && action.name === 'edit_note' && <NoteEditPreview preview={action.preview} compact={compact} />}
       {!isFinished && action.name === 'update_widget' && (
         <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mt: 0.25 }}>
           修改会作用于这个组件的所有实例，数据保留；完成后可以撤销。
@@ -551,6 +599,70 @@ const WidgetProgressSteps = ({ progress }) => {
   )
 }
 
+// AI 给出的设计方向：用户点选一个再生成。只在新建组件、需求开放时出现。
+const designOptionsOf = (action) => (action.name === 'create_widget' && Array.isArray(action.args?.design_options)
+  ? action.args.design_options.filter((option) => option && typeof option.title === 'string').slice(0, 3)
+  : [])
+
+const WidgetDesignCard = ({ action, executing, onExecute, onDismiss, compact }) => {
+  const theme = useTheme()
+  const status = getStatus(action, executing)
+  const options = designOptionsOf(action)
+  const [chosen, setChosen] = useState(() => (Number.isInteger(action.resultData?.designOption) ? action.resultData.designOption : 0))
+  const paletteKey = STATUS_META[status].palette
+  return (
+    <Paper elevation={0} sx={cardSx(theme, paletteKey, compact)}>
+      <Typography variant="caption" sx={{ display: 'block', color: `${paletteKey}.main`, fontWeight: 800, mb: 0.25 }}>
+        {status === 'failed' ? '生成失败 · 可以换个方向重试' : '选一个设计方向'}
+      </Typography>
+      <Typography variant="body2" sx={{ fontWeight: 650, lineHeight: 1.45, mb: 0.75, fontSize: compact ? 12.5 : undefined, wordBreak: 'break-word' }}>
+        {getDetail(action)}
+      </Typography>
+      {status === 'failed' && action.error && (
+        <Typography variant="caption" color="error.main" sx={{ display: 'block', mb: 0.5, wordBreak: 'break-word' }}>{action.error}</Typography>
+      )}
+      <Box role="radiogroup" sx={{ display: 'flex', flexDirection: 'column', gap: 0.5 }}>
+        {options.map((option, index) => (
+          <Box
+            key={`${index}-${option.title}`}
+            role="radio"
+            aria-checked={chosen === index}
+            tabIndex={0}
+            onClick={() => setChosen(index)}
+            onKeyDown={(event) => { if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); setChosen(index) } }}
+            sx={{
+              px: 1, py: 0.75, borderRadius: '10px', cursor: 'pointer', userSelect: 'none',
+              border: '1px solid',
+              borderColor: chosen === index ? alpha(theme.palette[paletteKey].main, 0.55) : theme.palette.divider,
+              bgcolor: chosen === index
+                ? alpha(theme.palette[paletteKey].main, theme.palette.mode === 'dark' ? 0.14 : 0.08)
+                : alpha(theme.palette.background.paper, theme.palette.mode === 'dark' ? 0.35 : 0.6),
+              '&:hover': chosen === index ? {} : { borderColor: alpha(theme.palette[paletteKey].main, 0.3) },
+              transition: 'background-color 120ms, border-color 120ms',
+              '&:focus-visible': { outline: `2px solid ${theme.palette[paletteKey].main}`, outlineOffset: 1 },
+            }}
+          >
+            <Typography variant="body2" sx={{ fontWeight: 700, fontSize: compact ? 12.5 : 13.5 }}>{option.title}</Typography>
+            {option.summary && (
+              <Typography variant="caption" color="text.secondary" sx={{ display: 'block', lineHeight: 1.5, mt: 0.25 }}>{option.summary}</Typography>
+            )}
+          </Box>
+        ))}
+      </Box>
+      <Box sx={{ display: 'flex', justifyContent: 'flex-end', mt: 0.75 }}>
+        <ActionButtons
+          action={action}
+          status={status}
+          compact={compact}
+          confirmLabel="按这个方向生成"
+          onConfirm={() => onExecute?.(action, { design_option: chosen })}
+          onDismiss={onDismiss ? () => onDismiss(action) : undefined}
+        />
+      </Box>
+    </Paper>
+  )
+}
+
 const WidgetActionCard = (props) => {
   const { action, executing, compact } = props
   const theme = useTheme()
@@ -561,6 +673,7 @@ const WidgetActionCard = (props) => {
   const [undone, setUndone] = useState(false)
   const [showDraft, setShowDraft] = useState(false)
   const [busy, setBusy] = useState(false)
+  if ((status === 'pending' || status === 'failed') && designOptionsOf(action).length >= 2) return <WidgetDesignCard {...props} />
   if (status !== 'running' && status !== 'done') return <>
     <SimpleActionCard {...props} />
     {status === 'failed' && action.resultData?.draftId && <Box sx={{ mt: 0.5 }}>

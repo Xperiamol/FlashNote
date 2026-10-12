@@ -165,6 +165,11 @@ class AIChatService {
       const { referenceImages, ...targetContext } = options.actionContext || {};
       const usesReferences = ['create_whiteboard', 'update_whiteboard', 'create_widget', 'update_widget'].includes(name);
       const context = options.actionContext ? (usesReferences ? options.actionContext : targetContext) : null;
+      if (name === 'edit_note') {
+        const prepared = this._prepareNoteEdit(args);
+        if (prepared.error) return JSON.stringify({ success: false, error: prepared.error });
+        return JSON.stringify(await this._pendingActions.create(name, prepared.args, context, { preview: prepared.preview }));
+      }
       return JSON.stringify(await this._pendingActions.create(name, args, context));
     }
     const result = await dispatchTool(name, args, {
@@ -173,6 +178,26 @@ class AIChatService {
     }, this._toolServices(options.contextPackage));
     this._notifyNotesChanged(name, args, result);
     return result;
+  }
+
+  /**
+   * 提出笔记修改时先按当前正文试算一次：片段找不到或不唯一时立即把错误交还给模型修正，不生成确认卡；
+   * 成功则记下正文指纹（确认时用来发现期间的改动）并生成修改前后对比，显示在确认卡上。
+   */
+  _prepareNoteEdit(args = {}) {
+    const existing = args.id != null ? this.noteDAO?.findById?.(args.id) : null;
+    if (!existing) return { args };
+    const { resolveNoteContentEdit } = require('./tools/handlers/notes');
+    const resolved = resolveNoteContentEdit(existing, { ...args, _base_hash: undefined });
+    if (resolved.error) return { error: resolved.error };
+    const { contentHash, previewRewrite } = require('./noteEdits');
+    let preview = null;
+    if (resolved.changes) {
+      preview = { mode: 'partial', changes: resolved.changes.slice(0, 8), total: resolved.changes.length };
+    } else if (typeof resolved.content === 'string' && resolved.content !== existing.content) {
+      preview = { mode: 'rewrite', ...previewRewrite(existing.content || '', resolved.content) };
+    }
+    return { args: { ...args, _base_hash: contentHash(existing.content || '') }, preview };
   }
 
   // 由 main.js 注入：AI 工具直接写库（不经 NoteService），需要主动通知渲染层刷新已打开的笔记

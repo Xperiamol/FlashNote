@@ -28,6 +28,7 @@ const NOTE_REFRESH_ACTIONS = new Set(['create_note', 'edit_note', 'edit_notes'])
 const TODO_REFRESH_ACTIONS = new Set(['create_todo', 'create_todos'])
 // 单篇笔记类动作：完成后卡片可以直接“查看”结果
 const SINGLE_NOTE_ACTIONS = new Set(['create_note', 'edit_note', 'create_whiteboard', 'update_whiteboard'])
+const NOTE_CONTENT_ACTIONS = new Set(['edit_note', 'edit_notes'])
 
 const pickResultNoteId = (name, result) => {
   if (!SINGLE_NOTE_ACTIONS.has(name)) return null
@@ -79,7 +80,16 @@ const executeWhiteboardAction = async (action, overrides, deps, task) => {
   })
 }
 
-const executeWidgetAction = async (action, task) => {
+// 用户在卡片上选的设计方向（AI 给出 design_options 时）；没有选择时用上次的或第一个
+const pickDesignOption = (args, action, overrides) => {
+  const options = Array.isArray(args.design_options) ? args.design_options.filter((option) => option && typeof option.title === 'string').slice(0, 3) : []
+  if (options.length < 2) return { index: null, option: null }
+  const requested = Number.isInteger(overrides?.design_option) ? overrides.design_option : action.resultData?.designOption
+  const index = Math.min(Math.max(Number.isInteger(requested) ? requested : 0, 0), options.length - 1)
+  return { index, option: options[index] }
+}
+
+const executeWidgetAction = async (action, task, overrides) => {
   const claim = await window.electronAPI?.ai?.consumePendingAction?.(action.actionId, buildFallback(action))
   if (!claim?.success) {
     throw new Error(claim?.error || '待确认操作不存在或已过期')
@@ -97,17 +107,29 @@ const executeWidgetAction = async (action, task) => {
     if (!previewInstanceId || !list.data.some((item) => item.id === previewInstanceId)) previewInstanceId = list.data[0]?.id || null
   }
 
-  const result = await runWidgetGeneration({
-    instruction: args.instruction || '',
-    referenceImages: (claim.action?.context || action.context)?.referenceImages || [],
-    widgetId: isUpdate ? args.id : undefined,
-    instanceId: previewInstanceId || undefined,
-    instanceName: args.instance_name,
-    onProgress: report,
-    task,
-    initialDraftId: action.resultData?.draftId || null,
-    initialErrors: action.resultData?.problems || null,
-  })
+  const design = pickDesignOption(args, action, overrides)
+  const instruction = design.option
+    ? `${args.instruction || ''}\n\n用户选定的设计方向：${design.option.title}——${design.option.summary || ''}`
+    : (args.instruction || '')
+  // 换了设计方向就从头生成，不再修补上一个方向留下的草稿
+  const sameDirection = (action.resultData?.designOption ?? null) === design.index
+  let result
+  try {
+    result = await runWidgetGeneration({
+      instruction,
+      referenceImages: (claim.action?.context || action.context)?.referenceImages || [],
+      widgetId: isUpdate ? args.id : undefined,
+      instanceId: previewInstanceId || undefined,
+      instanceName: args.instance_name,
+      onProgress: report,
+      task,
+      initialDraftId: sameDirection ? action.resultData?.draftId || null : null,
+      initialErrors: sameDirection ? action.resultData?.problems || null : null,
+    })
+  } catch (error) {
+    if (design.index !== null) error.designOption = design.index
+    throw error
+  }
   useWidgetActionProgress.getState().clear(action.actionId)
 
   const widgetName = result.widget?.name || '组件'
@@ -121,6 +143,7 @@ const executeWidgetAction = async (action, task) => {
     previousVersion: result.previousVersion,
     fixedRounds: result.fixedRounds,
     remainingProblems: (result.remainingProblems || []).map((problem) => problem.message).slice(0, 3),
+    ...(design.index !== null ? { designOption: design.index } : {}),
   }
   const message = isUpdate
     ? `已修改组件「${widgetName}」${instanceCount > 1 ? `，${instanceCount} 个实例都已生效` : ''}`
@@ -146,11 +169,20 @@ export const runPendingAction = async ({ action, overrides = null, deps = {} }) 
   ensureActionProgressSubscription()
   let task
   try {
+    // AI 改笔记前先把编辑器里还没落盘的输入保存下来：修改基于数据库里的最新正文，
+    // 载入编辑器时也不会丢掉刚刚输入、尚未自动保存的文字。
+    if (NOTE_CONTENT_ACTIONS.has(action.name)) {
+      try {
+        await window.__flushEditorSaves?.()
+      } catch (error) {
+        return { success: false, error: `当前笔记有未保存的修改且保存失败，已暂停 AI 修改：${error.message}`, finalAction: action, message: '', reloadNotes: false, reloadTodos: false }
+      }
+    }
     if (WHITEBOARD_ACTIONS.has(action.name) || WIDGET_ACTIONS.has(action.name)) task = createGenerationTask(action.actionId)
     const result = WHITEBOARD_ACTIONS.has(action.name)
       ? await executeWhiteboardAction(action, overrides, deps, task)
       : WIDGET_ACTIONS.has(action.name)
-        ? await executeWidgetAction(action, task)
+        ? await executeWidgetAction(action, task, overrides)
         : await window.electronAPI?.ai?.executePendingAction?.(action.actionId, overrides, buildFallback(action))
     // 步骤进度只在执行期间显示，完成后由结果卡片接管
     useActionSteps.getState().clear(action.actionId)
@@ -178,7 +210,12 @@ export const runPendingAction = async ({ action, overrides = null, deps = {} }) 
       message: task?.signal.aborted ? '已停止生成' : `操作失败：${error?.message || '未知错误'}`,
       error: error?.message || '未知错误',
       finalAction: action,
-      resultData: error?.draftId ? { draftId: error.draftId, problems: error.problems || [{ message: error.message }] } : null,
+      resultData: error?.draftId || Number.isInteger(error?.designOption)
+        ? {
+          ...(error?.draftId ? { draftId: error.draftId, problems: error.problems || [{ message: error.message }] } : {}),
+          ...(Number.isInteger(error?.designOption) ? { designOption: error.designOption } : {}),
+        }
+        : null,
       reloadNotes: false,
       reloadTodos: false,
     }

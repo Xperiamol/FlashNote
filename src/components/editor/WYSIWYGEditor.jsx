@@ -3151,7 +3151,7 @@ const WYSIWYGEditor = forwardRef(({ noteId, content, onChange, onEditorReady, on
     setPendingExternalContent(null)
     const timer = setTimeout(() => {
       isSyncingRef.current = true
-      editor.commands.setContent(preprocessMarkdown(incoming))
+      replaceContentKeepingView(editor, preprocessMarkdown(incoming))
       isSyncingRef.current = false
     }, 0)
     return () => clearTimeout(timer)
@@ -3588,7 +3588,7 @@ const WYSIWYGEditor = forwardRef(({ noteId, content, onChange, onEditorReady, on
               lastExternalContentRef.current = incoming
               undoBaselineRef.current = incoming
               isSyncingRef.current = true
-              editor.commands.setContent(preprocessMarkdown(incoming))
+              replaceContentKeepingView(editor, preprocessMarkdown(incoming))
               isSyncingRef.current = false
               // 通知父组件本地内容已变为远端版本
               onChangeRef.current?.(incoming)
@@ -3625,5 +3625,31 @@ const WYSIWYGEditor = forwardRef(({ noteId, content, onChange, onEditorReady, on
 })
 
 WYSIWYGEditor.displayName = 'WYSIWYGEditor'
+
+
+/** 最近的可滚动祖先：编辑器在笔记页、独立窗口里的滚动容器不同 */
+const findScrollParent = (node) => {
+  for (let element = node?.parentElement; element; element = element.parentElement) {
+    const { overflowY } = getComputedStyle(element)
+    if ((overflowY === 'auto' || overflowY === 'scroll') && element.scrollHeight > element.clientHeight) return element
+  }
+  return null
+}
+
+/**
+ * 外部改动（AI 修改、云同步）载入编辑器时整篇替换内容，但保留光标与滚动位置，
+ * 避免每次都跳回开头，看起来像整页刷新。
+ */
+const replaceContentKeepingView = (editor, content) => {
+  const scroller = findScrollParent(editor.view.dom)
+  const scrollTop = scroller?.scrollTop ?? 0
+  const { from } = editor.state.selection
+  editor.commands.setContent(content)
+  const max = editor.state.doc.content.size
+  if (max > 1) {
+    try { editor.commands.setTextSelection(Math.max(1, Math.min(from, max - 1))) } catch {}
+  }
+  if (scroller) scroller.scrollTop = scrollTop
+}
 
 export default WYSIWYGEditor

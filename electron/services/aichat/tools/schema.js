@@ -112,13 +112,26 @@ const TOOLS = [
     type: 'function',
     function: {
       name: 'edit_note',
-      description: '编辑已有的笔记。可以修改标题、内容、标签或分类，只需提供要修改的字段。禁止通过该工具修改 whiteboard 笔记的 content；画布内容只能由前端画布 AI 生成/插入能力处理。',
+      description: '编辑已有的笔记，只需提供要修改的字段。修改正文时优先用 edits 只改需要的片段（改错字、改写某段、插入或删除几句），其余内容原样保留；只有需要重写全文或大范围调整结构时才用 content 提交整篇新正文。edits 里的 find 必须是笔记中真实存在、且足以唯一定位的原文片段（不确定时先用 search_in_current_note / read_current_note 确认）。在末尾追加内容用 append。禁止修改 whiteboard 笔记的正文；画布内容只能由画布 AI 能力处理。',
       parameters: {
         type: 'object',
         properties: {
           id: { type: 'number', description: '笔记ID' },
           title: { type: 'string', description: '新标题（可选）' },
-          content: { type: 'string', description: '新内容。仅用于普通 Markdown 笔记；whiteboard 笔记禁止传 content（可选）' },
+          edits: {
+            type: 'array',
+            description: '局部修改（推荐）：按顺序应用的替换列表。要删除一段时 replace 传空字符串；要在某处插入时 find 写插入点附近的原文，replace 写原文加上新内容。',
+            items: {
+              type: 'object',
+              properties: {
+                find: { type: 'string', description: '要替换的原文片段，必须与笔记中的文字一致（空格换行差异可以容忍），并且在笔记里只出现一次；不够唯一时多带一两句上下文' },
+                replace: { type: 'string', description: '替换后的文字（Markdown）' }
+              },
+              required: ['find', 'replace']
+            }
+          },
+          append: { type: 'string', description: '追加到正文末尾的内容（Markdown，可选），可以和 edits 一起使用' },
+          content: { type: 'string', description: '整篇新正文（仅在需要重写全文时使用，不能和 edits / append 同时传）。仅用于普通 Markdown 笔记' },
           tags: { type: 'string', description: '新标签，用逗号分隔（可选）' },
           category: { type: 'string', description: '新分类名称（可选）' }
         },
@@ -203,7 +216,7 @@ const TOOLS = [
     type: 'function',
     function: {
       name: 'list_widgets',
-      description: '列出用户的组件（AI 生成的小应用，如看板、闪卡、打卡、记账）以及每个组件的实例。一个组件可以有多个实例，数据属于实例，比如闪卡组件有「英语」「日语」两个实例。',
+      description: '列出用户的组件（AI 生成的小应用）以及每个组件的实例。一个组件可以有多个实例，数据属于实例，比如闪卡组件有「英语」「日语」两个实例。',
       parameters: { type: 'object', properties: {} }
     }
   },
@@ -227,12 +240,26 @@ const TOOLS = [
     type: 'function',
     function: {
       name: 'create_widget',
-      description: '为用户生成一个新组件（可交互的小应用，如看板、闪卡、习惯打卡、记账、倒数日、统计卡片）。当用户想要一个“工具/模板/面板/追踪器”而不是一篇笔记时使用。确认后由专门的生成流程编写代码、在沙箱中预跑并自动修复，完成后固定到侧边栏并创建第一个实例。你只需要把需求写清楚，不要自己写代码。组件有三种显示位置：首页卡片 / 主页面板（compact，紧凑，可放一两个一键操作）、笔记里和桌面小窗（medium）、组件主页（full，完整功能）。',
+      description: '为用户生成一个新组件：运行在 Flota 里的可交互小应用。它可以记录和整理数据，联网获取信息（天气、汇率、RSS、公开 API），定时发系统提醒，导入导出文件，汇总笔记、待办和其他组件的数据，也可以调用 AI。当用户想要一个工具、面板、追踪器、仪表盘或小游戏，而不是一篇笔记时使用。确认后由专门的生成流程编写代码、在沙箱中预跑并自动修复，完成后固定到侧边栏并创建第一个实例。你只需要把需求写清楚，不要自己写代码。组件有三种显示位置：首页卡片 / 主页面板（compact，紧凑，可放一两个一键操作）、笔记里和桌面小窗（medium）、组件主页（full，完整功能）。',
       parameters: {
         type: 'object',
         properties: {
-          instruction: { type: 'string', description: '完整、具体的组件需求：要记录哪些数据、如何展示、有哪些操作，以及用户提到的偏好（含风格）。先原样引用用户的原话，再补充你的理解；涉及首页/主页面板、笔记内、组件主页等具体位置时写明对应尺寸（compact / medium / full）。用用户的语言书写。' },
-          instance_name: { type: 'string', description: '第一个实例的名称（可选），如「英语单词」' }
+          instruction: { type: 'string', description: '完整、具体的组件需求：要记录或获取哪些数据、如何展示、有哪些操作，需要联网（写明数据来源）、提醒、文件导入导出或引用其他组件数据时说明，以及用户提到的偏好（含风格）。先原样引用用户的原话，再补充你的理解；涉及首页/主页面板、笔记内、组件主页等具体位置时写明对应尺寸（compact / medium / full）。用用户的语言书写。' },
+          instance_name: { type: 'string', description: '第一个实例的名称（可选），如「英语单词」' },
+          design_options: {
+            type: 'array',
+            minItems: 2,
+            maxItems: 3,
+            description: '需求比较开放、可以有明显不同做法时，提供 2-3 个设计方向让用户选（信息结构、核心交互或呈现方式上真正不同，不是配色差异）。需求已经很具体、或用户已说明想要的样子时不要提供。',
+            items: {
+              type: 'object',
+              properties: {
+                title: { type: 'string', description: '方向名称，4-12 个字' },
+                summary: { type: 'string', description: '一两句话说明布局、核心交互和适合的人' }
+              },
+              required: ['title', 'summary']
+            }
+          }
         },
         required: ['instruction']
       }
